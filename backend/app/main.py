@@ -6,14 +6,15 @@ Solo lectura por ahora. La autenticacion y el control de acceso por rol
 import time
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from app import schemas
+from app import narrativa, schemas
 from app.database import engine
 from app.kpis import CORPORATIVO, calcular_kpis
+from app.llm import obtener_proveedor
 
 app = FastAPI(
     title="Motor Inteligente de Reportes de RRHH",
@@ -22,7 +23,7 @@ app = FastAPI(
         "(sin IA): rotacion, clima, desempeno, capacitacion, reclutamiento y "
         "productividad, con tendencias y semaforo."
     ),
-    version="0.4.0",
+    version="0.5.0",
 )
 
 # El frontend de React (paso 7) se sirve en local desde estos origenes.
@@ -153,3 +154,28 @@ def serie(
         f = f[f["periodo"] <= _mes(hasta)]
     f = f.sort_values("periodo")[["periodo", "valor", "n", "suprimido", "estado"]]
     return a_registros(f)
+
+
+@app.post("/narrativas", response_model=schemas.Narrativa, tags=["Narrativa"])
+def crear_narrativa(
+    solicitud: schemas.NarrativaSolicitud,
+    proveedor=Depends(obtener_proveedor),
+):
+    """Genera la narrativa ejecutiva (resumen, hallazgos y recomendaciones).
+
+    La redacta el modelo de lenguaje SOLO a partir de los KPIs ya calculados y
+    su respuesta se valida (cifras, trazabilidad, sin causalidad). Si el modelo
+    no responde o no pasa la validacion, se usa una plantilla determinista y se
+    indica en `origen` y `advertencias`. Puede tardar si el modelo corre en CPU.
+    Siempre requiere revision humana antes de distribuirse.
+    """
+    periodo = pd.Timestamp(solicitud.periodo + "-01") if solicitud.periodo else None
+    try:
+        return narrativa.generar_narrativa(
+            periodo=periodo,
+            area_id=solicitud.area_id,
+            proveedor=proveedor if solicitud.usar_ia else None,
+            df=kpis_df(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))

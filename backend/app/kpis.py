@@ -256,6 +256,6 @@ def calcular_kpis():
     columnas = [
         "indicador", "nombre", "unidad", "area_id", "area", "periodo", "valor", "n",
         "suprimido", "var_mes_ant", "var_mes_ant_pct", "var_anio_ant", "var_anio_ant_pct",
-        "estado",
+        "estado", "sentido", "umbral_atencion", "umbral_critico",
     ]
     return df[columnas].sort_values(["indicador", "area_id", "periodo"]).reset_index(drop=True)
