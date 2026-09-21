@@ -23,6 +23,10 @@ CORPORATIVO = 0
 MIN_GRUPO = 5
 INDICADORES_SUJETOS_A_MIN_GRUPO = {"cumplimiento_metas", "enps"}
 
+# El eNPS va de -100 a 100 y su cero es arbitrario: un "cambio porcentual" no
+# tiene sentido (ej. de +20 a -50), asi que solo se reporta variacion en puntos.
+INDICADORES_SOLO_VARIACION_ABSOLUTA = {"enps"}
+
 # Calendario de meses: del primer al ultimo mes con datos de productividad
 # (fuente mensual con un registro por area y mes).
 _MESES = """
@@ -213,8 +217,10 @@ def _agregar_tendencias(df):
         previo["periodo"] = previo["periodo"] + pd.DateOffset(months=meses)
         df = df.merge(previo, on=llaves, how="left")
         df[f"var_{sufijo}"] = df["valor"] - df["valor_previo"]
-        base = df["valor_previo"].abs().replace(0, np.nan)
+        # el % solo se calcula sobre una base positiva
+        base = df["valor_previo"].where(df["valor_previo"] > 0)
         df[f"var_{sufijo}_pct"] = df[f"var_{sufijo}"] / base * 100
+        df.loc[df["indicador"].isin(INDICADORES_SOLO_VARIACION_ABSOLUTA), f"var_{sufijo}_pct"] = np.nan
         df = df.drop(columns="valor_previo")
     return df
 

@@ -145,6 +145,21 @@ def test_tendencias_mes_anterior_y_anio_anterior(kpis):
     assert fila["var_anio_ant"] == pytest.approx(s[mes] - s[pd.Timestamp("2025-04-01")])
 
 
+def test_enps_solo_tiene_variacion_en_puntos(kpis):
+    """Un % sobre un eNPS que cruza el cero no tiene sentido (ej. -390%)."""
+    s = serie(kpis, "enps", "Operaciones")
+    assert s["var_mes_ant"].notna().sum() == 23
+    assert s["var_mes_ant_pct"].isna().all()
+    assert s["var_anio_ant_pct"].isna().all()
+
+
+def test_variacion_porcentual_de_un_indicador_positivo(kpis):
+    s = serie(kpis, "cumplimiento_metas", "Corporativo")
+    mes, previo = pd.Timestamp("2026-06-01"), pd.Timestamp("2026-05-01")
+    esperado = (s.loc[mes, "valor"] - s.loc[previo, "valor"]) / s.loc[previo, "valor"] * 100
+    assert s.loc[mes, "var_mes_ant_pct"] == pytest.approx(esperado)
+
+
 def test_primer_mes_no_tiene_variacion_contra_mes_anterior(kpis):
     primero = serie(kpis, "enps", "Operaciones").iloc[0]
     assert pd.isna(primero["var_mes_ant"])
