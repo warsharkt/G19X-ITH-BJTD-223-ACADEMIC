@@ -28,7 +28,12 @@ from app.narrativa import (
     conteo_estados,
     construir_hechos,
     construir_mensajes,
+    detectar_coincidencias,
+    esquema_narrativa,
+    evolucion_de,
     generar_narrativa,
+    hechos_para_modelo,
+    motivo_de_vigilancia,
     narrativa_plantilla,
 )
 
@@ -60,9 +65,11 @@ class ProveedorFalso:
     def __init__(self, *respuestas):
         self.respuestas = list(respuestas)
         self.llamadas = []
+        self.esquemas = []
 
     def generar(self, mensajes, esquema):
         self.llamadas.append(mensajes)
+        self.esquemas.append(esquema)
         respuesta = self.respuestas.pop(0)
         if isinstance(respuesta, Exception):
             raise respuesta
@@ -70,16 +77,31 @@ class ProveedorFalso:
 
 
 def respuesta_buena(hechos):
-    """Lo que devolveria un modelo bien portado: cifras copiadas y hechos citados."""
+    """Lo que devolveria un modelo bien portado: resumen con cifras, un hallazgo
+    por cada rojo (los amarillos y los "por vigilar" agrupados aparte) con sus
+    valores copiados, y una recomendacion por cada rojo. Cita solo los hechos
+    que se le entregan."""
+    visibles = hechos_para_modelo(hechos)  # alertas y "por vigilar"
+    c = conteo_estados(hechos)
+    # hasta 5 hallazgos individuales; el resto (si lo hay) se agrupa en uno solo
+    individuales, agrupados = (visibles, []) if len(visibles) <= 5 else (visibles[:4], visibles[4:])
+    hallazgos = [
+        {"titulo": h["nombre"], "texto": f"{h['nombre']} fue {h['valor_texto']}.", "hechos": [h["id"]]}
+        for h in individuales
+    ]
+    if agrupados:
+        detalle = "; ".join(f"{h['nombre']} {h['valor_texto']}" for h in agrupados)
+        hallazgos.append(
+            {"titulo": "Otros indicadores", "texto": f"También: {detalle}.",
+             "hechos": [h["id"] for h in agrupados]}
+        )
+    rojos = [h for h in visibles if h["estado"] == "rojo"] or visibles[:1]
     return json.dumps(
         {
-            "resumen": "Este mes hay indicadores que requieren atención de la dirección.",
-            "hallazgos": [
-                {"titulo": h["nombre"], "texto": f"{h['nombre']} fue {h['valor_texto']}.", "hechos": [h["id"]]}
-                for h in hechos[:3]
-            ],
+            "resumen": f"Hay {c['rojo']} indicadores en rojo y {c['amarillo']} en amarillo este mes.",
+            "hallazgos": hallazgos,
             "recomendaciones": [
-                {"accion": "Dar seguimiento al indicador con el área.", "hechos": [hechos[0]["id"]]}
+                {"accion": "Dar seguimiento al indicador con el área.", "hechos": [h["id"]]} for h in rojos[:3]
             ],
         },
         ensure_ascii=False,
@@ -100,6 +122,12 @@ def caso(df, id_area):
     return periodo, id_area("Operaciones"), construir_hechos(df, periodo, id_area("Operaciones"))
 
 
+@pytest.fixture(scope="module")
+def visibles(caso):
+    """Los hechos que ve el modelo (solo alertas)."""
+    return hechos_para_modelo(caso[2])
+
+
 # ------------------------------------------------------------- guardarrailes
 def test_extraer_numeros():
     assert extraer_numeros("fue 4.1 %") == [4.1]
@@ -112,32 +140,31 @@ def buenos(hechos):
     return json.loads(respuesta_buena(hechos))
 
 
-def test_narrativa_buena_no_tiene_errores(caso):
+def test_narrativa_buena_no_tiene_errores(caso, visibles):
     _, _, hechos = caso
-    assert validar_narrativa(buenos(hechos), hechos, cifras_de(*conteo_estados(hechos).values())) == []
+    assert validar_narrativa(buenos(hechos), visibles, cifras_de(*conteo_estados(hechos).values())) == []
 
 
-def test_rechaza_cifra_inventada(caso):
+def test_rechaza_cifra_inventada(caso, visibles):
     _, _, hechos = caso
     r = json.loads(con_cambio(hechos, texto="La rotación subió 37.5 % este mes."))
-    errores = validar_narrativa(r, hechos, set())
+    errores = validar_narrativa(r, visibles, set())
     assert any("cifras que no estan" in e and "37.5" in e for e in errores)
 
 
-def test_acepta_cifra_con_coma_decimal(caso):
+def test_acepta_cifra_con_coma_decimal(caso, visibles):
     _, _, hechos = caso
-    h = hechos[0]
-    coma = h["valor_texto"].split()[0].replace(".", ",")
+    coma = visibles[0]["valor_texto"].split()[0].replace(".", ",")
     r = json.loads(con_cambio(hechos, texto=f"El indicador cerró en {coma}."))
-    assert validar_narrativa(r, hechos, set()) == []
+    assert validar_narrativa(r, visibles, cifras_de(*conteo_estados(hechos).values())) == []
 
 
-def test_rechaza_cifra_de_otro_hecho_no_citado(caso):
+def test_rechaza_cifra_de_otro_hecho_no_citado(caso, visibles):
     """El texto usa una cifra real, pero de un hecho que este hallazgo no cita."""
     _, _, hechos = caso
-    otra = next(h for h in hechos[1:] if h["valor_texto"].split()[0] not in hechos[0]["valor_texto"])
+    otra = next(h for h in visibles[1:] if h["valor_texto"].split()[0] not in visibles[0]["valor_texto"])
     r = json.loads(con_cambio(hechos, texto=f"Cerró en {otra['valor_texto']}."))
-    assert validar_narrativa(r, hechos, set())  # hay errores
+    assert validar_narrativa(r, visibles, set())  # hay errores
 
 
 @pytest.mark.parametrize(
@@ -150,34 +177,220 @@ def test_rechaza_cifra_de_otro_hecho_no_citado(caso):
         "Provocó una caída en la productividad.",
     ],
 )
-def test_rechaza_causalidad(caso, frase):
+def test_rechaza_causalidad(caso, visibles, frase):
     _, _, hechos = caso
     r = json.loads(con_cambio(hechos, texto=frase))
-    assert any("causalidad" in e for e in validar_narrativa(r, hechos, set()))
+    assert any("causalidad" in e for e in validar_narrativa(r, visibles, set()))
 
 
-def test_permite_coincidencia_y_la_palabra_causas_como_sustantivo(caso):
+def test_permite_coincidencia_y_la_palabra_causas_como_sustantivo(caso, visibles):
     _, _, hechos = caso
     ok = "El clima y la rotación coinciden en el mismo periodo. Conviene investigar las causas."
-    r = json.loads(con_cambio(hechos, texto=ok))
-    assert validar_narrativa(r, hechos, set()) == []
+    r = json.loads(con_cambio(hechos, texto=f"{visibles[0]['valor_texto']}: {ok}"))
+    assert validar_narrativa(r, visibles, cifras_de(*conteo_estados(hechos).values())) == []
 
 
-def test_rechaza_hecho_inexistente_y_sin_citas(caso):
+def test_rechaza_hecho_inexistente_y_sin_citas(caso, visibles):
     _, _, hechos = caso
     r = json.loads(con_cambio(hechos, hechos=["H99"]))
-    assert any("no existen" in e for e in validar_narrativa(r, hechos, set()))
+    assert any("no se te entregaron" in e for e in validar_narrativa(r, visibles, set()))
     r = json.loads(con_cambio(hechos, hechos=[]))
-    assert any("no cita ningun hecho" in e for e in validar_narrativa(r, hechos, set()))
+    assert any("no cita ningun hecho" in e for e in validar_narrativa(r, visibles, set()))
 
 
-def test_rechaza_estructura_incompleta(caso):
+def test_rechaza_estructura_incompleta(caso, visibles):
     _, _, hechos = caso
-    assert validar_narrativa("texto suelto", hechos, set())
-    assert validar_narrativa({"resumen": "x"}, hechos, set())
+    assert validar_narrativa("texto suelto", visibles, set())
+    assert validar_narrativa({"resumen": "x"}, visibles, set())
     r = buenos(hechos)
     r["hallazgos"] = r["hallazgos"][:1]  # el PRD pide entre 3 y 5
-    assert any("entre 3 y 5" in e for e in validar_narrativa(r, hechos, set()))
+    assert any("entre 3 y 5" in e for e in validar_narrativa(r, visibles, set()))
+
+
+# --- reglas nuevas, surgidas de la prueba real con Llama 3.1 8B (prompt v1) ---
+def test_rechaza_citar_hechos_en_verde_que_no_se_le_entregaron(caso, visibles):
+    _, _, hechos = caso
+    verde = next(h for h in hechos if h["estado"] == "verde")
+    r = json.loads(con_cambio(hechos, hechos=[verde["id"]]))
+    assert any("no se te entregaron" in e for e in validar_narrativa(r, visibles, set()))
+
+
+def test_exige_cubrir_todos_los_hechos_en_rojo(caso, visibles):
+    _, _, hechos = caso
+    r = buenos(hechos)
+    rojo = next(h for h in visibles if h["estado"] == "rojo")
+    for h in r["hallazgos"]:
+        h["hechos"] = [x for x in h["hechos"] if x != rojo["id"]] or [visibles[-1]["id"]]
+    errores = validar_narrativa(r, visibles, cifras_de(*conteo_estados(hechos).values()))
+    assert any(rojo["id"] in e and "rojo" in e for e in errores)
+
+
+@pytest.mark.parametrize(
+    "frase",
+    [
+        "El eNPS supera el umbral crítico.",
+        "La rotación quedó por encima del umbral de atención.",
+        "Se ubica por debajo del umbral crítico.",
+    ],
+)
+def test_rechaza_comparar_contra_umbrales(caso, visibles, frase):
+    _, _, hechos = caso
+    r = json.loads(con_cambio(hechos, texto=frase))
+    assert any("umbral" in e for e in validar_narrativa(r, visibles, set()))
+
+
+def test_permite_hablar_de_umbrales_con_la_frase_neutra(caso, visibles):
+    _, _, hechos = caso
+    r = json.loads(con_cambio(hechos, texto=f"Cerró en {visibles[0]['valor_texto']} y ya cruzó el umbral crítico."))
+    assert validar_narrativa(r, visibles, cifras_de(*conteo_estados(hechos).values())) == []
+
+
+def test_rechaza_que_el_modelo_hable_de_confianza(caso, visibles):
+    _, _, hechos = caso
+    r = json.loads(con_cambio(hechos, texto="La confianza en este dato es baja."))
+    assert any("confianza" in e for e in validar_narrativa(r, visibles, set()))
+
+
+def test_rechaza_textos_demasiado_largos(caso, visibles):
+    _, _, hechos = caso
+    largo = "Primera idea. Segunda idea. Tercera idea. Cuarta idea."
+    r = json.loads(con_cambio(hechos, texto=largo))
+    assert any("demasiado largo" in e for e in validar_narrativa(r, visibles, set()))
+    r = buenos(hechos)
+    r["resumen"] = largo
+    assert any("demasiado largo" in e for e in validar_narrativa(r, visibles, set()))
+
+
+def test_cifras_decimales_no_cuentan_como_oraciones_distintas(caso, visibles):
+    _, _, hechos = caso
+    r = json.loads(con_cambio(hechos, texto=f"Cerró en {visibles[0]['valor_texto']}. Empeoró."))
+    assert not any("largo" in e for e in validar_narrativa(r, visibles, set()))
+
+
+def test_rechaza_hallazgos_y_resumen_sin_cifras(caso, visibles):
+    _, _, hechos = caso
+    r = json.loads(con_cambio(hechos, texto="El indicador está en una situación delicada."))
+    assert any("no incluye el valor" in e for e in validar_narrativa(r, visibles, set()))
+    r = buenos(hechos)
+    r["resumen"] = "El área enfrenta desafíos en varios indicadores clave."
+    assert any("resumen: no incluye ninguna cifra" in e for e in validar_narrativa(r, visibles, set()))
+
+
+def test_exige_cubrir_tambien_las_alertas_amarillas_pero_permite_agruparlas(caso, visibles):
+    _, _, hechos = caso
+    cifras = cifras_de(*conteo_estados(hechos).values())
+    r = buenos(hechos)                      # la respuesta buena agrupa los amarillos
+    assert validar_narrativa(r, visibles, cifras) == []
+    amarillo = next(h for h in visibles if h["estado"] == "amarillo")
+    for h in r["hallazgos"]:
+        h["hechos"] = [x for x in h["hechos"] if x != amarillo["id"]] or [visibles[0]["id"]]
+    assert any(amarillo["id"] in e and "amarillo" in e for e in validar_narrativa(r, visibles, cifras))
+
+
+def test_exige_una_recomendacion_por_cada_hecho_en_rojo(caso, visibles):
+    _, _, hechos = caso
+    r = buenos(hechos)
+    rojo = next(h for h in visibles if h["estado"] == "rojo")
+    r["recomendaciones"] = [x for x in r["recomendaciones"] if x["hechos"] != [rojo["id"]]] or [
+        {"accion": "Dar seguimiento.", "hechos": [visibles[-1]["id"]]}
+    ]
+    errores = validar_narrativa(r, visibles, cifras_de(*conteo_estados(hechos).values()))
+    assert any("Ninguna recomendacion cubre" in e and rojo["id"] in e for e in errores)
+
+
+def test_se_deben_como_obligacion_no_es_causalidad_pero_se_debe_a_si(caso, visibles):
+    _, _, hechos = caso
+    cifras = cifras_de(*conteo_estados(hechos).values())
+    valor = visibles[0]["valor_texto"]
+    ok = json.loads(con_cambio(hechos, texto=f"Cerró en {valor}. Se deben revisar las metas."))
+    assert validar_narrativa(ok, visibles, cifras) == []
+    mal = json.loads(con_cambio(hechos, texto=f"Cerró en {valor}. Esto se debe a la carga."))
+    assert any("causalidad" in e for e in validar_narrativa(mal, visibles, cifras))
+
+
+def test_regresion_segunda_salida_real_de_llama31_prompt_v2(caso, visibles):
+    """Version aceptada tras un reintento: cumplia las reglas v2 pero era vacia
+    (sin cifras, amarillos ignorados, sin recomendacion para el eNPS)."""
+    periodo, _, hechos = caso
+    if [h["indicador"] for h in hechos[:2]] != ["enps", "rotacion_total"]:
+        pytest.skip("Los datos sembrados difieren de los usados para capturar esta salida")
+    real = {
+        "resumen": "El área Operaciones enfrenta desafíos en varios indicadores clave. El eNPS ya cruzó el "
+        "umbral crítico. Se observan coincidencias entre algunos de estos indicadores.",
+        "hallazgos": [
+            {"titulo": "eNPS en alerta", "texto": "El eNPS ya cruzó el umbral crítico.", "hechos": ["H01"]},
+            {"titulo": "Tasa de rotación mensual en alerta",
+             "texto": "La Tasa de rotación mensual ya cruzó el umbral crítico.", "hechos": ["H02"]},
+            {"titulo": "Coincidencias entre indicadores",
+             "texto": "Se observan coincidencias entre el eNPS y la Tasa de rotación mensual.",
+             "hechos": ["H01", "H02"]},
+        ],
+        "recomendaciones": [
+            {"accion": "Revisar con la gerencia del área los patrones de las bajas del periodo", "hechos": ["H02"]},
+            {"accion": "Revisar con los líderes si las metas asignadas son alcanzables", "hechos": ["H03"]},
+            {"accion": "Analizar la planeación de entregables y la carga de trabajo del área", "hechos": ["H04"]},
+        ],
+    }
+    texto = " | ".join(validar_narrativa(real, visibles, cifras_de(*conteo_estados(hechos).values())))
+    assert "resumen: no incluye ninguna cifra" in texto
+    assert "no incluye el valor de" in texto   # hallazgos vacios (sin cifra de lo que citan)
+    assert "Ningun hallazgo cubre el hecho H05" in texto                # amarillos ignorados
+    assert "Ninguna recomendacion cubre el hecho H01" in texto          # eNPS sin recomendacion
+
+
+def test_regresion_salida_real_de_llama31_8b_con_prompt_v1(caso, visibles):
+    """La respuesta que dio Llama 3.1 8B con el prompt v1 pasaba las reglas
+    antiguas (sin cifras inventadas) pero tenia errores de criterio. Con las
+    reglas actuales debe ser rechazada."""
+    periodo, _, hechos = caso
+    if [h["indicador"] for h in hechos[:2]] != ["enps", "rotacion_total"]:
+        pytest.skip("Los datos sembrados difieren de los usados para capturar esta salida")
+    real = {
+        "resumen": (
+            "El área de Operaciones enfrenta desafíos en varios indicadores clave, destacando la "
+            "situación crítica del eNPS y la tasa de rotación mensual. A pesar de algunos avances en "
+            "indicadores como la cobertura de capacitación y la tasa de finalización de cursos, la "
+            "confianza en algunos de los hechos es baja. Es importante abordar estos problemas para "
+            "mejorar la eficiencia y satisfacción de los empleados."
+        ),
+        "hallazgos": [
+            {
+                "titulo": "Situación crítica del eNPS",
+                "texto": "El eNPS ha caído a -23.2 puntos, lo que supera el umbral crítico de 0 puntos. "
+                "Aunque ha mejorado en comparación con el mes anterior (+22.6 puntos), sigue siendo un "
+                "problema significativo.",
+                "hechos": ["H01"],
+            },
+            {
+                "titulo": "Tasa de rotación mensual en rojo",
+                "texto": "La tasa de rotación mensual es del 4.1 %, lo que supera el umbral de atención de "
+                "2.0 %. Aunque ha aumentado en comparación con el mismo mes del año anterior (+4.1 pts), "
+                "sigue siendo un problema.",
+                "hechos": ["H02"],
+            },
+            {
+                "titulo": "Cobertura de capacitación y tasa de finalización de cursos en verde",
+                "texto": "La cobertura de capacitación es del 96.9 % y la tasa de finalización de cursos es "
+                "del 81.4 %, lo que supera los umbrales de atención. Aunque la confianza en algunos de "
+                "estos hechos es baja, son indicadores positivos.",
+                "hechos": ["H07", "H09"],
+            },
+        ],
+        "recomendaciones": [
+            {
+                "accion": "Revisar y mejorar la estrategia de capacitación y desarrollo de empleados",
+                "hechos": ["H01", "H07", "H09"],
+            },
+            {"accion": "Implementar medidas para reducir la tasa de rotación mensual", "hechos": ["H02"]},
+            {"accion": "Revisar y ajustar la estrategia de contratación y selección de personal", "hechos": ["H08"]},
+        ],
+    }
+    errores = validar_narrativa(real, visibles, cifras_de(*conteo_estados(hechos).values()))
+    texto = " | ".join(errores)
+    assert "umbral" in texto                      # comparaciones contra umbrales (direccion invertida en el eNPS)
+    assert "confianza" in texto                   # comentario inventado sobre la confianza
+    assert "no se te entregaron" in texto         # hallazgo y recomendaciones apoyados en hechos en verde
+    assert len(errores) >= 5
 
 
 # ---------------------------------------------------------------- confianza
@@ -200,6 +413,34 @@ def test_hechos_ordenados_por_severidad_con_ids_consecutivos(caso):
     assert hechos[0]["estado"] == "rojo"
 
 
+def test_evolucion_se_calcula_segun_el_sentido_del_indicador():
+    assert evolucion_de(22.6, "menor_es_peor") == "mejoró"    # el eNPS subio: mejor
+    assert evolucion_de(0.8, "mayor_es_peor") == "empeoró"    # la rotacion subio: peor
+    assert evolucion_de(-3.6, "menor_es_peor") == "empeoró"   # la productividad bajo: peor
+    assert evolucion_de(-2.0, "mayor_es_peor") == "mejoró"    # el tiempo de contratacion bajo: mejor
+    assert evolucion_de(0.04, "mayor_es_peor") == "sin cambio"
+    assert evolucion_de(None, "mayor_es_peor") is None
+
+
+def test_el_prompt_no_entrega_umbrales_ni_valores_de_indicadores_en_verde(caso):
+    periodo, _, hechos = caso
+    prompt = "\n".join(m["content"] for m in construir_mensajes(hechos, periodo, "Operaciones"))
+    verde = next(h for h in hechos if h["estado"] == "verde")
+    assert verde["valor_texto"] not in prompt          # ni la cifra del indicador en verde...
+    assert verde["nombre"] in prompt                   # ...solo su nombre, como "sin alerta"
+    assert "3.5" not in prompt                         # umbral critico de la rotacion
+    assert "ya cruzó el umbral crítico" in prompt      # en su lugar, la frase neutra
+    assert "(mejoró)" in prompt and "(empeoró)" in prompt
+
+
+def test_el_sistema_detecta_coincidencias_entre_indicadores_en_alerta(caso):
+    periodo, _, hechos = caso
+    pares = {(a["indicador"], b["indicador"]) for a, b in detectar_coincidencias(hechos)}
+    assert ("enps", "rotacion_total") in pares
+    prompt = "\n".join(m["content"] for m in construir_mensajes(hechos, periodo, "Operaciones"))
+    assert "no causas demostradas" in prompt
+
+
 def test_los_valores_suprimidos_no_llegan_al_modelo(df, id_area):
     """Legal (4 personas): clima y desempeno estan ocultos; el prompt no debe ni mencionarlos."""
     periodo, legal = df["periodo"].max(), id_area("Legal")
@@ -219,7 +460,7 @@ def test_el_prompt_no_lleva_datos_personales_ni_floats_crudos(caso):
     prompt = "\n".join(m["content"] for m in construir_mensajes(hechos, periodo, "Operaciones"))
     assert "E0" not in prompt  # ningun codigo de empleado
     assert "abril de 2026" in prompt
-    assert "no calcules" in prompt.lower()
+    assert "ni calcules cifras" in prompt.lower()
 
 
 def test_la_plantilla_pasa_los_guardarrailes_en_todas_las_areas_y_meses(df):
@@ -296,6 +537,126 @@ def test_si_el_modelo_no_esta_disponible_cae_a_la_plantilla(df, caso):
     assert n["origen"] == "plantilla"
     assert len(prov.llamadas) == 1  # no reintenta si el modelo ni siquiera responde
     assert any("Ollama apagado" in a for a in n["advertencias"])
+
+
+def test_el_esquema_restringe_el_campo_hechos_a_los_ids_entregados(df, caso):
+    """Con salida estructurada, el modelo no puede poner frases ni 'H01 y H02' en `hechos`."""
+    periodo, area_id, hechos = caso
+    prov = ProveedorFalso(respuesta_buena(hechos))
+    generar_narrativa(periodo, area_id, proveedor=prov, df=df)
+    esquema = prov.esquemas[0]
+    ids = {h["id"] for h in hechos_para_modelo(hechos)}
+    for lista in ("hallazgos", "recomendaciones"):
+        campo = esquema["properties"][lista]["items"]["properties"]["hechos"]
+        assert set(campo["items"]["enum"]) == ids
+        assert campo["minItems"] == 1
+    # el esquema base no se modifica
+    assert "enum" not in ESQUEMA_NARRATIVA["properties"]["hallazgos"]["items"]["properties"]["hechos"]["items"]
+    assert esquema_narrativa(["H01"])["properties"]["hallazgos"]["items"]["properties"]["hechos"]["items"]["enum"] == ["H01"]
+
+
+# ------------------------------------------------------- "por vigilar" (v4)
+def test_motivo_de_vigilancia_por_cercania_al_umbral():
+    # menor_es_peor, umbral_atencion=68: 68.9 esta a 1.3% de distancia (< 10%)
+    m = motivo_de_vigilancia("indice_productividad", "verde", "menor_es_peor", 68.9, 68.0, -1.0, "empeoró", "alta")
+    assert m is not None and "cerca del umbral" in m
+
+
+def test_motivo_de_vigilancia_por_deterioro_relevante():
+    # mayor_es_peor, lejos del umbral pero cayo mas del 10% frente al mes anterior
+    m = motivo_de_vigilancia("rotacion_total", "verde", "mayor_es_peor", 1.0, 3.5, 0.2, "empeoró", "alta")
+    assert m is not None and "deterioro" in m
+
+
+def test_motivo_de_vigilancia_ninguno_si_no_aplica():
+    base = dict(indicador="enps", estado="verde", sentido="menor_es_peor",
+                valor=90.0, atencion=10.0, var_mes=5.0, evolucion="empeoró", confianza="alta")
+    assert motivo_de_vigilancia(**base) is None  # lejos del umbral y cambio pequeño
+    assert motivo_de_vigilancia(**{**base, "evolucion": "mejoró"}) is None  # no empeoro
+    assert motivo_de_vigilancia(**{**base, "valor": 10.5, "confianza": "baja"}) is None  # confianza baja
+    assert motivo_de_vigilancia(**{**base, "estado": "rojo", "valor": -5}) is None  # ya es alerta, no "por vigilar"
+
+
+def test_construir_hechos_marca_en_vigilancia_con_motivo(df, id_area):
+    """Operaciones feb-2026: eNPS en rojo, y otros 3 indicadores verdes con deterioro real."""
+    hechos = construir_hechos(df, pd.Timestamp("2026-02-01"), id_area("Operaciones"))
+    por_id = {h["id"]: h for h in hechos}
+    vigilancia = [h for h in hechos if h["en_vigilancia"]]
+    assert vigilancia, "se esperaba al menos un indicador por vigilar en este mes"
+    for h in vigilancia:
+        assert h["estado"] == "verde"
+        assert h["motivo_vigilancia"]
+        assert "conviene vigilarlo" in h["situacion"]
+        assert h["accion_base"] is not None  # por vigilar SI tiene accion sugerida, a diferencia de un verde normal
+    normales = [h for h in hechos if h["estado"] == "verde" and not h["en_vigilancia"]]
+    assert any(h["accion_base"] is None for h in normales) or not normales
+
+
+def test_hechos_para_modelo_incluye_alertas_y_vigilancia(df, id_area):
+    hechos = construir_hechos(df, pd.Timestamp("2026-02-01"), id_area("Operaciones"))
+    visibles = hechos_para_modelo(hechos)
+    assert all(h["estado"] != "verde" or h["en_vigilancia"] for h in visibles)
+    assert any(h["estado"] == "rojo" for h in visibles)
+    assert any(h["en_vigilancia"] for h in visibles)
+    # ningun verde "normal" (sin vigilancia) se cuela
+    ocultos = [h for h in hechos if h["id"] not in {v["id"] for v in visibles}]
+    assert all(h["estado"] == "verde" and not h["en_vigilancia"] for h in ocultos)
+
+
+def test_conteo_estados_incluye_por_vigilar(df, id_area):
+    hechos = construir_hechos(df, pd.Timestamp("2026-02-01"), id_area("Operaciones"))
+    c = conteo_estados(hechos)
+    assert c["por_vigilar"] == sum(h["en_vigilancia"] for h in hechos)
+    assert c["por_vigilar"] > 0
+
+
+def test_el_prompt_distingue_por_vigilar_de_una_alerta(df, id_area):
+    periodo, aid = pd.Timestamp("2026-02-01"), id_area("Operaciones")
+    hechos = construir_hechos(df, periodo, aid)
+    prompt = "\n".join(m["content"] for m in construir_mensajes(hechos, periodo, "Operaciones"))
+    assert "conviene vigilarlo" in prompt
+    assert "por vigilar" in prompt.lower()
+
+
+def test_guardrails_exige_cubrir_tambien_los_por_vigilar(df, id_area):
+    periodo, aid = pd.Timestamp("2026-02-01"), id_area("Operaciones")
+    hechos = construir_hechos(df, periodo, aid)
+    visibles = hechos_para_modelo(hechos)
+    vigilado = next(h for h in visibles if h["en_vigilancia"])
+    r = buenos(hechos) if False else json.loads(respuesta_buena(hechos))
+    for hl in r["hallazgos"]:
+        hl["hechos"] = [x for x in hl["hechos"] if x != vigilado["id"]] or [visibles[0]["id"]]
+    errores = validar_narrativa(r, visibles, cifras_de(*conteo_estados(hechos).values()))
+    assert any(vigilado["id"] in e and "vigilar" in e for e in errores)
+
+
+def test_plantilla_agrupa_alertas_y_vigilancia_juntas_si_sobran_de_5(df):
+    """Con mas de 5 temas (alertas + por vigilar), el sobrante se agrupa en un ultimo hallazgo."""
+    for area_id in df["area_id"].unique():
+        area = df.loc[df["area_id"] == area_id, "area"].iloc[0]
+        for periodo in pd.to_datetime(df["periodo"].unique()):
+            hechos = construir_hechos(df, periodo, area_id)
+            temas = hechos_para_modelo(hechos)
+            if len(temas) > 5:
+                cuerpo = narrativa_plantilla(hechos, periodo, area)
+                assert any(len(h["hechos"]) > 1 for h in cuerpo["hallazgos"][-1:])
+                return
+    pytest.skip("Ningun area/mes de estos datos tuvo mas de 5 temas a la vez")
+
+
+def test_schemas_exponen_los_campos_de_vigilancia():
+    from app.schemas import ConteoEstados, HechoOut
+    assert "en_vigilancia" in HechoOut.model_fields
+    assert "motivo_vigilancia" in HechoOut.model_fields
+    assert "por_vigilar" in ConteoEstados.model_fields
+
+
+def test_api_narrativa_expone_por_vigilar(client, id_area):
+    r = client.post("/narrativas", json={"periodo": "2026-02", "area_id": id_area("Operaciones"), "usar_ia": False})
+    assert r.status_code == 200
+    cuerpo = r.json()
+    assert cuerpo["conteo_estados"]["por_vigilar"] > 0
+    assert any(h["en_vigilancia"] for h in cuerpo["hechos"])
 
 
 def test_periodo_o_area_inexistentes(df):

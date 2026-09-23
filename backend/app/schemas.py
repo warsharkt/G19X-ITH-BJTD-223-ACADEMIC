@@ -75,6 +75,12 @@ class HechoOut(BaseModel):
     umbral_critico: float
     umbral_critico_texto: str
     sentido: str
+    evolucion_mes_ant: str | None = Field(None, description="mejoró, empeoró o sin cambio (calculado por código)")
+    evolucion_anio_ant: str | None = None
+    en_vigilancia: bool = Field(False, description="Verde, pero con señales de deterioro")
+    motivo_vigilancia: str | None = None
+    situacion: str = Field(description="Relación con los umbrales, en palabras neutras")
+    accion_base: str | None = Field(None, description="Acción sugerida base (solo indicadores en alerta)")
     confianza: str = Field(description="alta, media o baja; calculada por reglas, no por el modelo")
     motivo_confianza: str
     fuente: str
@@ -99,6 +105,7 @@ class ConteoEstados(BaseModel):
     rojo: int
     amarillo: int
     verde: int
+    por_vigilar: int = Field(0, description="Indicadores en verde que conviene vigilar")
     total: int
 
 

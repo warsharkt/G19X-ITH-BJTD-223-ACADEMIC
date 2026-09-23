@@ -19,4 +19,8 @@ DB_URL = URL.create(
     database=os.getenv("POSTGRES_DB"),
 )
 
-engine = create_engine(DB_URL)
+# connect_timeout: si PostgreSQL no responde, fallar en segundos (por defecto 5)
+# en lugar de quedarse esperando minutos.
+engine = create_engine(
+    DB_URL, connect_args={"connect_timeout": int(os.getenv("DB_CONNECT_TIMEOUT", "5"))}
+)
