@@ -4,6 +4,21 @@ from datetime import date, datetime
 from pydantic import BaseModel, Field
 
 
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expira_en_minutos: int
+
+
+class UsuarioOut(BaseModel):
+    id: int
+    usuario: str
+    nombre: str
+    rol: str = Field(description="direccion, rrhh, gerente o admin_ti")
+    area_id: int | None = Field(description="Solo los gerentes tienen area")
+    areas_permitidas: list[int] = Field(description="Areas que puede consultar (0 = corporativo)")
+
+
 class Area(BaseModel):
     id: int = Field(description="0 = consolidado corporativo")
     nombre: str
@@ -54,7 +69,9 @@ class NarrativaSolicitud(BaseModel):
     periodo: str | None = Field(
         None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$", description="AAAA-MM. Por defecto, el ultimo mes."
     )
-    area_id: int = Field(0, description="0 = consolidado corporativo")
+    area_id: int | None = Field(
+        None, description="0 = consolidado corporativo. Por defecto: tu area si eres gerente, si no el 0."
+    )
 
 
 class HechoOut(BaseModel):
@@ -148,4 +165,5 @@ class TrabajoNarrativa(BaseModel):
     rondas: int = Field(description="Veces que se pidio al modelo desde cero")
     error: str | None = Field(None, description="Motivo si estado = error")
     detalle_error: list[str] | None = None
+    solicitada_por: str | None = Field(None, description="Usuario que la solicito (bitacora RF-11)")
     narrativa: Narrativa | None = Field(None, description="Presente cuando estado = lista")

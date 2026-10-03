@@ -12,7 +12,7 @@ from datetime import date, timedelta
 
 from sqlalchemy import text
 
-from app.database import RAIZ, engine
+from app.database import DB_URL, ES_REMOTA, RAIZ, ejecutar_sql, engine
 
 SEED = 42
 random.seed(SEED)
@@ -383,7 +383,14 @@ def resumen():
 
 
 if __name__ == "__main__":
+    if ES_REMOTA:
+        # en una base compartida (Supabase) borrar por error afecta a todos
+        print(f"ATENCION: vas a BORRAR y recrear las tablas de datos en {DB_URL.host}.")
+        print("Los usuarios y las narrativas no se tocan.")
+        if input("Escribe BORRAR para continuar: ").strip() != "BORRAR":
+            raise SystemExit("Cancelado.")
     print(f"Generando datos sinteticos (SEED={SEED})...")
     cargar()
+    ejecutar_sql("rls.sql")  # tablas recien creadas: cerrar la Data API de Supabase
     resumen()
     print("\nListo.")

@@ -18,7 +18,7 @@ import pandas as pd
 from sqlalchemy import text
 
 from app import schemas
-from app.database import RAIZ, engine
+from app.database import engine, ejecutar_sql
 from app.narrativa import NarrativaNoGenerada, generar_narrativa
 
 RONDAS = int(os.getenv("NARRATIVA_RONDAS", "2"))
@@ -29,7 +29,7 @@ _tabla_lista = False
 
 _COLUMNAS = (
     "id, area_id, to_char(periodo, 'YYYY-MM') AS periodo, estado, solicitada_en, terminada_en, "
-    "proveedor, modelo, version_prompt, rondas, error, detalle_error"
+    "proveedor, modelo, version_prompt, rondas, error, detalle_error, solicitada_por"
 )
 
 
@@ -38,9 +38,7 @@ def asegurar_tabla():
     global _tabla_lista
     if _tabla_lista:
         return
-    sql = (RAIZ / "db" / "narrativas.sql").read_text(encoding="utf-8")
-    with engine.begin() as conn:
-        conn.connection.driver_connection.execute(sql)
+    ejecutar_sql("narrativas.sql")
     _tabla_lista = True
 
 
@@ -57,16 +55,19 @@ def marcar_interrumpidas() -> int:
         ).rowcount
 
 
-def encolar(periodo: pd.Timestamp, area_id: int, proveedor, df: pd.DataFrame) -> int:
-    """Registra la solicitud y la manda al hilo de trabajo. Devuelve su id."""
+def encolar(
+    periodo: pd.Timestamp, area_id: int, proveedor, df: pd.DataFrame, solicitante: str | None = None
+) -> int:
+    """Registra la solicitud (con quien la pidio) y la manda al hilo de trabajo. Devuelve su id."""
     asegurar_tabla()
     with engine.begin() as conn:
         id_ = conn.execute(
             text(
-                "INSERT INTO narrativas (area_id, periodo, proveedor, modelo) "
-                "VALUES (:a, :p, :prov, :mod) RETURNING id"
+                "INSERT INTO narrativas (area_id, periodo, proveedor, modelo, solicitada_por) "
+                "VALUES (:a, :p, :prov, :mod, :sol) RETURNING id"
             ),
-            {"a": area_id, "p": periodo.date(), "prov": proveedor.nombre, "mod": proveedor.modelo},
+            {"a": area_id, "p": periodo.date(), "prov": proveedor.nombre, "mod": proveedor.modelo,
+             "sol": solicitante},
         ).scalar_one()
     ejecutor.submit(_ejecutar, id_, periodo, area_id, proveedor, df)
     return id_
@@ -120,13 +121,17 @@ def obtener(id_: int) -> dict | None:
     return {**fila, "narrativa": fila["resultado"]}
 
 
-def listar(area_id: int | None = None, periodo: pd.Timestamp | None = None, limite: int = 20) -> list[dict]:
-    """Historial (lo mas reciente primero), sin el cuerpo de cada narrativa."""
+def listar(
+    area_ids: list[int] | None = None, periodo: pd.Timestamp | None = None, limite: int = 20
+) -> list[dict]:
+    """Historial (lo mas reciente primero), sin el cuerpo de cada narrativa.
+
+    area_ids: solo esas areas (None = todas)."""
     asegurar_tabla()
     filtros, params = [], {"limite": limite}
-    if area_id is not None:
-        filtros.append("area_id = :a")
-        params["a"] = area_id
+    if area_ids is not None:
+        filtros.append("area_id = ANY(:a)")
+        params["a"] = list(area_ids)
     if periodo is not None:
         filtros.append("periodo = :p")
         params["p"] = periodo.date()

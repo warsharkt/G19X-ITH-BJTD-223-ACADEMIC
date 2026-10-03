@@ -1,0 +1,20 @@
+# Dependencias del backend (probado con Python 3.14).
+# Instalar, con el entorno virtual activo y desde la carpeta backend:
+#     pip install -r requirements.txt
+
+# API
+fastapi==0.141.1
+uvicorn==0.53.0
+python-multipart==0.0.32   # formulario de inicio de sesion (/auth/login)
+PyJWT==2.15.1              # tokens de sesion
+
+# Datos
+SQLAlchemy==2.0.54
+psycopg[binary]==3.3.6
+pandas==3.0.6
+numpy==2.5.3
+python-dotenv==1.2.3
+
+# Pruebas
+pytest==9.1.1
+httpx2==2.13.0             # lo usa el TestClient de FastAPI

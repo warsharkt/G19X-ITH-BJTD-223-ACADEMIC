@@ -26,3 +26,7 @@ CREATE TABLE IF NOT EXISTS narrativas (
 );
 
 CREATE INDEX IF NOT EXISTS narrativas_area_periodo ON narrativas (area_id, periodo);
+
+-- Paso 6: quien la solicito (bitacora RF-11). ADD COLUMN IF NOT EXISTS para
+-- que funcione tambien en bases creadas antes de este paso.
+ALTER TABLE narrativas ADD COLUMN IF NOT EXISTS solicitada_por TEXT;

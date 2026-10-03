@@ -6,7 +6,9 @@ Ejecutar desde la carpeta backend:  python -m pytest -q
 """
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
+from app.database import engine
 from app.main import app
 
 
@@ -16,9 +18,13 @@ def client():
 
 
 @pytest.fixture(scope="module")
-def id_area(client):
-    """Busca el id de un area por su nombre (no asume el orden de los ids)."""
-    por_nombre = {a["nombre"]: a["id"] for a in client.get("/areas").json()}
+def id_area():
+    """Busca el id de un area por su nombre (no asume el orden de los ids).
+
+    Lee la BD directamente: este fixture se crea antes que la sesion de
+    prueba (conftest), y /areas ya exige iniciar sesion."""
+    with engine.connect() as conn:
+        por_nombre = dict(conn.execute(text("SELECT nombre, id FROM areas")).all())
     return por_nombre.__getitem__
 
 
