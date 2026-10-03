@@ -1,8 +1,10 @@
-"""Genera la narrativa ejecutiva de un area y mes y la muestra en consola.
+"""Genera con IA la narrativa ejecutiva de un area y mes y la muestra en consola.
+
+Usa el proveedor configurado en el .env (LLM_PROVEEDOR). No pasa por la cola
+de la API: espera aqui mismo a que el modelo termine.
 
 Uso (desde la carpeta backend, con el entorno virtual activo):
-    python -m scripts.generar_narrativa --sin-ia                   # solo plantilla, sin modelo
-    python -m scripts.generar_narrativa                            # con Ollama (corporativo, ultimo mes)
+    python -m scripts.generar_narrativa                            # corporativo, ultimo mes
     python -m scripts.generar_narrativa --area Operaciones --periodo 2026-04
     python -m scripts.generar_narrativa --area Operaciones --periodo 2026-04 --ver-prompt
 """
@@ -12,8 +14,14 @@ import textwrap
 import pandas as pd
 
 from app.kpis import calcular_kpis
-from app.llm import obtener_proveedor
-from app.narrativa import construir_hechos, construir_mensajes, generar_narrativa
+from app.llm import ConfiguracionIA, obtener_proveedor
+from app.narrativa import (
+    NarrativaNoGenerada,
+    construir_hechos,
+    construir_mensajes,
+    generar_narrativa,
+    indicadores_sin_evaluar,
+)
 
 
 def parrafo(texto, sangria="  "):
@@ -24,7 +32,6 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--periodo", help="AAAA-MM (por defecto el ultimo mes con datos)")
     ap.add_argument("--area", default="Corporativo", help="nombre del area (por defecto Corporativo)")
-    ap.add_argument("--sin-ia", action="store_true", help="usar solo la plantilla determinista")
     ap.add_argument("--ver-prompt", action="store_true", help="mostrar el prompt que recibe el modelo y salir")
     args = ap.parse_args()
 
@@ -38,21 +45,36 @@ def main():
 
     if args.ver_prompt:
         hechos = construir_hechos(df, periodo, area_id)
-        for m in construir_mensajes(hechos, periodo, coincidencia["area"].iloc[0]):
+        sin_evaluar = indicadores_sin_evaluar(df, periodo, area_id)
+        for m in construir_mensajes(hechos, periodo, coincidencia["area"].iloc[0], sin_evaluar=sin_evaluar):
             print(f"--- {m['role'].upper()} ---\n{m['content']}\n")
         return
 
-    proveedor = None if args.sin_ia else obtener_proveedor()
-    if proveedor is not None:
-        print(f"Consultando al modelo '{proveedor.modelo}' (en CPU puede tardar uno o dos minutos)...")
+    try:
+        proveedor = obtener_proveedor()
+    except ConfiguracionIA as exc:
+        raise SystemExit(f"Configuracion de IA no valida: {exc}")
+    donde = "en tu equipo" if proveedor.local else "en la nube (datos sinteticos)"
+    print(f"Consultando a {proveedor.nombre} / '{proveedor.modelo}' {donde}; en CPU puede tardar varios minutos...")
 
-    n = generar_narrativa(periodo=periodo, area_id=area_id, proveedor=proveedor, df=df)
+    try:
+        n = generar_narrativa(periodo=periodo, area_id=area_id, proveedor=proveedor, df=df)
+    except NarrativaNoGenerada as exc:
+        print(f"\nNO SE GENERO LA NARRATIVA: {exc.motivo}")
+        for d in exc.detalle:
+            print(parrafo("- " + d))
+        raise SystemExit(1)
 
-    origen = f"IA ({n['modelo']})" if n["origen"] == "llm" else "plantilla determinista (sin IA)"
     c = n["conteo_estados"]
     print(f"\n=== {n['area']} - {n['periodo']} ===")
-    print(f"Redactado por: {origen}")
-    print(f"Indicadores: {c['rojo']} rojo, {c['amarillo']} amarillo, {c['verde']} verde\n")
+    print(
+        f"Redactado por: {n['proveedor']} / {n['modelo']} en {n['intentos']} intento(s)"
+        + ("  [mes estable]" if n["mes_estable"] else "")
+    )
+    print(f"Indicadores: {c['rojo']} rojo, {c['amarillo']} amarillo, {c['verde']} verde")
+    if n["indicadores_sin_evaluar"]:
+        print(f"Sin evaluar (muestra insuficiente): {', '.join(n['indicadores_sin_evaluar'])}")
+    print()
     print("RESUMEN")
     print(parrafo(n["resumen"]))
 
@@ -68,7 +90,7 @@ def main():
         print(f"     Fuentes: {'; '.join(r['fuentes'])}")
 
     if n["advertencias"]:
-        print("\nADVERTENCIAS")
+        print("\nINTENTOS RECHAZADOS POR LOS GUARDARRAILES")
         for a in n["advertencias"]:
             print(parrafo("- " + a))
     print("\nRequiere revision y aprobacion de RRHH antes de distribuirse.")

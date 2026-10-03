@@ -32,7 +32,10 @@ class KpiFila(BaseModel):
     var_mes_ant_pct: float | None = None
     var_anio_ant: float | None = None
     var_anio_ant_pct: float | None = None
-    estado: str = Field(description="verde, amarillo, rojo, suprimido o sin_dato")
+    estado: str = Field(
+        description="verde, amarillo, rojo, suprimido, sin_dato o muestra_insuficiente "
+        "(valor visible pero sin semaforo: muy pocas personas detras del dato)"
+    )
     sentido: str | None = Field(None, description="mayor_es_peor o menor_es_peor")
     umbral_atencion: float | None = None
     umbral_critico: float | None = None
@@ -52,7 +55,6 @@ class NarrativaSolicitud(BaseModel):
         None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$", description="AAAA-MM. Por defecto, el ultimo mes."
     )
     area_id: int = Field(0, description="0 = consolidado corporativo")
-    usar_ia: bool = Field(True, description="False = solo plantilla determinista (sin modelo)")
 
 
 class HechoOut(BaseModel):
@@ -70,6 +72,7 @@ class HechoOut(BaseModel):
     var_anio_ant_texto: str | None
     estado: str
     n: int
+    personas_texto: str | None = Field(None, description="Conteo en personas (tasas de capacitacion)")
     umbral_atencion: float
     umbral_atencion_texto: str
     umbral_critico: float
@@ -113,15 +116,36 @@ class Narrativa(BaseModel):
     periodo: str
     area_id: int
     area: str
-    origen: str = Field(description="'llm' si la redacto el modelo y paso la validacion; 'plantilla' si no")
-    proveedor: str | None
+    proveedor: str = Field(description="ollama (local) o groq (nube, solo datos sinteticos)")
     modelo: str | None
     version_prompt: str
     generado_en: datetime
     requiere_revision: bool = Field(description="Siempre True: un responsable de RRHH debe aprobarla")
+    mes_estable: bool = Field(description="True si no hubo alertas ni indicadores por vigilar")
+    indicadores_sin_evaluar: list[str] = Field(
+        [], description="Indicadores con muestra insuficiente: se ven en el dashboard, pero no generan alertas"
+    )
+    intentos: int = Field(description="Llamadas al modelo hasta pasar los guardarrailes")
     resumen: str
     hallazgos: list[Hallazgo]
     recomendaciones: list[Recomendacion]
     conteo_estados: ConteoEstados
     hechos: list[HechoOut]
-    advertencias: list[str]
+    advertencias: list[str] = Field(description="Errores de validacion de los intentos previos")
+
+
+class TrabajoNarrativa(BaseModel):
+    """Solicitud de narrativa: se genera en segundo plano y se consulta por id."""
+    id: int
+    area_id: int
+    periodo: str
+    estado: str = Field(description="en_proceso, lista o error")
+    solicitada_en: datetime
+    terminada_en: datetime | None
+    proveedor: str | None
+    modelo: str | None
+    version_prompt: str | None
+    rondas: int = Field(description="Veces que se pidio al modelo desde cero")
+    error: str | None = Field(None, description="Motivo si estado = error")
+    detalle_error: list[str] | None = None
+    narrativa: Narrativa | None = Field(None, description="Presente cuando estado = lista")

@@ -20,8 +20,22 @@ CORPORATIVO = 0
 # Regla de tamano minimo de grupo (10.3.4): si el grupo de un area tiene menos
 # de MIN_GRUPO personas, no se muestra el valor de los indicadores sensibles.
 # El PRD deja el minimo "definido por politica interna": 5 es un valor tipico.
+# La rotacion tambien entra: en un equipo de 4, "rotacion involuntaria 25 %"
+# equivale a decir que despidieron a una persona concreta.
 MIN_GRUPO = 5
-INDICADORES_SUJETOS_A_MIN_GRUPO = {"cumplimiento_metas", "enps"}
+INDICADORES_SUJETOS_A_MIN_GRUPO = {
+    "cumplimiento_metas", "enps",
+    "rotacion_total", "rotacion_voluntaria", "rotacion_involuntaria",
+}
+
+# Muestra minima para el semaforo (10.3.3). En las tasas que son porcentaje
+# de un grupo de personas, con menos de MIN_MUESTRA personas una sola mueve el
+# indicador de 100 % a 0 % y disparaba una alerta "critica" de toda el area
+# (Legal: 1 inscrito). El valor SI se muestra, pero no se pinta de color ni
+# llega al modelo como alerta. Reclutamiento no entra: cada vacante es un
+# hecho real, no una muestra ruidosa de una poblacion.
+MIN_MUESTRA = 5
+INDICADORES_CON_MUESTRA_MINIMA = {"cobertura_capacitacion", "tasa_finalizacion"}
 
 # El eNPS va de -100 a 100 y su cero es arbitrario: un "cambio porcentual" no
 # tiene sentido (ej. de +20 a -50), asi que solo se reporta variacion en puntos.
@@ -247,6 +261,12 @@ def calcular_kpis():
     def estado(fila):
         if fila["suprimido"]:
             return "suprimido"
+        if (
+            fila["indicador"] in INDICADORES_CON_MUESTRA_MINIMA
+            and fila["n"] < MIN_MUESTRA
+            and not pd.isna(fila["valor"])
+        ):
+            return "muestra_insuficiente"
         return semaforo(
             fila["valor"], fila["sentido"], fila["umbral_atencion"], fila["umbral_critico"]
         )

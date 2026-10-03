@@ -1,7 +1,7 @@
 -- ============================================================
 -- Umbrales de atencion y criticos por indicador (regla 10.3.3)
 -- Los valores iniciales son PLACEHOLDERS: RRHH los debe validar
--- (Actividad 1) y luego editarlos desde el panel admin (RF-12).
+-- y luego editarlos desde el panel admin (RF-12).
 --
 -- Es seguro ejecutarlo varias veces: no borra la tabla y no
 -- pisa los umbrales que ya hayas modificado (ON CONFLICT DO NOTHING).

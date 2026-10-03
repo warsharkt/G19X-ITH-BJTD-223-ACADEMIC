@@ -5,11 +5,17 @@ Flujo (secciones 10.3.5 y 10.5 del PRD):
     KPIs validados -> HECHOS (con id, confianza y fuente)
                    -> prompt -> modelo de lenguaje -> JSON
                    -> GUARDARRAILES (cifras, trazabilidad, causalidad)
-                   -> si no pasa: 1 reintento con los errores -> plantilla
+                   -> si no pasa: reintento con los errores
+                   -> si sigue sin pasar: NarrativaNoGenerada (nunca se
+                      rellena con texto que no haya redactado la IA)
                    -> narrativa lista para REVISION HUMANA
 
+Los meses sin alertas ni indicadores por vigilar ("meses estables") tambien
+los redacta el modelo, a partir de todos los indicadores del mes.
+
 Lo que el modelo NUNCA recibe: valores suprimidos por la regla de tamano
-minimo de grupo (10.3.4), ni nombres ni datos personales.
+minimo de grupo (10.3.4), ni nombres ni datos personales. Con un proveedor
+en la nube tampoco recibe el nombre del area (seudonimo).
 El "nivel de confianza" lo calcula el codigo con reglas, no el modelo.
 """
 import copy
@@ -22,8 +28,8 @@ import pandas as pd
 from app.guardrails import cifras_de, cifras_permitidas, validar_narrativa
 from app.kpis import CORPORATIVO, INDICADORES_SOLO_VARIACION_ABSOLUTA, calcular_kpis
 
-VERSION_PROMPT = "v4"
-INTENTOS = int(os.getenv("LLM_INTENTOS", "2"))
+VERSION_PROMPT = "v5"
+INTENTOS = int(os.getenv("LLM_INTENTOS", "3"))
 
 MESES_ES = [
     "enero", "febrero", "marzo", "abril", "mayo", "junio",
@@ -43,7 +49,8 @@ FUENTES = {
     "indice_productividad": "Sistema de proyectos (productividad)",
 }
 
-# Acciones de la plantilla determinista. Sugerencias para valoracion de RRHH:
+# Accion base que se entrega al modelo por indicador en alerta o por vigilar.
+# Sugerencias para valoracion de RRHH:
 # ninguna afirma una causa ni propone decisiones sobre personas.
 RECOMENDACIONES = {
     "rotacion_total": "Revisar con la gerencia del área los patrones de las bajas del periodo, por ejemplo mediante entrevistas de salida.",
@@ -95,13 +102,26 @@ ESQUEMA_NARRATIVA = {
     "required": ["resumen", "hallazgos", "recomendaciones"],
 }
 
+def rango_hallazgos(n_hechos: int) -> tuple[int, int]:
+    """Cuantos hallazgos pedir: de 3 a 5, pero nunca mas que hechos citables.
+
+    Pedir "de 3 a 5" con solo 2 hechos obligaba a un tercer hallazgo que
+    repetia un hecho sin su valor, y los guardarrailes lo rechazaban siempre
+    (Legal, agosto 2026: fallo los 3 intentos en la evaluacion real).
+    """
+    return min(3, n_hechos), min(5, n_hechos)
+
+
 def esquema_narrativa(ids: list[str]) -> dict:
     """Esquema JSON donde `hechos` solo puede contener los ids entregados.
 
     Con salida estructurada, el modelo no puede escribir en ese campo nada que
     no sea un id valido (en la prueba real puso frases enteras y "H01 y H02").
+    Tampoco puede escribir mas hallazgos que hechos tiene para citar.
     """
     esquema = copy.deepcopy(ESQUEMA_NARRATIVA)
+    minimo, maximo = rango_hallazgos(len(ids))
+    esquema["properties"]["hallazgos"].update(minItems=minimo, maxItems=maximo)
     for lista in ("hallazgos", "recomendaciones"):
         campo = esquema["properties"][lista]["items"]["properties"]["hechos"]
         campo["minItems"] = 1
@@ -152,6 +172,17 @@ def texto_variacion(delta, unidad):
         return f"{_num(delta, 0, True)} MXN"
     sufijo = {"%": "pts", "días": "días", "puntos": "puntos"}[unidad]
     return f"{_num(delta, 1, True)} {sufijo}"
+
+
+def texto_personas(indicador, valor, n) -> str | None:
+    """Conteo en personas para las tasas de capacitacion: mas claro para un
+    directivo que el porcentaje solo ("18 de 80 inscritos no completaron")."""
+    si = round(float(valor) * int(n) / 100)
+    if indicador == "tasa_finalizacion":
+        return f"{si} de {int(n)} inscritos completaron el curso ({int(n) - si} no)"
+    if indicador == "cobertura_capacitacion":
+        return f"{si} de {int(n)} empleados activos se capacitaron ({int(n) - si} no)"
+    return None
 
 
 def nombre_mes(periodo: pd.Timestamp) -> str:
@@ -240,14 +271,20 @@ def evolucion_de(delta, sentido) -> str | None:
 
 
 def construir_hechos(df: pd.DataFrame, periodo: pd.Timestamp, area_id: int) -> list[dict]:
-    """Hechos verificables de un area y mes. Excluye los valores suprimidos."""
+    """Hechos verificables de un area y mes.
+
+    Excluye los valores suprimidos (grupo minimo) y los de muestra
+    insuficiente: esos se ven en el dashboard, pero no son hechos que la IA
+    deba evaluar (ver indicadores_sin_evaluar)."""
     filas = df[(df["periodo"] == periodo) & (df["area_id"] == area_id)]
     historia = (
         df[(df["area_id"] == area_id) & (df["periodo"] <= periodo) & df["valor"].notna()]
         .groupby("indicador")
         .size()
     )
-    filas = filas[~filas["suprimido"] & filas["valor"].notna()].copy()
+    filas = filas[
+        ~filas["suprimido"] & filas["valor"].notna() & (filas["estado"] != "muestra_insuficiente")
+    ].copy()
     filas["_sev"] = filas["estado"].map(SEVERIDAD)
     filas = filas.sort_values(["_sev", "indicador"])
 
@@ -279,6 +316,7 @@ def construir_hechos(df: pd.DataFrame, periodo: pd.Timestamp, area_id: int) -> l
                 "var_anio_ant_texto": texto_variacion(f.var_anio_ant, f.unidad),
                 "estado": f.estado,
                 "n": int(f.n),
+                "personas_texto": texto_personas(f.indicador, f.valor, f.n),
                 "umbral_atencion": float(f.umbral_atencion),
                 "umbral_atencion_texto": texto_valor(f.umbral_atencion, f.unidad),
                 "umbral_critico": float(f.umbral_critico),
@@ -300,6 +338,12 @@ def construir_hechos(df: pd.DataFrame, periodo: pd.Timestamp, area_id: int) -> l
     return hechos
 
 
+def indicadores_sin_evaluar(df: pd.DataFrame, periodo: pd.Timestamp, area_id: int) -> list[str]:
+    """Nombres de los indicadores con muestra insuficiente en ese area y mes."""
+    filas = df[(df["periodo"] == periodo) & (df["area_id"] == area_id) & (df["estado"] == "muestra_insuficiente")]
+    return sorted(filas["nombre"])
+
+
 def conteo_estados(hechos: list[dict]) -> dict:
     conteo = {"rojo": 0, "amarillo": 0, "verde": 0}
     for h in hechos:
@@ -309,8 +353,12 @@ def conteo_estados(hechos: list[dict]) -> dict:
     return conteo
 
 
-def _alcance(area: str) -> str:
-    return "el consolidado corporativo" if area == "Corporativo" else f"el área {area}"
+def _alcance(area: str, seudonimizar: bool = False) -> str:
+    if area == "Corporativo":
+        return "el consolidado corporativo"
+    # A un proveedor en la nube no se le dice que area es: en areas pequenas,
+    # area + mes + cifra podria bastar para adivinar de quien se habla.
+    return "un área de la empresa" if seudonimizar else f"el área {area}"
 
 
 # ----------------------------------------------------------------- prompt
@@ -327,10 +375,15 @@ def hechos_para_modelo(hechos: list[dict]) -> list[dict]:
     """Hechos que ve (y puede citar) el modelo: alertas e indicadores por vigilar.
 
     Los demas indicadores en verde no se le entregan, para que no gaste
-    hallazgos en ellos. Puede quedar vacia: sin alertas ni nada por vigilar no
-    hay nada que redactar y no se consulta al modelo.
+    hallazgos en ellos. Excepcion: en un mes estable (sin alertas ni nada por
+    vigilar) recibe todos, para redactar el resumen de estabilidad.
     """
-    return [h for h in hechos if h["estado"] != "verde" or h["en_vigilancia"]]
+    temas = [h for h in hechos if h["estado"] != "verde" or h["en_vigilancia"]]
+    return temas or list(hechos)
+
+
+def es_mes_estable(hechos: list[dict]) -> bool:
+    return bool(hechos) and all(h["estado"] == "verde" and not h["en_vigilancia"] for h in hechos)
 
 
 def detectar_coincidencias(hechos: list[dict]) -> list[tuple[dict, dict]]:
@@ -342,8 +395,15 @@ def _cambio(texto, evolucion):
     return None if texto is None else f"{texto} ({evolucion})"
 
 
-def construir_mensajes(hechos: list[dict], periodo: pd.Timestamp, area: str) -> list[dict]:
-    """Prompt para el modelo. Recibe todos los hechos y decide que se le muestra."""
+def construir_mensajes(
+    hechos: list[dict], periodo: pd.Timestamp, area: str, seudonimizar: bool = False,
+    sin_evaluar: list[str] = (),
+) -> list[dict]:
+    """Prompt para el modelo. Recibe todos los hechos y decide que se le muestra.
+
+    seudonimizar=True (proveedores en la nube) oculta el nombre del area.
+    sin_evaluar: nombres de indicadores con muestra insuficiente (sin cifras).
+    """
     visibles = hechos_para_modelo(hechos)
     ids_visibles = {h["id"] for h in visibles}
     para_modelo = [
@@ -358,19 +418,22 @@ def construir_mensajes(hechos: list[dict], periodo: pd.Timestamp, area: str) -> 
             "estado": h["estado"],
             "situacion": h["situacion"],
             "muestra": h["n"],
+            **({"personas": h["personas_texto"]} if h.get("personas_texto") else {}),
             "accion_base": h["accion_base"],
         }
         for h in visibles
     ]
     c = conteo_estados(hechos)
-    encabezado = (
-        "HECHOS EN ALERTA Y POR VIGILAR (ordenados por severidad)"
-        if any(h["estado"] != "verde" for h in hechos)
-        else "HECHOS POR VIGILAR (ningún indicador está en alerta este mes)"
-    )
+    estable = es_mes_estable(hechos)
+    if estable:
+        encabezado = "INDICADORES DEL MES (mes estable: ninguno en alerta ni por vigilar)"
+    elif any(h["estado"] != "verde" for h in hechos):
+        encabezado = "HECHOS EN ALERTA Y POR VIGILAR (ordenados por severidad)"
+    else:
+        encabezado = "HECHOS POR VIGILAR (ningún indicador está en alerta este mes)"
     partes = [
         f"Periodo: {nombre_mes(periodo)}",
-        f"Alcance: {_alcance(area)}",
+        f"Alcance: {_alcance(area, seudonimizar)}",
         f"Conteo de estados: {c['rojo']} en rojo, {c['amarillo']} en amarillo, "
         f"{c['verde']} en verde, de los cuales {c['por_vigilar']} conviene vigilar (total {c['total']}).",
         f"\n{encabezado}:\n{json.dumps(para_modelo, ensure_ascii=False, indent=1)}",
@@ -381,6 +444,19 @@ def construir_mensajes(hechos: list[dict], periodo: pd.Timestamp, area: str) -> 
             "\nIndicadores sin alerta (menciónalos solo en el resumen, sin cifras): "
             + ", ".join(sin_alerta) + "."
         )
+    if sin_evaluar:
+        partes.append(
+            "\nIndicadores sin evaluar por muestra insuficiente (muy pocas personas; no son alertas "
+            "ni hallazgos, menciónalos solo en el resumen y sin cifras): " + ", ".join(sin_evaluar) + "."
+        )
+    if estable:
+        partes.append(
+            "\nEste mes no hay alertas ni indicadores por vigilar. Redacta un resumen de estabilidad "
+            f"que diga con números que hay 0 indicadores en rojo y 0 en amarillo de {c['total']}, "
+            "y en los hallazgos describe los indicadores más relevantes con su valor (puedes agrupar los del mismo tipo; no "
+            "hace falta mencionarlos todos). Como no hay \"accion_base\", la recomendación "
+            "es mantener el seguimiento mensual de los indicadores citados."
+        )
     coincidencias = detectar_coincidencias(hechos)
     if coincidencias:
         partes.append(
@@ -390,78 +466,16 @@ def construir_mensajes(hechos: list[dict], periodo: pd.Timestamp, area: str) -> 
             f"- {a['id']} ({a['nombre']}) y {b['id']} ({b['nombre']}) están ambos en alerta."
             for a, b in coincidencias
         ]
+    minimo, maximo = rango_hallazgos(len(visibles))
+    cantidad = f"exactamente {minimo}" if minimo == maximo else f"de {minimo} a {maximo}"
     partes.append(
-        "\nEntrega un JSON con: \"resumen\", \"hallazgos\" (de 3 a 5; cada uno con \"titulo\", "
+        f"\nEntrega un JSON con: \"resumen\", \"hallazgos\" ({cantidad}; cada uno con \"titulo\", "
         "\"texto\" y \"hechos\") y \"recomendaciones\" (de 1 a 3; cada una con \"accion\" y \"hechos\")."
     )
     return [
         {"role": "system", "content": PROMPT_SISTEMA},
         {"role": "user", "content": "\n".join(partes)},
     ]
-
-
-# -------------------------------------------------------------- plantilla
-def narrativa_plantilla(hechos: list[dict], periodo: pd.Timestamp, area: str) -> dict:
-    """Narrativa determinista (sin IA). Respaldo cuando el modelo falla y
-    linea base para comparar contra la version con IA."""
-    mes, alcance, c = nombre_mes(periodo), _alcance(area), conteo_estados(hechos)
-    resumen = (
-        f"En {mes}, {alcance} tiene {c['rojo']} indicadores en rojo, "
-        f"{c['amarillo']} en amarillo y {c['verde']} en verde, de {c['total']} "
-        "con datos disponibles"
-        + (f"; de los que están en verde, {c['por_vigilar']} conviene vigilar" if c["por_vigilar"] else "")
-        + "."
-    )
-
-    temas = hechos_para_modelo(hechos)  # alertas y "por vigilar", en orden de severidad
-    verdes = [h for h in hechos if h["estado"] == "verde" and not h["en_vigilancia"]]
-    # hasta 5 hallazgos individuales; si hay mas temas, los que sobran se agrupan en uno
-    individuales, agrupados = (temas, []) if len(temas) <= 5 else (temas[:4], temas[4:])
-
-    def _texto(h):
-        texto = f"{h['nombre']} fue {h['valor_texto']} en {mes}"
-        if h["var_mes_ant_texto"]:
-            texto += f" ({h['var_mes_ant_texto']} frente al mes anterior)"
-        if h["en_vigilancia"]:
-            texto += f"; sin alerta, pero conviene vigilar: {h['motivo_vigilancia']}."
-        else:
-            texto += f"; se ubica en {h['estado']} según los umbrales definidos por RRHH."
-        return texto
-
-    hallazgos = [
-        {"titulo": f"{h['nombre']}: {'por vigilar' if h['en_vigilancia'] else h['estado']}",
-         "texto": _texto(h), "hechos": [h["id"]]}
-        for h in individuales
-    ]
-    if agrupados:
-        detalle = "; ".join(f"{h['nombre']} {h['valor_texto']}" for h in agrupados)
-        hallazgos.append(
-            {
-                "titulo": "Otros indicadores en alerta o por vigilar",
-                "texto": f"También en {mes}: {detalle}.",
-                "hechos": [h["id"] for h in agrupados],
-            }
-        )
-    while len(hallazgos) < min(3, len(hechos)) and verdes:  # relleno si hay pocos temas
-        h = verdes.pop(0)
-        texto = f"{h['nombre']} fue {h['valor_texto']} en {mes}"
-        if h["var_mes_ant_texto"]:
-            texto += f" ({h['var_mes_ant_texto']} frente al mes anterior)"
-        hallazgos.append({"titulo": f"{h['nombre']}: {h['estado']}", "texto": texto + ".", "hechos": [h["id"]]})
-
-    # todas las alertas en rojo reciben recomendacion (maximo 3); se etiquetan con su confianza
-    recomendaciones = [
-        {"accion": RECOMENDACIONES[h["indicador"]], "hechos": [h["id"]]}
-        for h in temas[:3]
-    ]
-    if not recomendaciones and hechos:
-        recomendaciones = [
-            {
-                "accion": "Mantener el seguimiento mensual de los indicadores; no hay alertas en este periodo.",
-                "hechos": [hechos[0]["id"]],
-            }
-        ]
-    return {"resumen": resumen, "hallazgos": hallazgos, "recomendaciones": recomendaciones}
 
 
 # ---------------------------------------------------------- orquestacion
@@ -482,90 +496,116 @@ def _enriquecer(items: list[dict], por_id: dict, campos: tuple) -> list[dict]:
     return resultado
 
 
-def generar_narrativa(periodo=None, area_id=CORPORATIVO, proveedor=None, df=None) -> dict:
-    """Genera la narrativa ejecutiva de un area y mes.
+class NarrativaNoGenerada(Exception):
+    """El modelo no logro una narrativa valida. Nunca se sustituye por otro texto.
 
-    proveedor: objeto con .generar(mensajes, esquema); None = solo plantilla.
-    Lanza ValueError si el periodo o el area no existen.
+    reintentable=False si el modelo no estuvo disponible (repetir de inmediato
+    no sirve); True si respondio pero no paso los guardarrailes.
     """
-    df = df if df is not None else calcular_kpis()
+
+    def __init__(self, motivo: str, detalle: list[str], reintentable: bool):
+        super().__init__(motivo)
+        self.motivo = motivo
+        self.detalle = detalle
+        self.reintentable = reintentable
+
+
+def mensajes_de_correccion(
+    base: list[dict], crudo: str, errores: list[str], previos: list[str] = ()
+) -> list[dict]:
+    """Conversacion para el siguiente intento: el prompt original, SOLO la
+    ultima respuesta y sus errores. Antes se acumulaban todos los intentos y
+    al segundo reintento se rebasaba el contexto del modelo.
+
+    `previos` son los errores de intentos anteriores (texto corto): se le
+    recuerdan para que al corregir uno no vuelva a cometer el otro."""
+    contenido = "Tu respuesta tuvo estos problemas:\n- " + "\n- ".join(errores)
+    ya_vistos = [e for e in dict.fromkeys(previos) if e not in errores]
+    if ya_vistos:
+        contenido += "\nEn intentos anteriores también se te señaló (no lo repitas):\n- " + "\n- ".join(ya_vistos)
+    return base + [
+        {"role": "assistant", "content": crudo},
+        {"role": "user", "content": contenido + "\nCorrígela y responde solo con el JSON."},
+    ]
+
+
+def validar_solicitud(df: pd.DataFrame, periodo=None, area_id=CORPORATIVO) -> tuple[pd.Timestamp, str]:
+    """Periodo y nombre del area; ValueError si no existen o no hay indicadores."""
     periodo = pd.Timestamp(periodo) if periodo is not None else df["periodo"].max()
     if not (df["periodo"] == periodo).any():
         raise ValueError(f"No hay datos para el periodo {periodo:%Y-%m}")
     if area_id not in set(df["area_id"]):
         raise ValueError(f"El area {area_id} no existe")
-    area = df.loc[df["area_id"] == area_id, "area"].iloc[0]
+    if not construir_hechos(df, periodo, area_id):
+        raise ValueError("No hay indicadores con datos disponibles para este periodo y alcance")
+    return periodo, df.loc[df["area_id"] == area_id, "area"].iloc[0]
+
+
+def generar_narrativa(periodo=None, area_id=CORPORATIVO, proveedor=None, df=None) -> dict:
+    """Genera con IA la narrativa ejecutiva de un area y mes.
+
+    proveedor: objeto con .generar(mensajes, esquema) y .local (obligatorio).
+    Lanza ValueError si el periodo o el area no existen o no hay indicadores,
+    y NarrativaNoGenerada si el modelo no logra una respuesta valida.
+    """
+    if proveedor is None:
+        raise ValueError("Se necesita un proveedor de IA: la narrativa siempre la redacta un modelo")
+    df = df if df is not None else calcular_kpis()
+    periodo, area = validar_solicitud(df, periodo, area_id)
 
     hechos = construir_hechos(df, periodo, area_id)
     conteo = conteo_estados(hechos)
-    advertencias, aceptada, origen = [], None, "plantilla"
-    proveedor_usado, modelo = None, None
+    visibles = hechos_para_modelo(hechos)
+    sin_evaluar = indicadores_sin_evaluar(df, periodo, area_id)
+    base = construir_mensajes(
+        hechos, periodo, area, seudonimizar=not getattr(proveedor, "local", True), sin_evaluar=sin_evaluar
+    )
+    cifras_resumen = cifras_de(*conteo.values())
+    esquema = esquema_narrativa([h["id"] for h in visibles])
 
-    if not hechos:
-        advertencias.append("No hay indicadores con datos disponibles para este periodo y alcance.")
-        proveedor = None
-    elif not hechos_para_modelo(hechos):
-        advertencias.append("No hay alertas ni indicadores por vigilar: se usó la plantilla sin consultar al modelo.")
-        proveedor = None
-    if proveedor is not None:
-        mensajes = construir_mensajes(hechos, periodo, area)
-        visibles = hechos_para_modelo(hechos)
-        cifras_resumen = cifras_de(*conteo.values())
-        esquema = esquema_narrativa([h["id"] for h in visibles])
-        for intento in range(1, INTENTOS + 1):
-            try:
-                crudo = proveedor.generar(mensajes, esquema)
-            except Exception as exc:  # frontera externa: cualquier fallo -> plantilla
-                advertencias.append(f"El modelo de lenguaje no estuvo disponible: {exc}")
-                break
-            try:
-                salida = json.loads(crudo)
-                errores = validar_narrativa(salida, visibles, cifras_resumen)
-            except json.JSONDecodeError as exc:
-                salida, errores = None, [f"La respuesta no es JSON válido ({exc.msg})"]
-            if not errores:
-                aceptada = salida
-                break
-            advertencias.append(
-                f"Intento {intento}: la respuesta del modelo no pasó la validación: "
-                + " | ".join(errores)
-            )
-            mensajes = mensajes + [
-                {"role": "assistant", "content": crudo},
-                {
-                    "role": "user",
-                    "content": "Tu respuesta tuvo estos problemas:\n- "
-                    + "\n- ".join(errores)
-                    + "\nCorrígela y responde solo con el JSON.",
-                },
-            ]
+    mensajes, advertencias, aceptada, previos = base, [], None, []
+    for intento in range(1, INTENTOS + 1):
+        try:
+            crudo = proveedor.generar(mensajes, esquema)
+        except Exception as exc:  # frontera externa: cualquier fallo del proveedor
+            raise NarrativaNoGenerada(
+                f"El modelo de lenguaje no estuvo disponible: {exc}", advertencias, reintentable=False
+            ) from exc
+        try:
+            salida = json.loads(crudo)
+            errores = validar_narrativa(salida, visibles, cifras_resumen)
+        except json.JSONDecodeError as exc:
+            salida, errores = None, [f"La respuesta no es JSON válido ({exc.msg})"]
+        if not errores:
+            aceptada = salida
+            break
+        advertencias.append(
+            f"Intento {intento}: la respuesta del modelo no pasó la validación: " + " | ".join(errores)
+        )
+        mensajes = mensajes_de_correccion(base, crudo, errores, previos)
+        previos += errores
 
-    if aceptada is not None:
-        origen = "llm"
-        proveedor_usado = getattr(proveedor, "nombre", type(proveedor).__name__)
-        modelo = getattr(proveedor, "modelo", None)
-        cuerpo = aceptada
-    else:
-        if proveedor is not None:
-            advertencias.append("Se usó la plantilla determinista como respaldo.")
-        cuerpo = narrativa_plantilla(hechos, periodo, area) if hechos else {
-            "resumen": "Sin datos disponibles.", "hallazgos": [], "recomendaciones": []
-        }
+    if aceptada is None:
+        raise NarrativaNoGenerada(
+            f"El modelo no logró una narrativa válida en {INTENTOS} intentos", advertencias, reintentable=True
+        )
 
     por_id = {h["id"]: h for h in hechos}
     return {
         "periodo": f"{periodo:%Y-%m}",
         "area_id": int(area_id),
         "area": area,
-        "origen": origen,
-        "proveedor": proveedor_usado,
-        "modelo": modelo,
+        "proveedor": getattr(proveedor, "nombre", type(proveedor).__name__),
+        "modelo": getattr(proveedor, "modelo", None),
         "version_prompt": VERSION_PROMPT,
         "generado_en": datetime.now(timezone.utc),
-        "requiere_revision": True,  # human-in-the-loop, regla 10.3.6
-        "resumen": cuerpo["resumen"].strip(),
-        "hallazgos": _enriquecer(cuerpo["hallazgos"], por_id, ("titulo", "texto")),
-        "recomendaciones": _enriquecer(cuerpo["recomendaciones"], por_id, ("accion",)),
+        "requiere_revision": True,  # human-in-the-loop, regla 10.3.9
+        "mes_estable": es_mes_estable(hechos),
+        "indicadores_sin_evaluar": sin_evaluar,
+        "intentos": len(advertencias) + 1,
+        "resumen": aceptada["resumen"].strip(),
+        "hallazgos": _enriquecer(aceptada["hallazgos"], por_id, ("titulo", "texto")),
+        "recomendaciones": _enriquecer(aceptada["recomendaciones"], por_id, ("accion",)),
         "conteo_estados": conteo,
         "hechos": hechos,
         "advertencias": advertencias,

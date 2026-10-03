@@ -15,7 +15,7 @@ import pytest
 from sqlalchemy import text
 
 from app.database import engine
-from app.kpis import MIN_GRUPO, calcular_kpis, semaforo
+from app.kpis import INDICADORES_CON_MUESTRA_MINIMA, MIN_GRUPO, MIN_MUESTRA, calcular_kpis, semaforo
 
 
 @pytest.fixture(scope="module")
@@ -168,8 +168,11 @@ def test_primer_mes_no_tiene_variacion_contra_mes_anterior(kpis):
 
 # ------------------------------------------- reglas de negocio y escenario
 def test_area_pequena_se_suprime(kpis):
-    """Legal tiene 4 personas: clima y desempeno no se deben mostrar (10.3.4)."""
-    for indicador in ("enps", "cumplimiento_metas"):
+    """Legal tiene 4 personas: clima, desempeno y rotacion no se deben mostrar
+    (10.3.4). En la rotacion, una sola baja en un equipo de 4 identifica a la persona."""
+    for indicador in (
+        "enps", "cumplimiento_metas", "rotacion_total", "rotacion_voluntaria", "rotacion_involuntaria",
+    ):
         s = serie(kpis, indicador, "Legal")
         assert s["suprimido"].all()
         assert s["valor"].isna().all()
@@ -184,6 +187,28 @@ def test_baja_y_reemplazo_el_mismo_mes_no_destapa_area_pequena(kpis):
     if meses_con_5.empty:
         pytest.skip("Con estos datos Legal no tuvo baja y reemplazo el mismo mes")
     assert meses_con_5["suprimido"].all()
+
+
+def test_capacitacion_con_muestra_insuficiente_se_ve_pero_sin_semaforo(kpis):
+    """Con menos de 5 personas detras de una tasa de capacitacion, una sola
+    persona la mueve de 100 % a 0 %: el valor se muestra, pero no se pinta de
+    rojo/amarillo/verde (estado muestra_insuficiente)."""
+    chicos = kpis[
+        kpis["indicador"].isin(INDICADORES_CON_MUESTRA_MINIMA) & (kpis["n"] < MIN_MUESTRA)
+        & kpis["valor"].notna()
+    ]
+    assert not chicos.empty
+    assert (chicos["estado"] == "muestra_insuficiente").all()
+    assert not chicos["suprimido"].any()  # no se oculta: el valor sigue visible
+    grandes = kpis[kpis["indicador"].isin(INDICADORES_CON_MUESTRA_MINIMA) & (kpis["n"] >= MIN_MUESTRA)]
+    assert grandes["estado"].isin(["verde", "amarillo", "rojo"]).all()
+
+
+def test_reclutamiento_con_una_vacante_conserva_su_semaforo(kpis):
+    """Una vacante que tardo 70 dias es un hecho real, no una muestra ruidosa."""
+    una = kpis[(kpis["indicador"] == "tiempo_contratacion") & (kpis["n"] == 1)]
+    assert not una.empty
+    assert una["estado"].isin(["verde", "amarillo", "rojo"]).all()
 
 
 def test_area_grande_y_corporativo_no_se_suprimen(kpis):

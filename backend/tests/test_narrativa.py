@@ -1,10 +1,10 @@
 """Pruebas del motor de narrativa (paso 5).
 
-NO necesitan Ollama ni conexion a internet: el modelo se sustituye por un
-proveedor falso y el cliente de Ollama se prueba contra un servidor simulado.
+NO necesitan Ollama, Groq ni conexion a internet: el modelo se sustituye por
+un proveedor falso y los clientes HTTP se prueban contra servidores simulados.
 Lo que se verifica es que el SISTEMA se comporte bien aunque el modelo se
-equivoque: rechaza cifras inventadas, causalidad y citas falsas, y cae a la
-plantilla cuando hace falta.
+equivoque: rechaza cifras inventadas, causalidad y citas falsas, y si el
+modelo no lo logra falla de forma explicita (nunca rellena con otro texto).
 
 Requiere PostgreSQL con datos cargados (python -m scripts.seed).
 Ejecutar desde la carpeta backend:  python -m pytest -q
@@ -17,24 +17,37 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from app.guardrails import extraer_numeros, validar_narrativa
+from sqlalchemy import text
+
+from app import trabajos
+from app.database import engine
+from app.guardrails import cifras_permitidas, extraer_numeros, validar_narrativa
 from app.kpis import calcular_kpis
-from app.llm import OllamaProveedor, ProveedorNoDisponible, obtener_proveedor
-from app.main import app, kpis_df
+from app.llm import (
+    ConfiguracionIA,
+    GroqProveedor,
+    OllamaProveedor,
+    ProveedorNoDisponible,
+    esquema_estricto,
+    obtener_proveedor,
+)
+from app.main import app, kpis_df, proveedor_configurado
 from app.narrativa import (
     ESQUEMA_NARRATIVA,
+    INTENTOS,
+    NarrativaNoGenerada,
     cifras_de,
     confianza_de,
     conteo_estados,
     construir_hechos,
     construir_mensajes,
     detectar_coincidencias,
+    es_mes_estable,
     esquema_narrativa,
     evolucion_de,
     generar_narrativa,
     hechos_para_modelo,
     motivo_de_vigilancia,
-    narrativa_plantilla,
 )
 
 
@@ -52,17 +65,46 @@ def id_area(df):
 
 @pytest.fixture(autouse=True)
 def sin_ia_real():
-    """Ninguna prueba debe llamar a un Ollama real, aunque este instalado."""
-    app.dependency_overrides[obtener_proveedor] = lambda: None
+    """Ninguna prueba debe llamar a un Ollama o Groq real, aunque este configurado.
+    Por defecto la API recibe un proveedor sin respuestas: si se le llamara, fallaria."""
+    app.dependency_overrides[proveedor_configurado] = lambda: ProveedorFalso()
     yield
     app.dependency_overrides.clear()
+
+
+class _Inmediato:
+    """Ejecutor que corre la tarea en el momento (en vez de en otro hilo)."""
+
+    def submit(self, fn, *args):
+        fn(*args)
+
+
+class _Diferido:
+    """Ejecutor que guarda las tareas para correrlas cuando la prueba quiera."""
+
+    def __init__(self):
+        self.pendientes = []
+
+    def submit(self, fn, *args):
+        self.pendientes.append((fn, args))
+
+    def correr(self):
+        while self.pendientes:
+            fn, args = self.pendientes.pop(0)
+            fn(*args)
+
+
+@pytest.fixture(autouse=True)
+def ejecutor_inmediato(monkeypatch):
+    monkeypatch.setattr(trabajos, "ejecutor", _Inmediato())
 
 
 class ProveedorFalso:
     nombre = "falso"
     modelo = "modelo-falso"
 
-    def __init__(self, *respuestas):
+    def __init__(self, *respuestas, local=True):
+        self.local = local
         self.respuestas = list(respuestas)
         self.llamadas = []
         self.esquemas = []
@@ -463,42 +505,68 @@ def test_el_prompt_no_lleva_datos_personales_ni_floats_crudos(caso):
     assert "ni calcules cifras" in prompt.lower()
 
 
-def test_la_plantilla_pasa_los_guardarrailes_en_todas_las_areas_y_meses(df):
-    """Propiedad: el respaldo determinista siempre es una narrativa valida."""
-    combinaciones = 0
-    for area_id in df["area_id"].unique():
-        area = df.loc[df["area_id"] == area_id, "area"].iloc[0]
-        for periodo in pd.to_datetime(df["periodo"].unique()):
-            hechos = construir_hechos(df, periodo, area_id)
-            if not hechos:
-                continue
-            cuerpo = narrativa_plantilla(hechos, periodo, area)
-            errores = validar_narrativa(cuerpo, hechos, cifras_de(*conteo_estados(hechos).values()))
-            assert errores == [], f"{area} {periodo:%Y-%m}: {errores}"
-            combinaciones += 1
-    assert combinaciones == 7 * 24
+@pytest.fixture(scope="module")
+def caso_estable(df, id_area):
+    """Ventas en octubre de 2024: todo en verde y nada por vigilar."""
+    periodo = pd.Timestamp("2024-10-01")
+    return periodo, id_area("Ventas"), construir_hechos(df, periodo, id_area("Ventas"))
+
+
+def test_en_un_mes_estable_el_modelo_recibe_todos_los_indicadores(caso_estable):
+    periodo, _, hechos = caso_estable
+    assert es_mes_estable(hechos)
+    assert hechos_para_modelo(hechos) == hechos
+    prompt = "\n".join(m["content"] for m in construir_mensajes(hechos, periodo, "Ventas"))
+    assert "mes estable" in prompt
+    assert all(h["valor_texto"] in prompt for h in hechos)
+
+
+def test_un_mes_con_alertas_no_es_estable(caso):
+    assert not es_mes_estable(caso[2])
+
+
+def test_el_mes_estable_tambien_lo_redacta_el_modelo(df, caso_estable):
+    periodo, area_id, hechos = caso_estable
+    prov = ProveedorFalso(respuesta_buena(hechos))
+    n = generar_narrativa(periodo, area_id, proveedor=prov, df=df)
+    assert len(prov.llamadas) == 1
+    assert n["mes_estable"] is True and n["intentos"] == 1
+    assert n["conteo_estados"]["rojo"] == 0 and n["hallazgos"]
+
+
+def test_con_proveedor_en_la_nube_no_se_envia_el_nombre_del_area(df, caso):
+    periodo, area_id, hechos = caso
+    nube = ProveedorFalso(respuesta_buena(hechos), local=False)
+    n = generar_narrativa(periodo, area_id, proveedor=nube, df=df)
+    prompt = "\n".join(m["content"] for m in nube.llamadas[0])
+    assert "Operaciones" not in prompt and "un área de la empresa" in prompt
+    assert n["area"] == "Operaciones"  # el reporte si dice el area; solo el modelo no la ve
+
+    local = ProveedorFalso(respuesta_buena(hechos))
+    generar_narrativa(periodo, area_id, proveedor=local, df=df)
+    assert "el área Operaciones" in "\n".join(m["content"] for m in local.llamadas[0])
 
 
 # ------------------------------------------------------------- orquestacion
-def test_sin_proveedor_usa_plantilla_y_exige_revision(df, caso):
+def test_sin_proveedor_no_hay_narrativa(df, caso):
+    """Ya no existe la plantilla: sin modelo no se genera nada."""
     periodo, area_id, _ = caso
-    n = generar_narrativa(periodo, area_id, proveedor=None, df=df)
-    assert n["origen"] == "plantilla" and n["proveedor"] is None
-    assert n["requiere_revision"] is True
-    for item in n["hallazgos"] + n["recomendaciones"]:
-        assert item["confianza"] in {"alta", "media", "baja"}
-        assert item["fuentes"] and item["hechos"]
+    with pytest.raises(ValueError, match="proveedor"):
+        generar_narrativa(periodo, area_id, proveedor=None, df=df)
 
 
 def test_respuesta_valida_del_modelo_se_acepta(df, caso):
     periodo, area_id, hechos = caso
     prov = ProveedorFalso(respuesta_buena(hechos))
     n = generar_narrativa(periodo, area_id, proveedor=prov, df=df)
-    assert n["origen"] == "llm" and n["modelo"] == "modelo-falso"
-    assert n["advertencias"] == []
+    assert n["proveedor"] == "falso" and n["modelo"] == "modelo-falso"
+    assert n["intentos"] == 1 and n["advertencias"] == []
+    assert n["requiere_revision"] is True
     assert len(prov.llamadas) == 1
     # la confianza de cada hallazgo la pone el codigo, no el modelo
-    assert all(h["confianza"] in {"alta", "media", "baja"} for h in n["hallazgos"])
+    for item in n["hallazgos"] + n["recomendaciones"]:
+        assert item["confianza"] in {"alta", "media", "baja"}
+        assert item["fuentes"] and item["hechos"]
 
 
 def test_reintenta_con_los_errores_y_acepta_la_correccion(df, caso):
@@ -506,7 +574,7 @@ def test_reintenta_con_los_errores_y_acepta_la_correccion(df, caso):
     mala = con_cambio(hechos, texto="La rotación subió 99.9 % este mes.")
     prov = ProveedorFalso(mala, respuesta_buena(hechos))
     n = generar_narrativa(periodo, area_id, proveedor=prov, df=df)
-    assert n["origen"] == "llm"
+    assert n["intentos"] == 2
     assert len(prov.llamadas) == 2
     assert len(n["advertencias"]) == 1 and "99.9" in n["advertencias"][0]
     # el segundo intento incluye la respuesta mala y los errores detectados
@@ -514,29 +582,153 @@ def test_reintenta_con_los_errores_y_acepta_la_correccion(df, caso):
     assert "problemas" in ultimo and "99.9" in ultimo
 
 
-def test_si_el_modelo_insiste_en_inventar_cifras_cae_a_la_plantilla(df, caso):
+@pytest.mark.skipif(INTENTOS < 3, reason="requiere al menos 3 intentos")
+def test_el_reintento_no_acumula_la_conversacion(df, caso):
+    """Cada reintento lleva el prompt original + SOLO la ultima respuesta mala.
+    Acumular todos los intentos rebasaba el contexto del modelo (4096 tokens)."""
+    periodo, area_id, hechos = caso
+    mala1 = con_cambio(hechos, texto="La rotación subió 99.9 % este mes.")
+    mala2 = con_cambio(hechos, texto="La rotación subió 88.8 % este mes.")
+    prov = ProveedorFalso(mala1, mala2, respuesta_buena(hechos))
+    generar_narrativa(periodo, area_id, proveedor=prov, df=df)
+    primera, tercera = prov.llamadas[0], prov.llamadas[2]
+    assert len(tercera) == len(primera) + 2
+    assert "88.8 %" in tercera[-2]["content"]  # solo la ultima respuesta mala...
+    assert not any("subió 99.9 %" in m["content"] for m in tercera)  # ...la primera ya no viaja
+    # pero el error del primer intento se le recuerda, en una linea, para que no lo repita
+    assert "En intentos anteriores" in tercera[-1]["content"] and "99.9" in tercera[-1]["content"]
+
+
+def test_el_error_de_largo_explica_como_corregirlo(caso, visibles):
+    hechos = caso[2]
+    r = buenos(hechos)
+    r["hallazgos"][0]["texto"] += " Uno. Dos. Tres. Cuatro."
+    errores = validar_narrativa(r, visibles, set())
+    assert any("demasiado largo" in e and "hallazgos separados" in e for e in errores)
+
+
+def test_no_pide_mas_hallazgos_que_hechos_citables(df, id_area):
+    """Regresion (evaluacion real, Legal ago-2026): con 2 hechos se pedian
+    "de 3 a 5" hallazgos y el tercero nunca podia pasar los guardarrailes.
+    Hoy Legal ago-2026 tiene un solo hecho evaluable (la capacitacion quedo
+    con muestra insuficiente): se pide exactamente 1."""
+    periodo, legal = pd.Timestamp("2026-08-01"), id_area("Legal")
+    hechos = construir_hechos(df, periodo, legal)
+    visibles = hechos_para_modelo(hechos)
+    assert len(visibles) == 1
+    prompt = construir_mensajes(hechos, periodo, "Legal")[-1]["content"]
+    assert "hallazgos\" (exactamente 1;" in prompt and "de 3 a 5" not in prompt
+    for n, esperado in [(1, (1, 1)), (2, (2, 2)), (4, (3, 4)), (7, (3, 5))]:
+        esquema = esquema_narrativa([f"H{i:02d}" for i in range(1, n + 1)])["properties"]["hallazgos"]
+        assert (esquema["minItems"], esquema["maxItems"]) == esperado
+
+
+def _hecho_pct(id_, nombre, valor, var_mes, var_anio, n):
+    """Hecho minimo en % para probar los guardarrailes sin depender de los datos."""
+    return {
+        "id": id_, "nombre": nombre, "unidad": "%", "estado": "rojo", "en_vigilancia": False, "n": n,
+        "valor_texto": f"{valor:.1f} %", "var_mes_ant_texto": f"{var_mes:+.1f} pts",
+        "var_anio_ant_texto": f"{var_anio:+.1f} pts", "personas_texto": None,
+    }
+
+
+def test_regresion_salida_real_de_qwen3_en_legal_sin_valores():
+    """Salida real de Qwen3 (Legal ago-2026, antes de la regla de muestra
+    minima): escribe los cambios pero no los valores. El hallazgo 1 pasaba por
+    casualidad: su cambio anual (-25.0 pts) coincide con su valor (25.0 %).
+    Ambos deben rechazarse, y el error debe decirle al modelo el valor exacto."""
+    visibles = [
+        _hecho_pct("H01", "Cobertura de capacitación", 25.0, -75.0, -25.0, 4),
+        _hecho_pct("H02", "Tasa de finalización de cursos", 0.0, -100.0, -50.0, 1),
+    ]
+    hechos = visibles
+    salida = {
+        "resumen": "En agosto hay 2 indicadores en rojo y 0 en amarillo.",
+        "hallazgos": [
+            {"titulo": "Cobertura de capacitación", "hechos": ["H01"],
+             "texto": "La Cobertura de capacitación empeoró en -75.0 pts (empeoró) respecto al mes anterior y "
+                      "en -25.0 pts (empeoró) respecto al mismo mes del año anterior, ya cruzó el umbral crítico."},
+            {"titulo": "Tasa de finalización de cursos", "hechos": ["H02"],
+             "texto": "La Tasa de finalización de cursos empeoró en -100.0 pts (empeoró) respecto al mes anterior y "
+                      "en -50.0 pts (empeoró) respecto al mismo mes del año anterior, ya cruzó el umbral crítico."},
+        ],
+        "recomendaciones": [{"accion": "Reforzar la convocatoria.", "hechos": ["H01"]},
+                            {"accion": "Revisar los horarios de los cursos.", "hechos": ["H02"]}],
+    }
+    errores = validar_narrativa(salida, visibles, cifras_de(*conteo_estados(hechos).values()))
+    assert any("hallazgo 1" in e and "que es 25.0 %" in e for e in errores)
+    assert any("hallazgo 2" in e and "que es 0.0 %" in e for e in errores)
+
+    salida["hallazgos"][0]["texto"] = "La cobertura quedó en 25.0 % (-75.0 pts frente al mes anterior)."
+    salida["hallazgos"][1]["texto"] = "La tasa de finalización quedó en 0 % (-100.0 pts)."
+    assert validar_narrativa(salida, visibles, cifras_de(*conteo_estados(hechos).values())) == []
+
+
+def test_muestra_insuficiente_no_llega_al_modelo_como_alerta(df, id_area):
+    """Legal ago-2026: la capacitacion (4 empleados, 1 inscrito) se ve en el
+    dashboard, pero no es un hecho: el modelo solo la nombra, sin cifras."""
+    periodo, legal = pd.Timestamp("2026-08-01"), id_area("Legal")
+    hechos = construir_hechos(df, periodo, legal)
+    assert {h["indicador"] for h in hechos}.isdisjoint({"cobertura_capacitacion", "tasa_finalizacion"})
+    prov = ProveedorFalso(respuesta_buena(hechos))
+    n = generar_narrativa(periodo, legal, proveedor=prov, df=df)
+    assert n["indicadores_sin_evaluar"] == ["Cobertura de capacitación", "Tasa de finalización de cursos"]
+    prompt = prov.llamadas[0][-1]["content"]
+    assert "sin evaluar por muestra insuficiente" in prompt and "Tasa de finalización de cursos" in prompt
+    assert "0.0 %" not in prompt and "25.0 %" not in prompt
+
+
+def test_capacitacion_lleva_el_conteo_de_personas(df, id_area):
+    """En areas grandes, "18 de 80 inscritos no completaron" es mas claro que el % solo."""
+    periodo = pd.Timestamp("2026-04-01")
+    hechos = construir_hechos(df, periodo, id_area("Operaciones"))
+    fin = next(h for h in hechos if h["indicador"] == "tasa_finalizacion")
+    completaron = round(fin["valor"] * fin["n"] / 100)
+    assert fin["personas_texto"] == (
+        f"{completaron} de {fin['n']} inscritos completaron el curso ({fin['n'] - completaron} no)"
+    )
+    assert all(h["personas_texto"] is None for h in hechos if "capacitacion" not in h["indicador"]
+               and h["indicador"] != "tasa_finalizacion")
+    # el modelo puede citar esos conteos sin que cuenten como cifras inventadas
+    assert {completaron, fin["n"], fin["n"] - completaron} <= cifras_permitidas(fin)
+
+
+def test_con_muchos_hechos_pide_de_3_a_5_hallazgos(caso):
+    periodo, _, hechos = caso
+    assert len(hechos_para_modelo(hechos)) > 5
+    assert "hallazgos\" (de 3 a 5;" in construir_mensajes(hechos, periodo, "Operaciones")[-1]["content"]
+
+
+def test_el_mes_estable_pide_el_conteo_con_numeros(caso_estable):
+    periodo, _, hechos = caso_estable
+    prompt = construir_mensajes(hechos, periodo, "Ventas")[-1]["content"]
+    assert f"0 indicadores en rojo y 0 en amarillo de {len(hechos)}" in prompt
+
+
+def test_si_el_modelo_insiste_en_inventar_cifras_falla_sin_rellenar(df, caso):
     periodo, area_id, hechos = caso
     mala = con_cambio(hechos, texto="La rotación subió 99.9 % este mes.")
-    n = generar_narrativa(periodo, area_id, proveedor=ProveedorFalso(mala, mala), df=df)
-    assert n["origen"] == "plantilla"
-    assert "99.9" not in json.dumps(n["hallazgos"], ensure_ascii=False)
-    assert any("plantilla" in a for a in n["advertencias"])
+    with pytest.raises(NarrativaNoGenerada) as exc:
+        generar_narrativa(periodo, area_id, proveedor=ProveedorFalso(*[mala] * INTENTOS), df=df)
+    assert exc.value.reintentable is True
+    assert len(exc.value.detalle) == INTENTOS
+    assert "99.9" in exc.value.detalle[0]
 
 
-def test_si_el_modelo_no_devuelve_json_cae_a_la_plantilla(df, caso):
+def test_si_el_modelo_no_devuelve_json_falla(df, caso):
     periodo, area_id, _ = caso
-    n = generar_narrativa(periodo, area_id, proveedor=ProveedorFalso("no soy json", "tampoco"), df=df)
-    assert n["origen"] == "plantilla"
-    assert any("JSON" in a for a in n["advertencias"])
+    with pytest.raises(NarrativaNoGenerada) as exc:
+        generar_narrativa(periodo, area_id, proveedor=ProveedorFalso(*["no soy json"] * INTENTOS), df=df)
+    assert any("JSON" in d for d in exc.value.detalle)
 
 
-def test_si_el_modelo_no_esta_disponible_cae_a_la_plantilla(df, caso):
+def test_si_el_modelo_no_esta_disponible_falla_sin_reintentar(df, caso):
     periodo, area_id, _ = caso
     prov = ProveedorFalso(ProveedorNoDisponible("Ollama apagado"))
-    n = generar_narrativa(periodo, area_id, proveedor=prov, df=df)
-    assert n["origen"] == "plantilla"
+    with pytest.raises(NarrativaNoGenerada, match="Ollama apagado") as exc:
+        generar_narrativa(periodo, area_id, proveedor=prov, df=df)
+    assert exc.value.reintentable is False
     assert len(prov.llamadas) == 1  # no reintenta si el modelo ni siquiera responde
-    assert any("Ollama apagado" in a for a in n["advertencias"])
 
 
 def test_el_esquema_restringe_el_campo_hechos_a_los_ids_entregados(df, caso):
@@ -630,20 +822,6 @@ def test_guardrails_exige_cubrir_tambien_los_por_vigilar(df, id_area):
     assert any(vigilado["id"] in e and "vigilar" in e for e in errores)
 
 
-def test_plantilla_agrupa_alertas_y_vigilancia_juntas_si_sobran_de_5(df):
-    """Con mas de 5 temas (alertas + por vigilar), el sobrante se agrupa en un ultimo hallazgo."""
-    for area_id in df["area_id"].unique():
-        area = df.loc[df["area_id"] == area_id, "area"].iloc[0]
-        for periodo in pd.to_datetime(df["periodo"].unique()):
-            hechos = construir_hechos(df, periodo, area_id)
-            temas = hechos_para_modelo(hechos)
-            if len(temas) > 5:
-                cuerpo = narrativa_plantilla(hechos, periodo, area)
-                assert any(len(h["hechos"]) > 1 for h in cuerpo["hallazgos"][-1:])
-                return
-    pytest.skip("Ningun area/mes de estos datos tuvo mas de 5 temas a la vez")
-
-
 def test_schemas_exponen_los_campos_de_vigilancia():
     from app.schemas import ConteoEstados, HechoOut
     assert "en_vigilancia" in HechoOut.model_fields
@@ -652,18 +830,20 @@ def test_schemas_exponen_los_campos_de_vigilancia():
 
 
 def test_api_narrativa_expone_por_vigilar(client, id_area):
-    r = client.post("/narrativas", json={"periodo": "2026-02", "area_id": id_area("Operaciones"), "usar_ia": False})
-    assert r.status_code == 200
-    cuerpo = r.json()
+    hechos = construir_hechos(kpis_df(), pd.Timestamp("2026-02-01"), id_area("Operaciones"))
+    app.dependency_overrides[proveedor_configurado] = lambda: ProveedorFalso(respuesta_buena(hechos))
+    r = client.post("/narrativas", json={"periodo": "2026-02", "area_id": id_area("Operaciones")})
+    assert r.status_code == 202
+    cuerpo = r.json()["narrativa"]
     assert cuerpo["conteo_estados"]["por_vigilar"] > 0
     assert any(h["en_vigilancia"] for h in cuerpo["hechos"])
 
 
 def test_periodo_o_area_inexistentes(df):
     with pytest.raises(ValueError):
-        generar_narrativa("2030-01-01", 0, df=df)
+        generar_narrativa("2030-01-01", 0, proveedor=ProveedorFalso(), df=df)
     with pytest.raises(ValueError):
-        generar_narrativa(None, 99, df=df)
+        generar_narrativa(None, 99, proveedor=ProveedorFalso(), df=df)
 
 
 # ---------------------------------------------------------- cliente Ollama
@@ -704,7 +884,64 @@ def test_cliente_ollama_arma_la_peticion_y_lee_la_respuesta(servidor_ollama):
     assert recibido["cuerpo"]["model"] == "llama3.1:8b"
     assert recibido["cuerpo"]["stream"] is False
     assert recibido["cuerpo"]["format"] == ESQUEMA_NARRATIVA
-    assert recibido["cuerpo"]["messages"] == mensajes
+    assert recibido["cuerpo"]["think"] is False  # por defecto no pensamos (ver mas abajo)
+    # "/no_think" es una convencion de Qwen: a un Llama no se le agrega, porque
+    # no la entiende y podria tratarla como texto a responder (visto en una
+    # evaluacion real: mas fallos y mas lento con Llama al agregarsela)
+    assert recibido["cuerpo"]["messages"][-1]["content"] == "hola"
+    assert mensajes[-1]["content"] == "hola"  # la lista original del llamador no se modifica
+
+
+def test_cliente_ollama_desactiva_pensar_por_defecto_y_solo_toca_el_ultimo_mensaje(servidor_ollama):
+    """Qwen3 y otros modelos razonadores piensan antes de responder por defecto,
+    lo que puede sumar minutos sin ayudar en esta tarea. Debe desactivarse solo,
+    sin necesidad de configurar nada, y sin ensuciar los mensajes anteriores
+    (importante en el ciclo de reintento, que reenvia toda la conversacion)."""
+    url = f"http://127.0.0.1:{servidor_ollama.server_port}"
+    prov = OllamaProveedor(modelo="qwen3:8b", url=url, timeout=5)
+    mensajes = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "hechos"},
+        {"role": "assistant", "content": "respuesta mala"},
+        {"role": "user", "content": "corrige esto"},
+    ]
+    prov.generar(mensajes, ESQUEMA_NARRATIVA)
+    enviados = servidor_ollama.ultima["cuerpo"]["messages"]
+    assert servidor_ollama.ultima["cuerpo"]["think"] is False
+    assert [m["content"] for m in enviados[:-1]] == ["sys", "hechos", "respuesta mala"]
+    assert enviados[-1]["content"] == "corrige esto\n/no_think"
+
+
+def test_cliente_ollama_permite_activar_pensar_explicitamente(servidor_ollama):
+    url = f"http://127.0.0.1:{servidor_ollama.server_port}"
+    prov = OllamaProveedor(modelo="qwen3:8b", url=url, timeout=5, pensar=True)
+    prov.generar([{"role": "user", "content": "hola"}], ESQUEMA_NARRATIVA)
+    cuerpo = servidor_ollama.ultima["cuerpo"]
+    assert cuerpo["think"] is True
+    assert cuerpo["messages"][-1]["content"] == "hola"  # no se le agrega /no_think
+
+
+def test_ollama_think_configurable_desde_el_entorno(monkeypatch):
+    monkeypatch.delenv("OLLAMA_THINK", raising=False)
+    assert OllamaProveedor(modelo="x").pensar is False  # por defecto, no piensa
+    monkeypatch.setenv("OLLAMA_THINK", "true")
+    assert OllamaProveedor(modelo="x").pensar is True
+
+
+def test_no_think_solo_se_agrega_a_modelos_qwen(servidor_ollama):
+    """El texto '/no_think' es una convencion de Qwen. A otras familias
+    (Llama, Phi, Gemma...) no se les agrega: no la entienden y una evaluacion
+    real mostro mas fallos y mas lentitud en Llama al agregarsela igual."""
+    url = f"http://127.0.0.1:{servidor_ollama.server_port}"
+    for modelo, espera_no_think in [
+        ("qwen3:8b", True), ("qwen2.5:14b", True), ("QWEN3:14B", True),
+        ("llama3.1:8b", False), ("phi4:14b", False), ("gemma3:12b", False),
+    ]:
+        prov = OllamaProveedor(modelo=modelo, url=url, timeout=5)
+        prov.generar([{"role": "user", "content": "hola"}], ESQUEMA_NARRATIVA)
+        contenido = servidor_ollama.ultima["cuerpo"]["messages"][-1]["content"]
+        assert contenido.endswith("/no_think") == espera_no_think, modelo
+        assert servidor_ollama.ultima["cuerpo"]["think"] is False  # esto si se manda siempre
 
 
 def test_cliente_ollama_modelo_no_descargado_da_pista(servidor_ollama):
@@ -720,45 +957,218 @@ def test_cliente_ollama_apagado(monkeypatch):
         prov.generar([{"role": "user", "content": "hola"}], ESQUEMA_NARRATIVA)
 
 
+def test_ollama_trae_contexto_y_timeout_para_cpu(monkeypatch):
+    for var in ("OLLAMA_NUM_CTX", "OLLAMA_TIMEOUT"):
+        monkeypatch.delenv(var, raising=False)
+    prov = OllamaProveedor(modelo="x")
+    assert prov.num_ctx >= 8192   # 4096 se rebasaba en los reintentos
+    assert prov.timeout >= 900    # en CPU un reporte puede tardar minutos
+    assert prov.local is True
+
+
 def test_proveedor_configurable_desde_el_entorno(monkeypatch):
-    monkeypatch.setenv("LLM_PROVEEDOR", "ninguno")
-    assert obtener_proveedor() is None
     monkeypatch.setenv("LLM_PROVEEDOR", "ollama")
     monkeypatch.setenv("OLLAMA_MODEL", "phi3:mini")
     assert obtener_proveedor().modelo == "phi3:mini"
 
 
+def test_ya_no_existe_la_opcion_sin_ia(monkeypatch):
+    monkeypatch.setenv("LLM_PROVEEDOR", "ninguno")
+    with pytest.raises(ConfiguracionIA, match="ollama, groq"):
+        obtener_proveedor()
+
+
+# ------------------------------------------------------------ cliente Groq
+@pytest.fixture()
+def datos_sinteticos(monkeypatch):
+    monkeypatch.setenv("MODO_DATOS", "sinteticos")
+    monkeypatch.setenv("GROQ_API_KEY", "clave-de-prueba")
+
+
+def test_groq_se_niega_con_datos_reales(monkeypatch):
+    """El candado: con datos reales (o sin declarar) nada sale a la nube."""
+    monkeypatch.setenv("GROQ_API_KEY", "clave-de-prueba")
+    monkeypatch.delenv("MODO_DATOS", raising=False)  # por defecto: reales
+    with pytest.raises(ConfiguracionIA, match="sinteticos"):
+        GroqProveedor()
+    monkeypatch.setenv("MODO_DATOS", "reales")
+    monkeypatch.setenv("LLM_PROVEEDOR", "groq")
+    with pytest.raises(ConfiguracionIA, match="sinteticos"):
+        obtener_proveedor()
+
+
+def test_modo_datos_invalido_no_se_acepta(monkeypatch):
+    monkeypatch.setenv("MODO_DATOS", "prueba")
+    with pytest.raises(ConfiguracionIA, match="MODO_DATOS"):
+        GroqProveedor(api_key="x")
+
+
+def test_groq_sin_api_key(monkeypatch, datos_sinteticos):
+    monkeypatch.delenv("GROQ_API_KEY")
+    with pytest.raises(ConfiguracionIA, match="GROQ_API_KEY"):
+        GroqProveedor()
+
+
+class _GroqSimulado(BaseHTTPRequestHandler):
+    def do_POST(self):
+        cuerpo = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        self.server.peticiones.append({"cuerpo": cuerpo, "auth": self.headers.get("Authorization")})
+        codigo, respuesta, encabezados = self.server.respuestas.pop(0)
+        datos = json.dumps(respuesta).encode()
+        self.send_response(codigo)
+        for k, v in encabezados.items():
+            self.send_header(k, v)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(datos)))
+        self.end_headers()
+        self.wfile.write(datos)
+
+    def log_message(self, *args):
+        pass
+
+
+@pytest.fixture()
+def servidor_groq():
+    servidor = HTTPServer(("127.0.0.1", 0), _GroqSimulado)
+    servidor.peticiones, servidor.respuestas = [], []
+    hilo = threading.Thread(target=servidor.serve_forever, daemon=True)
+    hilo.start()
+    yield servidor
+    servidor.shutdown()
+
+
+def _ok_groq(contenido='{"ok": true}'):
+    return (200, {"choices": [{"message": {"role": "assistant", "content": contenido}}]}, {})
+
+
+def test_cliente_groq_arma_la_peticion_y_lee_la_respuesta(servidor_groq, datos_sinteticos):
+    servidor_groq.respuestas.append(_ok_groq())
+    url = f"http://127.0.0.1:{servidor_groq.server_port}/v1/chat/completions"
+    prov = GroqProveedor(modelo="openai/gpt-oss-120b", url=url, timeout=5)
+    assert prov.local is False
+    assert prov.generar([{"role": "user", "content": "hola"}], ESQUEMA_NARRATIVA) == '{"ok": true}'
+
+    peticion = servidor_groq.peticiones[0]
+    assert peticion["auth"] == "Bearer clave-de-prueba"
+    formato = peticion["cuerpo"]["response_format"]
+    assert formato["type"] == "json_schema" and formato["json_schema"]["strict"] is True
+    assert formato["json_schema"]["schema"]["additionalProperties"] is False
+    assert peticion["cuerpo"]["reasoning_effort"] == "low"  # razonar poco: ahorra tokens del limite gratuito
+
+
+def test_esquema_estricto_cierra_todos_los_objetos():
+    e = esquema_estricto(esquema_narrativa(["H01"]))
+    hallazgo = e["properties"]["hallazgos"]["items"]
+    assert e["additionalProperties"] is False and hallazgo["additionalProperties"] is False
+    assert set(hallazgo["required"]) == set(hallazgo["properties"])
+    assert "additionalProperties" not in ESQUEMA_NARRATIVA  # el original no se toca
+
+
+def test_cliente_groq_espera_y_reintenta_si_llega_al_limite_por_minuto(servidor_groq, datos_sinteticos):
+    servidor_groq.respuestas += [(429, {"error": "rate limit"}, {"retry-after": "7"}), _ok_groq()]
+    esperas = []
+    url = f"http://127.0.0.1:{servidor_groq.server_port}/v1/chat/completions"
+    prov = GroqProveedor(url=url, timeout=5, dormir=esperas.append)
+    assert prov.generar([{"role": "user", "content": "hola"}], ESQUEMA_NARRATIVA) == '{"ok": true}'
+    assert esperas == [7.0]
+    assert len(servidor_groq.peticiones) == 2
+
+
+def test_cliente_groq_clave_invalida_da_pista(servidor_groq, datos_sinteticos):
+    servidor_groq.respuestas.append((401, {"error": "invalid api key"}, {}))
+    url = f"http://127.0.0.1:{servidor_groq.server_port}/v1/chat/completions"
+    with pytest.raises(ProveedorNoDisponible, match="GROQ_API_KEY"):
+        GroqProveedor(url=url, timeout=5).generar([{"role": "user", "content": "hola"}], ESQUEMA_NARRATIVA)
+
+
 # ------------------------------------------------------------------- API
 @pytest.fixture()
 def client():
-    return TestClient(app)
+    """Cliente de la API. Borra al terminar las narrativas que la prueba creo."""
+    trabajos.asegurar_tabla()
+    with engine.connect() as conn:
+        ultimo = conn.execute(text("SELECT COALESCE(MAX(id), 0) FROM narrativas")).scalar()
+    yield TestClient(app)
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM narrativas WHERE id > :u"), {"u": ultimo})
 
 
-def test_api_narrativa_sin_ia(client):
-    r = client.post("/narrativas", json={"usar_ia": False})
-    assert r.status_code == 200
-    cuerpo = r.json()
-    assert cuerpo["origen"] == "plantilla"
-    assert cuerpo["periodo"] == "2026-08" and cuerpo["area"] == "Corporativo"
-    assert cuerpo["requiere_revision"] is True
-    assert cuerpo["hechos"] and cuerpo["hallazgos"]
+def test_api_narrativa_se_genera_en_segundo_plano(client, monkeypatch, id_area):
+    """POST responde de inmediato (202, en_proceso); el resultado se consulta por id."""
+    diferido = _Diferido()
+    monkeypatch.setattr(trabajos, "ejecutor", diferido)
+    hechos = construir_hechos(kpis_df(), pd.Timestamp("2026-02-01"), id_area("Operaciones"))
+    app.dependency_overrides[proveedor_configurado] = lambda: ProveedorFalso(respuesta_buena(hechos))
 
-
-def test_api_narrativa_con_modelo_simulado(client, id_area):
-    df = kpis_df()
-    hechos = construir_hechos(df, pd.Timestamp("2026-02-01"), id_area("Operaciones"))
-    app.dependency_overrides[obtener_proveedor] = lambda: ProveedorFalso(respuesta_buena(hechos))
     r = client.post("/narrativas", json={"periodo": "2026-02", "area_id": id_area("Operaciones")})
-    assert r.status_code == 200
-    assert r.json()["origen"] == "llm"
-    assert r.json()["modelo"] == "modelo-falso"
+    assert r.status_code == 202
+    trabajo = r.json()
+    assert trabajo["estado"] == "en_proceso" and trabajo["narrativa"] is None
+    assert client.get(f"/narrativas/{trabajo['id']}").json()["estado"] == "en_proceso"
+
+    diferido.correr()  # el hilo de trabajo termina
+    listo = client.get(f"/narrativas/{trabajo['id']}").json()
+    assert listo["estado"] == "lista" and listo["terminada_en"]
+    assert listo["proveedor"] == "falso" and listo["modelo"] == "modelo-falso"  # bitacora (RF-11)
+    n = listo["narrativa"]
+    assert n["periodo"] == "2026-02" and n["area"] == "Operaciones"
+    assert n["requiere_revision"] is True and n["hallazgos"]
 
 
-def test_api_narrativa_usar_ia_false_ignora_el_modelo(client):
-    llamado = ProveedorFalso()  # si se le llamara, fallaria (sin respuestas)
-    app.dependency_overrides[obtener_proveedor] = lambda: llamado
-    assert client.post("/narrativas", json={"usar_ia": False}).json()["origen"] == "plantilla"
-    assert llamado.llamadas == []
+def test_api_narrativa_por_defecto_es_corporativo_del_ultimo_mes(client):
+    hechos = construir_hechos(kpis_df(), kpis_df()["periodo"].max(), 0)
+    app.dependency_overrides[proveedor_configurado] = lambda: ProveedorFalso(respuesta_buena(hechos))
+    trabajo = client.post("/narrativas", json={}).json()
+    assert trabajo["estado"] == "lista"
+    assert trabajo["narrativa"]["periodo"] == "2026-08" and trabajo["narrativa"]["area"] == "Corporativo"
+
+
+def test_api_si_el_modelo_no_lo_logra_queda_en_error_con_el_motivo(client):
+    """Sin plantilla: el reporte no se rellena; queda en error y se pide de nuevo desde cero."""
+    prov = ProveedorFalso(*["no soy json"] * (INTENTOS * trabajos.RONDAS))
+    app.dependency_overrides[proveedor_configurado] = lambda: prov
+    trabajo = client.post("/narrativas", json={}).json()
+    assert trabajo["estado"] == "error" and trabajo["narrativa"] is None
+    assert "no logró una narrativa válida" in trabajo["error"]
+    assert trabajo["rondas"] == trabajos.RONDAS
+    assert len(prov.llamadas) == INTENTOS * trabajos.RONDAS
+    assert any("JSON" in d for d in trabajo["detalle_error"])
+
+
+def test_api_si_el_modelo_no_esta_disponible_no_insiste(client):
+    prov = ProveedorFalso(ProveedorNoDisponible("Ollama apagado"))
+    app.dependency_overrides[proveedor_configurado] = lambda: prov
+    trabajo = client.post("/narrativas", json={}).json()
+    assert trabajo["estado"] == "error" and "Ollama apagado" in trabajo["error"]
+    assert trabajo["rondas"] == 1 and len(prov.llamadas) == 1
+
+
+def test_api_configuracion_insegura_responde_503(client, monkeypatch):
+    app.dependency_overrides.pop(proveedor_configurado)
+    monkeypatch.setenv("LLM_PROVEEDOR", "groq")
+    monkeypatch.setenv("MODO_DATOS", "reales")
+    r = client.post("/narrativas", json={})
+    assert r.status_code == 503 and "sinteticos" in r.json()["detail"]
+
+
+def test_api_historial_y_narrativa_inexistente(client, id_area):
+    hechos = construir_hechos(kpis_df(), pd.Timestamp("2026-04-01"), id_area("Operaciones"))
+    app.dependency_overrides[proveedor_configurado] = lambda: ProveedorFalso(respuesta_buena(hechos))
+    creado = client.post("/narrativas", json={"periodo": "2026-04", "area_id": id_area("Operaciones")}).json()
+    historial = client.get("/narrativas", params={"area_id": id_area("Operaciones"), "periodo": "2026-04"}).json()
+    assert historial[0]["id"] == creado["id"]
+    assert historial[0]["narrativa"] is None  # el historial no trae el cuerpo
+    assert client.get("/narrativas/999999999").status_code == 404
+
+
+def test_al_reiniciar_las_narrativas_en_proceso_quedan_en_error(client):
+    with engine.begin() as conn:
+        id_ = conn.execute(
+            text("INSERT INTO narrativas (area_id, periodo) VALUES (0, '2026-08-01') RETURNING id")
+        ).scalar_one()
+    assert trabajos.marcar_interrumpidas() >= 1
+    trabajo = client.get(f"/narrativas/{id_}").json()
+    assert trabajo["estado"] == "error" and "reinició" in trabajo["error"]
 
 
 @pytest.mark.parametrize(

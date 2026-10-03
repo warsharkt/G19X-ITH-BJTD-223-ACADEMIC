@@ -2,17 +2,19 @@
 
 Corre generar_narrativa() con IA real en una muestra de casos y mide, para
 cada uno: si el modelo acerto a la primera, cuantos intentos necesito, si
-termino en la plantilla, cuanto tardo, y una senal (heuristica, no un
-guardarrail) de posibles generalizaciones de direccion incorrectas al
+no logro una narrativa valida (FALLO), cuanto tardo, y una senal (heuristica,
+no un guardarrail) de posibles generalizaciones de direccion incorrectas al
 agrupar hechos con "mejoro"/"empeoro" distintos (el error real que
 encontramos en Operaciones-febrero).
 
-Cada llamada al modelo tarda 30-90 segundos en CPU: la muestra por defecto
-(10 casos) puede tardar 10-20 minutos. Se guarda un CSV para el informe de
-QA aunque el script se interrumpa a la mitad (se escribe fila por fila).
+Usa el proveedor del .env (LLM_PROVEEDOR). Con Ollama en CPU cada caso tarda
+2-5 minutos: la muestra por defecto (12 casos) puede tardar 30-60 minutos.
+Con Groq (solo datos sinteticos) tarda segundos por caso. Se guarda un CSV
+para el informe de QA aunque el script se interrumpa a la mitad (se escribe
+fila por fila).
 
-Uso (desde la carpeta backend, con el entorno virtual activo y Ollama abierto):
-    python -m scripts.evaluar_narrativa                       # muestra curada de 10 casos
+Uso (desde la carpeta backend, con el entorno virtual activo):
+    python -m scripts.evaluar_narrativa                       # muestra curada de 12 casos
     python -m scripts.evaluar_narrativa --aleatorio 15         # 15 casos al azar (semilla fija)
     python -m scripts.evaluar_narrativa --casos "Operaciones:2026-04,Ventas:2026-06"
     python -m scripts.evaluar_narrativa --salida reportes/mi_evaluacion.csv
@@ -28,19 +30,33 @@ from pathlib import Path
 import pandas as pd
 
 from app.kpis import calcular_kpis
-from app.llm import obtener_proveedor
-from app.narrativa import generar_narrativa
+from app.llm import ConfiguracionIA, obtener_proveedor
+from app.narrativa import (
+    NarrativaNoGenerada,
+    construir_hechos,
+    conteo_estados,
+    es_mes_estable,
+    generar_narrativa,
+)
 
 RAIZ_REPORTES = Path(__file__).resolve().parents[1] / "reportes"
 
 # Cubre los escenarios que ya vimos a mano: crisis (rojo+amarillo), solo
-# amarillo, solo "por vigilar" (sin ninguna alerta), y un area pequena con
-# indicadores suprimidos.
+# amarillo, solo "por vigilar" (sin ninguna alerta), un area pequena con
+# indicadores suprimidos y dos meses estables (todo en verde). Los 10
+# primeros son los de las evaluaciones anteriores, para poder comparar.
 MUESTRA_CURADA = [
     ("Corporativo", "2026-08"), ("Corporativo", "2026-03"),
     ("Operaciones", "2026-04"), ("Operaciones", "2026-02"), ("Operaciones", "2026-07"),
     ("Ventas", "2026-06"), ("TI", "2026-05"), ("Finanzas", "2026-01"),
     ("Marketing", "2026-06"), ("Legal", "2026-08"),
+    ("Ventas", "2024-10"), ("Finanzas", "2025-04"),
+]
+
+COLUMNAS = [
+    "proveedor", "modelo", "area", "periodo", "rojo", "amarillo", "por_vigilar", "mes_estable",
+    "resultado", "acerto_a_la_primera", "intentos", "motivo_fallo", "detalle",
+    "posibles_inconsistencias", "segundos",
 ]
 
 _MEJORO = re.compile(r"mejor[oó]|mejorad[oa]s?|mejorando", re.IGNORECASE)
@@ -89,27 +105,30 @@ def posibles_inconsistencias(narrativa: dict) -> list[str]:
 
 
 def evaluar_uno(area_id: int, area: str, periodo: str, proveedor, df) -> dict:
-    inicio = time.perf_counter()
-    n = generar_narrativa(pd.Timestamp(periodo + "-01"), area_id, proveedor=proveedor, df=df)
-    segundos = round(time.perf_counter() - inicio, 1)
-
-    intentos_fallidos = sum(1 for a in n["advertencias"] if a.startswith("Intento"))
-    cayo_a_plantilla = n["origen"] == "plantilla"
-    inconsistencias = posibles_inconsistencias(n) if not cayo_a_plantilla else []
-    return {
-        "area": area,
-        "periodo": periodo,
-        "rojo": n["conteo_estados"]["rojo"],
-        "amarillo": n["conteo_estados"]["amarillo"],
-        "por_vigilar": n["conteo_estados"]["por_vigilar"],
-        "origen": n["origen"],
-        "acerto_a_la_primera": (not cayo_a_plantilla) and intentos_fallidos == 0,
-        "intentos_fallidos_antes_de_aceptar": 0 if cayo_a_plantilla else intentos_fallidos,
-        "cayo_a_plantilla": cayo_a_plantilla,
-        "motivo_plantilla": " | ".join(n["advertencias"]) if cayo_a_plantilla else "",
-        "posibles_inconsistencias": " | ".join(inconsistencias),
-        "segundos": segundos,
+    mes = pd.Timestamp(periodo + "-01")
+    hechos = construir_hechos(df, mes, area_id)
+    c = conteo_estados(hechos)
+    fila = {
+        "proveedor": proveedor.nombre, "modelo": proveedor.modelo, "area": area, "periodo": periodo,
+        "rojo": c["rojo"], "amarillo": c["amarillo"], "por_vigilar": c["por_vigilar"],
+        "mes_estable": es_mes_estable(hechos),
     }
+    inicio = time.perf_counter()
+    try:
+        n = generar_narrativa(mes, area_id, proveedor=proveedor, df=df)
+    except NarrativaNoGenerada as exc:
+        fila.update(
+            resultado="fallo", acerto_a_la_primera=False, intentos=len(exc.detalle) or 1,
+            motivo_fallo=exc.motivo, detalle=" | ".join(exc.detalle), posibles_inconsistencias="",
+        )
+    else:
+        fila.update(
+            resultado="ok", acerto_a_la_primera=n["intentos"] == 1, intentos=n["intentos"],
+            motivo_fallo="", detalle=" | ".join(n["advertencias"]),
+            posibles_inconsistencias=" | ".join(posibles_inconsistencias(n)),
+        )
+    fila["segundos"] = round(time.perf_counter() - inicio, 1)
+    return fila
 
 
 def imprimir_resumen(filas: list[dict]):
@@ -117,44 +136,48 @@ def imprimir_resumen(filas: list[dict]):
     if not total:
         print("No se evaluo ningun caso.")
         return
-    primera = sum(f["acerto_a_la_primera"] for f in filas)
-    plantilla = sum(f["cayo_a_plantilla"] for f in filas)
-    con_retry = total - primera - plantilla
+    primera = sum(f["acerto_a_la_primera"] is True for f in filas)
+    fallos = sum(f["resultado"] != "ok" for f in filas)
+    con_retry = total - primera - fallos
     inconsist = sum(1 for f in filas if f["posibles_inconsistencias"])
-    tiempo_prom = sum(f["segundos"] for f in filas) / total
+    tiempos = [f["segundos"] for f in filas if f["segundos"] != ""]
+    tiempo_prom = sum(tiempos) / len(tiempos) if tiempos else 0
 
-    print(f"\n{'='*70}\nRESUMEN ({total} casos)\n{'='*70}")
+    print(f"\n{'='*70}\nRESUMEN ({total} casos) - {filas[0]['proveedor']} / {filas[0]['modelo']}\n{'='*70}")
     print(f"  Acerto a la primera:        {primera:>3} ({100*primera/total:.0f}%)")
     print(f"  Acerto tras corregir:       {con_retry:>3} ({100*con_retry/total:.0f}%)")
-    print(f"  Cayo a la plantilla:        {plantilla:>3} ({100*plantilla/total:.0f}%)")
+    print(f"  FALLO (sin narrativa):      {fallos:>3} ({100*fallos/total:.0f}%)")
     print(f"  Con posible inconsistencia: {inconsist:>3} ({100*inconsist/total:.0f}%)  <- heuristica, revisar a mano")
     print(f"  Tiempo promedio por caso:   {tiempo_prom:.1f} s")
 
-    print(f"\n{'area':<14}{'periodo':<10}{'rojo':>5}{'ambar':>6}{'vigilar':>8}   {'resultado':<22}{'seg':>6}")
+    print(f"\n{'area':<14}{'periodo':<10}{'rojo':>5}{'ambar':>6}{'vigilar':>8}   {'resultado':<26}{'seg':>7}")
     for f in filas:
-        if f["cayo_a_plantilla"]:
-            resultado = "plantilla (fallo)"
-        elif f["intentos_fallidos_antes_de_aceptar"]:
-            resultado = f"IA (corrigio {f['intentos_fallidos_antes_de_aceptar']}x)"
+        if f["resultado"] != "ok":
+            resultado = "FALLO"
+        elif f["intentos"] > 1:
+            resultado = f"IA (corrigio {f['intentos'] - 1}x)"
         else:
             resultado = "IA (a la primera)"
+        if f["mes_estable"] is True:
+            resultado += " estable"
         marca = " !" if f["posibles_inconsistencias"] else ""
         print(
             f"{f['area']:<14}{f['periodo']:<10}{f['rojo']:>5}{f['amarillo']:>6}{f['por_vigilar']:>8}   "
-            f"{resultado:<22}{f['segundos']:>6.1f}{marca}"
+            f"{resultado:<26}{f['segundos']:>7}{marca}"
         )
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--casos", help='ej. "Operaciones:2026-04,Ventas:2026-06" (por defecto, una muestra curada de 10)')
+    ap.add_argument("--casos", help='ej. "Operaciones:2026-04,Ventas:2026-06" (por defecto, una muestra curada de 12)')
     ap.add_argument("--aleatorio", type=int, metavar="N", help="N casos al azar (semilla fija) en vez de la muestra curada")
     ap.add_argument("--salida", help="ruta del CSV (por defecto: reportes/evaluacion_AAAAMMDD_HHMM.csv)")
     args = ap.parse_args()
 
-    proveedor = obtener_proveedor()
-    if proveedor is None:
-        raise SystemExit("LLM_PROVEEDOR esta desactivado en tu .env; esta evaluacion necesita un modelo real.")
+    try:
+        proveedor = obtener_proveedor()
+    except ConfiguracionIA as exc:
+        raise SystemExit(f"Configuracion de IA no valida: {exc}")
 
     df = calcular_kpis()
     casos = elegir_casos(df, args)
@@ -162,18 +185,13 @@ def main():
 
     RAIZ_REPORTES.mkdir(exist_ok=True)
     salida = Path(args.salida) if args.salida else RAIZ_REPORTES / f"evaluacion_{datetime.now():%Y%m%d_%H%M}.csv"
-    columnas = [
-        "area", "periodo", "rojo", "amarillo", "por_vigilar", "origen", "acerto_a_la_primera",
-        "intentos_fallidos_antes_de_aceptar", "cayo_a_plantilla", "motivo_plantilla",
-        "posibles_inconsistencias", "segundos",
-    ]
 
-    print(f"Modelo: {proveedor.modelo}  |  Casos: {len(casos)}  |  Guardando en: {salida}")
-    print("Cada caso puede tardar 30-90 segundos en CPU. Progreso:\n")
+    print(f"{proveedor.nombre} / {proveedor.modelo}  |  Casos: {len(casos)}  |  Guardando en: {salida}")
+    print("Con Ollama en CPU cada caso puede tardar varios minutos. Progreso:\n")
 
     filas = []
     with open(salida, "w", newline="", encoding="utf-8") as f:
-        escritor = csv.DictWriter(f, fieldnames=columnas)
+        escritor = csv.DictWriter(f, fieldnames=COLUMNAS)
         escritor.writeheader()
         for i, (area, periodo) in enumerate(casos, 1):
             print(f"[{i}/{len(casos)}] {area} {periodo}...", end=" ", flush=True)
@@ -181,10 +199,14 @@ def main():
                 fila = evaluar_uno(int(areas[area]), area, periodo, proveedor, df)
             except Exception as exc:
                 print(f"ERROR: {exc}")
-                fila = {c: "" for c in columnas}
-                fila.update(area=area, periodo=periodo, motivo_plantilla=f"error: {exc}")
+                fila = {c: "" for c in COLUMNAS}
+                fila.update(
+                    proveedor=proveedor.nombre, modelo=proveedor.modelo, area=area, periodo=periodo,
+                    rojo=0, amarillo=0, por_vigilar=0, resultado="error",
+                    acerto_a_la_primera=False, motivo_fallo=f"error: {exc}",
+                )
             else:
-                estado = "plantilla" if fila["cayo_a_plantilla"] else f"IA ({fila['intentos_fallidos_antes_de_aceptar']} correccion(es))"
+                estado = "FALLO" if fila["resultado"] != "ok" else f"IA ({fila['intentos']} intento(s))"
                 print(f"{estado} en {fila['segundos']}s")
             filas.append(fila)
             escritor.writerow(fila)

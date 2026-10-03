@@ -1,9 +1,12 @@
-"""API del Motor Inteligente de Reportes de RRHH (paso 4).
+"""API del Motor Inteligente de Reportes de RRHH (pasos 4 y 5).
 
-Solo lectura por ahora. La autenticacion y el control de acceso por rol
-(RBAC) llegan en el paso 6: hasta entonces la API solo debe usarse en local.
+KPIs de solo lectura y narrativas generadas por IA en segundo plano (se
+guardan en la tabla `narrativas`). La autenticacion y el control de acceso
+por rol (RBAC) llegan en el paso 6: hasta entonces la API solo debe usarse
+en local.
 """
 import time
+from contextlib import asynccontextmanager
 
 import pandas as pd
 from fastapi import Depends, FastAPI, HTTPException, Query
@@ -11,26 +14,37 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from app import narrativa, schemas
+from app import narrativa, schemas, trabajos
 from app.database import engine
 from app.kpis import CORPORATIVO, calcular_kpis
-from app.llm import obtener_proveedor
+from app.llm import ConfiguracionIA, obtener_proveedor
+
+
+@asynccontextmanager
+async def ciclo_de_vida(_app):
+    try:
+        trabajos.marcar_interrumpidas()
+    except SQLAlchemyError:
+        pass  # sin BD la API arranca igual; /health lo reporta
+    yield
+
 
 app = FastAPI(
+    lifespan=ciclo_de_vida,
     title="Motor Inteligente de Reportes de RRHH",
     description=(
         "Indicadores de Recursos Humanos calculados por el motor analitico "
         "(sin IA): rotacion, clima, desempeno, capacitacion, reclutamiento y "
         "productividad, con tendencias y semaforo."
     ),
-    version="0.5.0",
+    version="0.6.0",
 )
 
 # El frontend de React (paso 7) se sirve en local desde estos origenes.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:3000"],
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -156,26 +170,64 @@ def serie(
     return a_registros(f)
 
 
-@app.post("/narrativas", response_model=schemas.Narrativa, tags=["Narrativa"])
+def proveedor_configurado():
+    """Proveedor del .env; 503 con el motivo si la configuracion no es valida o segura."""
+    try:
+        return obtener_proveedor()
+    except ConfiguracionIA as exc:
+        raise HTTPException(status_code=503, detail=f"IA no disponible: {exc}")
+
+
+@app.post(
+    "/narrativas", status_code=202, response_model=schemas.TrabajoNarrativa, tags=["Narrativa"]
+)
 def crear_narrativa(
     solicitud: schemas.NarrativaSolicitud,
-    proveedor=Depends(obtener_proveedor),
+    proveedor=Depends(proveedor_configurado),
 ):
-    """Genera la narrativa ejecutiva (resumen, hallazgos y recomendaciones).
+    """Solicita la narrativa ejecutiva (resumen, hallazgos y recomendaciones).
 
-    La redacta el modelo de lenguaje SOLO a partir de los KPIs ya calculados y
-    su respuesta se valida (cifras, trazabilidad, sin causalidad). Si el modelo
-    no responde o no pasa la validacion, se usa una plantilla determinista y se
-    indica en `origen` y `advertencias`. Puede tardar si el modelo corre en CPU.
-    Siempre requiere revision humana antes de distribuirse.
+    Responde de inmediato con un id y estado `en_proceso`; el modelo la redacta
+    en segundo plano (en CPU tarda minutos). Consulta el resultado con
+    `GET /narrativas/{id}`. La redacta SIEMPRE el modelo de lenguaje, solo a
+    partir de los KPIs ya calculados, y su respuesta se valida (cifras,
+    trazabilidad, sin causalidad); si no lo logra, termina en `error` con el
+    motivo. Siempre requiere revision humana antes de distribuirse.
     """
-    periodo = pd.Timestamp(solicitud.periodo + "-01") if solicitud.periodo else None
+    df = kpis_df()
     try:
-        return narrativa.generar_narrativa(
-            periodo=periodo,
-            area_id=solicitud.area_id,
-            proveedor=proveedor if solicitud.usar_ia else None,
-            df=kpis_df(),
+        periodo, _ = narrativa.validar_solicitud(
+            df, _mes(solicitud.periodo) if solicitud.periodo else None, solicitud.area_id
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+    try:
+        id_ = trabajos.encolar(periodo, solicitud.area_id, proveedor, df)
+        return trabajos.obtener(id_)
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
+
+
+@app.get("/narrativas/{id_narrativa}", response_model=schemas.TrabajoNarrativa, tags=["Narrativa"])
+def ver_narrativa(id_narrativa: int):
+    """Estado de una solicitud y, cuando esta `lista`, la narrativa completa."""
+    try:
+        trabajo = trabajos.obtener(id_narrativa)
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
+    if trabajo is None:
+        raise HTTPException(status_code=404, detail=f"La narrativa {id_narrativa} no existe")
+    return trabajo
+
+
+@app.get("/narrativas", response_model=list[schemas.TrabajoNarrativa], tags=["Narrativa"])
+def historial_narrativas(
+    area_id: int | None = Query(None, description="0 = consolidado corporativo"),
+    periodo: str | None = Query(None, pattern=PATRON_MES, description="AAAA-MM"),
+    limite: int = Query(20, ge=1, le=100),
+):
+    """Historial de solicitudes, de la mas reciente a la mas antigua (sin el cuerpo)."""
+    try:
+        return trabajos.listar(area_id, _mes(periodo) if periodo else None, limite)
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")

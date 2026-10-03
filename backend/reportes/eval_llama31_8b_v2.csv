@@ -1,0 +1,11 @@
+modelo,pensar,area,periodo,rojo,amarillo,por_vigilar,origen,acerto_a_la_primera,intentos_fallidos_antes_de_aceptar,cayo_a_plantilla,motivo_plantilla,posibles_inconsistencias,segundos
+llama3.1:8b,False,Corporativo,2026-08,0,0,5,plantilla,False,0,True,El modelo de lenguaje no estuvo disponible: No se pudo conectar con Ollama en http://localhost:11434 (timed out). Verifica que Ollama este abierto. | Se usó la plantilla determinista como respaldo.,,302.2
+llama3.1:8b,False,Corporativo,2026-03,1,2,4,llm,False,1,False,,,466.0
+llama3.1:8b,False,Operaciones,2026-04,2,4,1,llm,False,1,False,,,453.8
+llama3.1:8b,False,Operaciones,2026-02,1,0,3,llm,False,1,False,,,365.5
+llama3.1:8b,False,Operaciones,2026-07,0,1,3,plantilla,False,0,True,"Intento 1: la respuesta del modelo no pasó la validación: resumen: demasiado largo (maximo 3 oraciones) | Ningun hallazgo cubre el hecho H07, que esta por vigilar (puedes agrupar varios hechos en un mismo hallazgo) | Intento 2: la respuesta del modelo no pasó la validación: Debe haber entre 3 y 5 hallazgos (hay 2) | hallazgo 2 (texto): no incluye el valor de Tasa de rotación mensual (H07); copia su campo 'valor' | Intento 3: la respuesta del modelo no pasó la validación: hallazgo 3 (texto): no incluye el valor de Cumplimiento de metas (H04); copia su campo 'valor' | hallazgo 3 (texto): no incluye el valor de Índice de productividad (H06); copia su campo 'valor' | hallazgo 3 (texto): no incluye el valor de Tasa de rotación mensual (H07); copia su campo 'valor' | Se usó la plantilla determinista como respaldo.",,436.3
+llama3.1:8b,False,Ventas,2026-06,0,3,3,llm,False,1,False,,,317.3
+llama3.1:8b,False,TI,2026-05,0,3,0,llm,False,2,False,,,431.3
+llama3.1:8b,False,Finanzas,2026-01,0,2,1,llm,False,1,False,,,281.0
+llama3.1:8b,False,Marketing,2026-06,0,0,3,llm,False,1,False,,,271.6
+llama3.1:8b,False,Legal,2026-08,2,0,0,llm,True,0,False,,,107.4

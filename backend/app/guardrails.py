@@ -33,7 +33,7 @@ Reglas anadidas tras la tercera prueba real (prompt v3):
      (los hallazgos de Ventas decian "empeoro 1.1 puntos" sin decir en cuanto quedo).
 
 Limite conocido: no puede comprobar que una frase sea semanticamente
-correcta. Por eso la revision humana (10.3.6) sigue siendo obligatoria.
+correcta. Por eso la revision humana (10.3.9) sigue siendo obligatoria.
 """
 import re
 
@@ -91,17 +91,35 @@ def cifras_de(*textos) -> set[float]:
 
 
 def cifras_permitidas(hecho: dict) -> set[float]:
-    """Cifras que el modelo puede citar de un hecho: valor, cambios y muestra.
+    """Cifras que el modelo puede citar de un hecho: valor, cambios, muestra y conteo de personas.
 
     Los umbrales NO se incluyen: el modelo no los recibe (ver regla 7).
     """
     return cifras_de(
-        hecho["valor_texto"], hecho["var_mes_ant_texto"], hecho["var_anio_ant_texto"], hecho["n"]
+        hecho["valor_texto"], hecho["var_mes_ant_texto"], hecho["var_anio_ant_texto"], hecho["n"],
+        hecho.get("personas_texto"),
     )
 
 
 def _usa_alguna(texto: str, cifras: set[float]) -> bool:
     return any(abs(abs(x) - c) <= TOLERANCIA for x in extraer_numeros(texto) for c in cifras)
+
+
+_PORCENTAJE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(?:%|por\s*ciento)", re.IGNORECASE)
+
+
+def incluye_valor(texto: str, hecho: dict) -> bool:
+    """El texto menciona el VALOR del hecho, no solo su cambio.
+
+    En indicadores en %, el valor se escribe con "%" y el cambio con "pts":
+    se exige el "%" para que un cambio igual al valor no cuente como valor
+    (visto en la evaluacion real: cobertura 25.0 % con cambio anual -25.0 pts).
+    """
+    objetivo = cifras_de(hecho["valor_texto"])
+    if hecho.get("unidad") != "%":
+        return _usa_alguna(texto, objetivo)
+    con_signo = [float(m.replace(",", ".")) for m in _PORCENTAJE.findall(_ID.sub(" ", texto))]
+    return any(abs(x - c) <= TOLERANCIA for x in con_signo for c in objetivo)
 
 
 def _numeros_no_permitidos(texto: str, permitidas: set[float]) -> list[float]:
@@ -135,7 +153,12 @@ def _revisar_texto(etiqueta: str, campo: str, texto: str, permitidas: set[float]
             break
     maximo = MAX_ORACIONES.get(campo)
     if maximo and len(_oraciones(texto)) > maximo:
-        errores.append(f"{etiqueta}: demasiado largo (maximo {maximo} oraciones)")
+        pista = ""
+        if campo == "texto":
+            # visto con Qwen3: al corregir un valor faltante agrupaba mas hechos
+            # en el mismo hallazgo y se pasaba de largo una y otra vez
+            pista = "; acórtalo y, si cita varios hechos, repártelos en hallazgos separados (puede haber hasta 5)"
+        errores.append(f"{etiqueta}: demasiado largo (maximo {maximo} oraciones){pista}")
     return errores
 
 
@@ -206,10 +229,13 @@ def validar_narrativa(salida, hechos: list[dict], cifras_extra_resumen: set[floa
                 errores += _revisar_texto(f"{etiqueta} ({campo})", campo, valor, permitidas)
                 if tipo == "hallazgo" and campo == "texto":
                     for x in ids:
-                        if not _usa_alguna(valor, cifras_de(por_id[x]["valor_texto"])):
+                        if not incluye_valor(valor, por_id[x]):
+                            # el valor exacto en el mensaje: con solo "copia su campo
+                            # 'valor'" Qwen3 repitio el mismo error 3 veces seguidas
+                            v = por_id[x]["valor_texto"]
                             errores.append(
-                                f"{etiqueta} (texto): no incluye el valor de {por_id[x]['nombre']} ({x}); "
-                                "copia su campo 'valor'"
+                                f"{etiqueta} (texto): no incluye el valor de {por_id[x]['nombre']} ({x}), "
+                                f"que es {v}; escríbelo tal cual, por ejemplo: '... quedó en {v}'"
                             )
 
     # Reglas 5 y 10: ningun hecho entregado (alerta o "por vigilar") puede quedar sin mencionar
