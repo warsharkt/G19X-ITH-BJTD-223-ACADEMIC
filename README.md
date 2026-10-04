@@ -5,6 +5,7 @@ Consolida los datos de Recursos Humanos (reclutamiento, desempeño, capacitació
 - **Motor analítico (sin IA):** calcula los KPIs con SQL y pandas, de forma reproducible y verificada con pruebas.
 - **Motor de narrativa (con IA):** el modelo redacta **solo** a partir de los KPIs ya calculados. Unos guardarrailes rechazan cifras inventadas, causas no demostradas y alertas omitidas. Todo reporte requiere revisión humana.
 - **Acceso por rol:** Dirección ve el consolidado, RRHH ve todo, cada gerente ve solo su área y TI ve la configuración.
+- **Tablero web (React):** indicadores del mes con semáforo, tendencia de 24 meses con umbrales, generación de reportes con IA e historial.
 
 Requisitos, decisiones y reglas de negocio: [`docs/PRD.md`](docs/PRD.md).
 
@@ -12,7 +13,7 @@ Requisitos, decisiones y reglas de negocio: [`docs/PRD.md`](docs/PRD.md).
 
 ## Tecnologías
 
-Python 3.14 · FastAPI · PostgreSQL 16 (Docker local o Supabase) · pandas · Ollama + Qwen3 8B (IA local) o Groq (IA en la nube, solo con datos sintéticos) · pytest
+Python 3.14 · FastAPI · PostgreSQL 16 (Docker local o Supabase) · pandas · Ollama + Qwen3 8B (IA local) o Groq (IA en la nube, solo con datos sintéticos) · React + Vite + Recharts · pytest y Vitest
 
 ## Instalación local
 
@@ -48,6 +49,28 @@ python -m uvicorn app.main:app --reload
 
 Abre http://localhost:8000/docs, pulsa **Authorize**, escribe tu usuario y contraseña, y prueba los endpoints.
 
+Al crear el usuario, **escribe la contraseña a mano**: en la entrada oculta de PowerShell, Ctrl+V no pega el texto sino un carácter invisible, y la contraseña guardada no será la que crees.
+
+## Tablero web (frontend)
+
+Necesitas [Node.js](https://nodejs.org) 20 o más reciente. Con la API encendida, en otra terminal:
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Abre http://localhost:5173 e inicia sesión con tu usuario. Si la API no está en `http://localhost:8000`, copia `frontend/.env.example` a `frontend/.env` y cambia `VITE_API_URL`.
+
+| Sección | Qué hace |
+|---|---|
+| **Tablero** | Indicadores del mes con semáforo (siempre con icono y texto), variación contra el mes y el año anterior, y la tendencia del indicador elegido con sus umbrales. Filtros por área, mes e indicador; quedan en la dirección de la página, así que se pueden compartir |
+| **Narrativas** | Solicita el reporte con IA de un área y mes, muestra el avance mientras se redacta y guarda el historial consultable por área y mes |
+| **Umbrales** | Valores de atención y crítico de cada indicador (solo lectura) |
+
+Cada rol ve solo lo suyo: Dirección no puede cambiar de área, y TI solo ve los umbrales. La API aplica los mismos permisos, así que no dependen de la interfaz. La sesión se guarda solo en la pestaña (`sessionStorage`) y se cierra sola cuando el token vence.
+
 ## Inteligencia artificial
 
 La narrativa siempre la redacta un modelo. Hay dos opciones, y se elige en el `.env`:
@@ -80,7 +103,7 @@ python -m scripts.crear_usuario --usuario luis --cambiar-contrasena   # también
 
 Sirve para que varias personas usen la misma base sin instalar Docker. Usa **solo datos sintéticos**.
 
-1. Crea una cuenta en https://supabase.com y un proyecto nuevo (plan Free). Elige la región **East US** y guarda la contraseña de la base que definas.
+1. Crea una cuenta en https://supabase.com y un proyecto nuevo (plan Free) en cualquier región. Guarda la contraseña de la base; usa **Generate password** o solo letras y números, porque `@ # / : %` rompen la cadena de conexión. Este backend no usa la Data API de Supabase: puedes desactivar **Enable Data API** y **Automatically expose new tables**, y activar **Enable automatic RLS**.
 2. En el proyecto, pulsa **Connect**, elige **Session pooler** y copia la cadena de conexión.
 3. En tu `.env`, agrega `DATABASE_URL=` con esa cadena, cambiando `[YOUR-PASSWORD]` por tu contraseña. El SSL se activa solo.
 4. Carga los datos y crea los usuarios, ahora en Supabase:
@@ -103,6 +126,13 @@ python -m pytest -q
 
 Usan el PostgreSQL local y **no** necesitan Ollama, Groq ni internet: el modelo se simula. Por seguridad, se niegan a correr si `DATABASE_URL` apunta a una base remota.
 
+```powershell
+cd frontend
+npm test
+```
+
+Las del frontend simulan la API: no necesitan el backend ni la base de datos.
+
 ## Estructura
 
 ```
@@ -119,6 +149,14 @@ backend/
   scripts/           seed, crear_usuario, generar_narrativa, evaluar_narrativa
   tests/             pruebas automáticas
   reportes/          resultados de las evaluaciones del modelo de IA
+frontend/
+  src/
+    api.js           cliente de la API (token de sesión y errores)
+    sesion.jsx       inicio y cierre de sesión, permisos por rol
+    formato.js       cifras, fechas, semáforo y variaciones
+    paginas/         Login, Tablero, Narrativas, DetalleNarrativa, Umbrales
+    componentes/     tarjetas de KPI, gráfica de tendencia, vista del reporte
+    pruebas/         pruebas automáticas (Vitest) con una API simulada
 db/                  esquema y tablas (SQL)
 docs/PRD.md          documento de requerimientos del producto
 ```
