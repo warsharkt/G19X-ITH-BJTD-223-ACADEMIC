@@ -1,4 +1,4 @@
-"""API del Motor Inteligente de Reportes de RRHH (pasos 4 a 6).
+"""API del Motor Inteligente de Reportes de RRHH (pasos 4 a 8).
 
 KPIs de solo lectura y narrativas generadas por IA en segundo plano (se
 guardan en la tabla `narrativas`). Todo, salvo /health y /auth/login,
@@ -49,7 +49,7 @@ app = FastAPI(
         "(sin IA): rotacion, clima, desempeno, capacitacion, reclutamiento y "
         "productividad, con tendencias y semaforo."
     ),
-    version="0.7.0",
+    version="0.8.0",
 )
 
 # El frontend de React (paso 7) se sirve en local desde estos origenes.
@@ -277,10 +277,38 @@ def ver_narrativa(id_narrativa: int, u: Usuario = Depends(con_acceso_a_datos)):
     return trabajo
 
 
+@app.post(
+    "/narrativas/{id_narrativa}/revision", response_model=schemas.TrabajoNarrativa, tags=["Narrativa"]
+)
+def revisar_narrativa(
+    id_narrativa: int, solicitud: schemas.RevisionSolicitud, u: Usuario = Depends(con_acceso_a_datos)
+):
+    """Aprueba o rechaza una narrativa terminada (RF-05) y registra quien lo hizo (RF-11).
+
+    Solo RRHH puede revisar, y nunca una narrativa que la misma persona
+    solicito: siempre la revisa alguien distinto. La decision es definitiva;
+    si se rechaza, se explica el motivo y se solicita una nueva.
+    """
+    if u.rol != "rrhh":
+        raise HTTPException(status_code=403, detail="Solo Recursos Humanos puede aprobar o rechazar reportes")
+    try:
+        trabajo = trabajos.revisar(id_narrativa, solicitud.decision, u.usuario, solicitud.comentario)
+    except trabajos.RevisionNoPermitida as exc:
+        raise HTTPException(status_code=409 if exc.conflicto else 403, detail=str(exc))
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
+    if trabajo is None:
+        raise HTTPException(status_code=404, detail=f"La narrativa {id_narrativa} no existe")
+    return trabajo
+
+
 @app.get("/narrativas", response_model=list[schemas.TrabajoNarrativa], tags=["Narrativa"])
 def historial_narrativas(
     area_id: int | None = Query(None, description="0 = consolidado corporativo"),
     periodo: str | None = Query(None, pattern=PATRON_MES, description="AAAA-MM"),
+    revision: str | None = Query(
+        None, pattern="^(pendiente|aprobada|rechazada)$", description="Solo narrativas listas con esa revision"
+    ),
     limite: int = Query(20, ge=1, le=100),
     u: Usuario = Depends(con_acceso_a_datos),
 ):
@@ -291,6 +319,6 @@ def historial_narrativas(
     else:
         area_ids = None if u.rol == "rrhh" else areas_visibles(u, [])
     try:
-        return trabajos.listar(area_ids, _mes(periodo) if periodo else None, limite)
+        return trabajos.listar(area_ids, _mes(periodo) if periodo else None, limite, revision)
     except SQLAlchemyError:
         raise HTTPException(status_code=503, detail="Base de datos no disponible")

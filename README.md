@@ -66,7 +66,7 @@ Abre http://localhost:5173 e inicia sesión con tu usuario. Si la API no está e
 | Sección | Qué hace |
 |---|---|
 | **Tablero** | Indicadores del mes con semáforo (siempre con icono y texto), variación contra el mes y el año anterior, y la tendencia del indicador elegido con sus umbrales. Filtros por área, mes e indicador; quedan en la dirección de la página, así que se pueden compartir |
-| **Narrativas** | Solicita el reporte con IA de un área y mes, muestra el avance mientras se redacta y guarda el historial consultable por área y mes |
+| **Narrativas** | Solicita el reporte con IA de un área y mes, muestra el avance mientras se redacta, permite aprobarlo o rechazarlo y guarda el historial consultable por área, mes y revisión |
 | **Umbrales** | Valores de atención y crítico de cada indicador (solo lectura) |
 
 Cada rol ve solo lo suyo: Dirección no puede cambiar de área, y TI solo ve los umbrales. La API aplica los mismos permisos, así que no dependen de la interfaz. La sesión se guarda solo en la pestaña (`sessionStorage`) y se cierra sola cuando el token vence.
@@ -82,6 +82,10 @@ La narrativa siempre la redacta un modelo. Hay dos opciones, y se elige en el `.
 
 Los reportes se generan en segundo plano: `POST /narrativas` devuelve un id y `GET /narrativas/{id}` muestra el resultado cuando está listo.
 
+### Revisión antes de distribuir
+
+Todo reporte nace **pendiente de revisión**. Una persona de RRHH lo **aprueba** o lo **rechaza** con motivo desde la pantalla del reporte (o con `POST /narrativas/{id}/revision`). Quien lo solicitó no puede aprobarlo: para probar este flujo necesitas **dos usuarios con rol `rrhh`**. La decisión es definitiva y queda registrada con usuario, fecha y comentario. Si se rechaza, se solicita uno nuevo.
+
 ## Usuarios y roles
 
 ```powershell
@@ -95,7 +99,7 @@ python -m scripts.crear_usuario --usuario luis --cambiar-contrasena   # también
 | Rol | Ve |
 |---|---|
 | `direccion` | Solo el consolidado corporativo |
-| `rrhh` | Todo |
+| `rrhh` | Todo; aprueba o rechaza los reportes que solicitó otra persona |
 | `gerente` | Solo su área |
 | `admin_ti` | Catálogos y configuración, sin datos de colaboradores |
 

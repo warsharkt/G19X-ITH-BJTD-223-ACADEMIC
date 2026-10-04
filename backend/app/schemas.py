@@ -1,7 +1,8 @@
 """Modelos de respuesta de la API (validacion y documentacion OpenAPI)."""
 from datetime import date, datetime
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class Token(BaseModel):
@@ -166,4 +167,25 @@ class TrabajoNarrativa(BaseModel):
     error: str | None = Field(None, description="Motivo si estado = error")
     detalle_error: list[str] | None = None
     solicitada_por: str | None = Field(None, description="Usuario que la solicito (bitacora RF-11)")
+    revision: str = Field(
+        "pendiente", description="pendiente, aprobada o rechazada (RF-05). Solo aplica si estado = lista"
+    )
+    revisada_por: str | None = Field(None, description="Usuario que la aprobo o rechazo (bitacora RF-11)")
+    revisada_en: datetime | None = None
+    comentario_revision: str | None = None
     narrativa: Narrativa | None = Field(None, description="Presente cuando estado = lista")
+
+
+class RevisionSolicitud(BaseModel):
+    """Decision de RRHH sobre una narrativa lista (RF-05)."""
+    decision: Literal["aprobada", "rechazada"]
+    comentario: str | None = Field(
+        None, max_length=1000, description="Obligatorio al rechazar: que hay que corregir"
+    )
+
+    @model_validator(mode="after")
+    def _rechazo_con_motivo(self):
+        self.comentario = (self.comentario or "").strip() or None
+        if self.decision == "rechazada" and (self.comentario is None or len(self.comentario) < 10):
+            raise ValueError("Al rechazar, explica el motivo en el comentario (mínimo 10 caracteres)")
+        return self

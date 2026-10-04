@@ -3,6 +3,7 @@ import { vi } from 'vitest'
 
 export const USUARIOS = {
   ana: { id: 1, usuario: 'ana', nombre: 'Ana López', rol: 'rrhh', area_id: null, areas_permitidas: [0, 1, 2] },
+  eva: { id: 4, usuario: 'eva', nombre: 'Eva Ruiz', rol: 'rrhh', area_id: null, areas_permitidas: [0, 1, 2] },
   dir: { id: 2, usuario: 'dir', nombre: 'Dirección General', rol: 'direccion', area_id: null, areas_permitidas: [0] },
   ti: { id: 3, usuario: 'ti', nombre: 'Soporte TI', rol: 'admin_ti', area_id: null, areas_permitidas: [0, 1, 2] },
 }
@@ -61,13 +62,31 @@ export const NARRATIVA = {
   hechos: [HECHO], advertencias: [],
 }
 
+// Revisiones hechas durante la prueba: id -> campos de revision
+let revisiones = {}
+
 function trabajo(id, estado, extra = {}) {
   return {
     id, area_id: 0, periodo: '2026-08', estado, solicitada_en: '2026-10-03T17:55:00Z',
     terminada_en: estado === 'en_proceso' ? null : '2026-10-03T18:00:00Z', proveedor: 'ollama',
     modelo: 'qwen3:8b', version_prompt: 'v5', rondas: 1, error: null, detalle_error: null,
-    solicitada_por: 'ana', narrativa: estado === 'lista' ? NARRATIVA : null, ...extra,
+    solicitada_por: 'ana', revision: 'pendiente', revisada_por: null, revisada_en: null,
+    comentario_revision: null, narrativa: estado === 'lista' ? NARRATIVA : null, ...extra, ...revisiones[id],
   }
+}
+
+// Mismas reglas que POST /narrativas/{id}/revision de la API real
+function revisar(usuario, id, { decision, comentario }) {
+  const actual = trabajo(id, 'lista')
+  if (usuario.rol !== 'rrhh') return respuesta(403, { detail: 'Solo Recursos Humanos puede aprobar o rechazar reportes' })
+  const motivo = (comentario ?? '').trim()
+  if (decision === 'rechazada' && motivo.length < 10)
+    return respuesta(422, { detail: [{ msg: 'Value error, Al rechazar, explica el motivo en el comentario (mínimo 10 caracteres)' }] })
+  if (actual.revision !== 'pendiente') return respuesta(409, { detail: `Esta narrativa ya fue ${actual.revision}` })
+  if (actual.solicitada_por === usuario.usuario)
+    return respuesta(403, { detail: 'No puedes revisar una narrativa que tú solicitaste: debe hacerlo otra persona de RRHH' })
+  revisiones[id] = { revision: decision, revisada_por: usuario.usuario, revisada_en: '2026-10-04T10:00:00Z', comentario_revision: motivo || null }
+  return respuesta(200, trabajo(id, 'lista'))
 }
 
 function respuesta(estado, cuerpo) {
@@ -78,6 +97,7 @@ function respuesta(estado, cuerpo) {
 // consulta la narrativa nueva antes de que pase de en_proceso a lista.
 export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = false } = {}) {
   const estado = { tokenValido: null, consultas: 0, solicitudes: [] }
+  revisiones = {}
   const tokens = Object.fromEntries(Object.keys(USUARIOS).map((u) => [`token-${u}`, USUARIOS[u]]))
 
   const fetchFalso = vi.fn(async (url, opciones = {}) => {
@@ -117,6 +137,9 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
       estado.solicitudes.push(JSON.parse(opciones.body))
       return respuesta(202, trabajo(7, 'en_proceso'))
     }
+    const enRevision = pathname.match(/^\/narrativas\/(\d+)\/revision$/)
+    if (enRevision && metodo === 'POST') return revisar(usuario, Number(enRevision[1]), JSON.parse(opciones.body))
+    if (pathname === '/narrativas/5') return respuesta(200, trabajo(5, 'lista'))
     if (pathname === '/narrativas/7') {
       estado.consultas += 1
       if (estado.consultas <= consultasHastaLista) return respuesta(200, trabajo(7, 'en_proceso'))

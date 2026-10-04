@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../api'
 import Mensaje from '../componentes/Mensaje'
+import PanelRevision from '../componentes/PanelRevision'
 import VistaNarrativa from '../componentes/VistaNarrativa'
 import { fechaHora, nombreMes } from '../formato'
 import { useConsulta } from '../useConsulta'
@@ -112,10 +113,12 @@ export default function DetalleNarrativa() {
   return (
     <>
       {volver}
-      <VistaNarrativa narrativa={trabajo.narrativa} />
+      <VistaNarrativa narrativa={trabajo.narrativa} aviso={<PanelRevision trabajo={trabajo} alRevisar={setTrabajo} />} />
       <p className="nota bitacora">
         Reporte #{trabajo.id} · solicitado por {trabajo.solicitada_por ?? '—'} el {fechaHora(trabajo.solicitada_en)} ·
         terminado el {fechaHora(trabajo.terminada_en)}
+        {trabajo.revisada_por &&
+          ` · ${trabajo.revision} por ${trabajo.revisada_por} el ${fechaHora(trabajo.revisada_en)}`}
       </p>
     </>
   )

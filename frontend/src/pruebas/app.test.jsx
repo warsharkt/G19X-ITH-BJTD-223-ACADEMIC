@@ -151,6 +151,9 @@ describe('narrativas', () => {
     await act(() => vi.advanceTimersByTimeAsync(SEGUNDOS_ENTRE_CONSULTAS * 1000))
     expect(await screen.findByRole('heading', { name: 'Reporte ejecutivo de Recursos Humanos' })).toBeInTheDocument()
     expect(screen.getByText(/Borrador pendiente de revisión/)).toBeInTheDocument()
+    // ana lo solicito: no puede aprobarlo ella misma
+    expect(screen.getByText(/Tú lo solicitaste/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Aprobar' })).not.toBeInTheDocument()
     expect(screen.getByText('Rotación al alza')).toBeInTheDocument()
     expect(screen.getByText('Revisar las bajas del mes por área.')).toBeInTheDocument()
     expect(screen.getAllByText('Tasa de rotación mensual: 3.9 %').length).toBe(2)
@@ -172,9 +175,53 @@ describe('narrativas', () => {
     await entrar('ana', contrasena, '/narrativas')
     const tabla = await screen.findByRole('table')
     await waitFor(() => expect(within(tabla).getAllByRole('row')).toHaveLength(3))
-    expect(tabla).toHaveTextContent('Lista para revisión')
-    expect(tabla).toHaveTextContent('Error')
+    expect(tabla).toHaveTextContent('Pendiente de revisión')
+    expect(tabla).toHaveTextContent('Error al generar')
     expect(tabla).toHaveTextContent('Ventas')
     expect(within(tabla).getByRole('link', { name: '#5' })).toHaveAttribute('href', '/narrativas/5')
+  })
+})
+
+describe('revisión humana (RF-05)', () => {
+  it('otra persona de RRHH aprueba el reporte y queda registrado', async () => {
+    const { contrasena } = instalarApiFalsa()
+    const persona = await entrar('eva', contrasena, '/narrativas/5')
+    await screen.findByRole('heading', { name: 'Reporte ejecutivo de Recursos Humanos' })
+    await persona.type(screen.getByLabelText(/Comentario/), 'Cifras revisadas contra el tablero')
+    await persona.click(screen.getByRole('button', { name: 'Aprobar' }))
+    expect(await screen.findByText(/Aprobado por eva/)).toBeInTheDocument()
+    expect(screen.getByText(/Comentario: Cifras revisadas contra el tablero/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Aprobar' })).not.toBeInTheDocument()
+    expect(screen.getByText(/aprobada por eva/)).toBeInTheDocument() // bitacora al pie
+  })
+
+  it('para rechazar pide el motivo y muestra el error de la API', async () => {
+    const { contrasena } = instalarApiFalsa()
+    const persona = await entrar('eva', contrasena, '/narrativas/5')
+    await persona.click(await screen.findByRole('button', { name: 'Rechazar' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Al rechazar, explica el motivo')
+
+    await persona.type(screen.getByLabelText(/Comentario/), 'Falta el hallazgo de rotación de Ventas')
+    await persona.click(screen.getByRole('button', { name: 'Rechazar' }))
+    expect(await screen.findByText(/Rechazado por eva/)).toBeInTheDocument()
+    expect(screen.getByText(/Motivo: Falta el hallazgo de rotación de Ventas/)).toBeInTheDocument()
+  })
+
+  it('Dirección ve el estado de la revisión pero no puede aprobar', async () => {
+    const { contrasena } = instalarApiFalsa()
+    await entrar('dir', contrasena, '/narrativas/5')
+    expect(await screen.findByText(/Borrador pendiente de revisión/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Aprobar' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/Tú lo solicitaste/)).not.toBeInTheDocument()
+  })
+
+  it('el historial filtra por revisión', async () => {
+    const { contrasena, fetch } = instalarApiFalsa()
+    const persona = await entrar('eva', contrasena, '/narrativas')
+    await screen.findByRole('table')
+    await persona.selectOptions(screen.getByLabelText('Revisión'), 'aprobada')
+    await waitFor(() =>
+      expect(fetch.mock.calls.some(([url]) => String(url).includes('revision=aprobada'))).toBe(true),
+    )
   })
 })

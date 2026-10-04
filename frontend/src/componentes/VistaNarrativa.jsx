@@ -26,7 +26,8 @@ function Respaldo({ ids, hechos, fuentes }) {
 }
 
 // Reporte ejecutivo (seccion 10.1 del PRD) a partir de la respuesta de la API.
-export default function VistaNarrativa({ narrativa: n }) {
+// `aviso`: estado de la revision humana, bajo la portada.
+export default function VistaNarrativa({ narrativa: n, aviso }) {
   const hechos = Object.fromEntries(n.hechos.map((h) => [h.id, h]))
   const alertas = n.hechos.filter((h) => h.estado === 'rojo' || h.estado === 'amarillo' || h.en_vigilancia)
   const c = n.conteo_estados
@@ -44,12 +45,7 @@ export default function VistaNarrativa({ narrativa: n }) {
         </p>
       </header>
 
-      {n.requiere_revision && (
-        <div className="mensaje mensaje-advertencia" role="note">
-          <strong>Borrador pendiente de revisión.</strong> Lo redactó un modelo de IA a partir de los indicadores
-          calculados. Un responsable de RRHH debe revisarlo antes de distribuirlo.
-        </div>
-      )}
+      {aviso}
 
       <section>
         <h2>Resumen ejecutivo</h2>

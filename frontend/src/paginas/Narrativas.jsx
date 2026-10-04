@@ -5,10 +5,17 @@ import Mensaje from '../componentes/Mensaje'
 import { fechaHora, nombreMes } from '../formato'
 import { useConsulta } from '../useConsulta'
 
-const ESTADO_TRABAJO = {
+// Estado de cada reporte: primero la generacion y, si termino, la revision
+const ESTADOS = {
   en_proceso: { texto: 'En proceso', clase: 'neutro', icono: '◌' },
-  lista: { texto: 'Lista para revisión', clase: 'verde', icono: '✓' },
-  error: { texto: 'Error', clase: 'rojo', icono: '✕' },
+  error: { texto: 'Error al generar', clase: 'rojo', icono: '✕' },
+  pendiente: { texto: 'Pendiente de revisión', clase: 'amarillo', icono: '●' },
+  aprobada: { texto: 'Aprobado', clase: 'verde', icono: '✓' },
+  rechazada: { texto: 'Rechazado', clase: 'rojo', icono: '✕' },
+}
+
+function estadoDe(t) {
+  return ESTADOS[t.estado === 'lista' ? t.revision : t.estado] ?? { texto: t.estado, clase: 'neutro', icono: '•' }
 }
 
 function duracion(t) {
@@ -75,13 +82,14 @@ export default function Narrativas() {
   const [parametros, setParametros] = useSearchParams()
   const areaFiltro = parametros.get('area') ?? ''
   const periodoFiltro = parametros.get('periodo') ?? ''
+  const revisionFiltro = parametros.get('revision') ?? ''
   const [vuelta, setVuelta] = useState(0) // fuerza una nueva consulta
 
   const areas = useConsulta(() => api.areas(), [])
   const periodos = useConsulta(() => api.periodos(), [])
   const historial = useConsulta(
-    () => api.historial({ areaId: areaFiltro, periodo: periodoFiltro }),
-    [areaFiltro, periodoFiltro, vuelta],
+    () => api.historial({ areaId: areaFiltro, periodo: periodoFiltro, revision: revisionFiltro }),
+    [areaFiltro, periodoFiltro, revisionFiltro, vuelta],
   )
 
   // Mientras haya reportes en proceso, el historial se actualiza solo
@@ -108,7 +116,8 @@ export default function Narrativas() {
         <div>
           <h1>Reportes con IA</h1>
           <p className="texto-secundario">
-            Narrativas ejecutivas redactadas por IA a partir de los indicadores. Todas requieren revisión humana.
+            Narrativas ejecutivas redactadas por IA a partir de los indicadores. Solo se distribuyen las que aprueba
+            una persona de RRHH distinta de quien las solicitó.
           </p>
         </div>
       </div>
@@ -142,6 +151,15 @@ export default function Narrativas() {
                 ))}
             </select>
           </label>
+          <label>
+            Revisión
+            <select value={revisionFiltro} onChange={(e) => filtrar('revision', e.target.value)}>
+              <option value="">Todas</option>
+              <option value="pendiente">Pendientes de revisión</option>
+              <option value="aprobada">Aprobados</option>
+              <option value="rechazada">Rechazados</option>
+            </select>
+          </label>
         </div>
 
         {historial.datos?.length === 0 && <p className="texto-secundario">Todavía no hay reportes con estos filtros.</p>}
@@ -155,13 +173,14 @@ export default function Narrativas() {
                   <th scope="col">Mes</th>
                   <th scope="col">Estado</th>
                   <th scope="col">Solicitado por</th>
+                  <th scope="col">Revisado por</th>
                   <th scope="col">Solicitado</th>
                   <th scope="col" className="num">Duración</th>
                 </tr>
               </thead>
               <tbody>
                 {historial.datos.map((t) => {
-                  const e = ESTADO_TRABAJO[t.estado] ?? { texto: t.estado, clase: 'neutro', icono: '•' }
+                  const e = estadoDe(t)
                   return (
                     <tr key={t.id}>
                       <td>
@@ -178,6 +197,7 @@ export default function Narrativas() {
                         </span>
                       </td>
                       <td>{t.solicitada_por ?? '—'}</td>
+                      <td>{t.revisada_por ?? '—'}</td>
                       <td>{fechaHora(t.solicitada_en)}</td>
                       <td className="num">{duracion(t)}</td>
                     </tr>

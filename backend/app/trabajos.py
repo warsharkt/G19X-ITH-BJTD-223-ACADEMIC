@@ -29,7 +29,8 @@ _tabla_lista = False
 
 _COLUMNAS = (
     "id, area_id, to_char(periodo, 'YYYY-MM') AS periodo, estado, solicitada_en, terminada_en, "
-    "proveedor, modelo, version_prompt, rondas, error, detalle_error, solicitada_por"
+    "proveedor, modelo, version_prompt, rondas, error, detalle_error, solicitada_por, "
+    "revision, revisada_por, revisada_en, comentario_revision"
 )
 
 
@@ -122,13 +123,20 @@ def obtener(id_: int) -> dict | None:
 
 
 def listar(
-    area_ids: list[int] | None = None, periodo: pd.Timestamp | None = None, limite: int = 20
+    area_ids: list[int] | None = None,
+    periodo: pd.Timestamp | None = None,
+    limite: int = 20,
+    revision: str | None = None,
 ) -> list[dict]:
     """Historial (lo mas reciente primero), sin el cuerpo de cada narrativa.
 
-    area_ids: solo esas areas (None = todas)."""
+    area_ids: solo esas areas (None = todas). revision: solo las narrativas
+    listas con esa revision (pendiente, aprobada o rechazada)."""
     asegurar_tabla()
     filtros, params = [], {"limite": limite}
+    if revision is not None:
+        filtros.append("estado = 'lista' AND revision = :r")
+        params["r"] = revision
     if area_ids is not None:
         filtros.append("area_id = ANY(:a)")
         params["a"] = list(area_ids)
@@ -141,3 +149,48 @@ def listar(
             text(f"SELECT {_COLUMNAS} FROM narrativas {donde} ORDER BY id DESC LIMIT :limite"), params
         ).mappings().all()
     return [{**f, "narrativa": None} for f in filas]
+
+
+# ------------------------------------------------------------------ revision
+class RevisionNoPermitida(Exception):
+    """La narrativa no se puede revisar; `conflicto` distingue 409 de 403."""
+
+    def __init__(self, mensaje: str, conflicto: bool = True):
+        super().__init__(mensaje)
+        self.conflicto = conflicto
+
+
+def revisar(id_: int, decision: str, revisor: str, comentario: str | None) -> dict | None:
+    """Aprueba o rechaza una narrativa lista (RF-05) y registra quien (RF-11).
+
+    Devuelve la narrativa actualizada, None si no existe, o lanza
+    RevisionNoPermitida. La decision es definitiva. El UPDATE lleva todas las
+    condiciones: si dos personas revisan a la vez, solo una gana.
+    """
+    asegurar_tabla()
+    with engine.begin() as conn:
+        actualizada = conn.execute(
+            text(
+                "UPDATE narrativas SET revision = :d, revisada_por = :u, revisada_en = now(), "
+                "comentario_revision = :c "
+                "WHERE id = :id AND estado = 'lista' AND revision = 'pendiente' "
+                "AND solicitada_por IS DISTINCT FROM :u RETURNING id"
+            ),
+            {"id": id_, "d": decision, "u": revisor, "c": comentario},
+        ).first()
+    if actualizada:
+        return obtener(id_)
+    trabajo = obtener(id_)
+    if trabajo is None:
+        return None
+    if trabajo["estado"] != "lista":
+        raise RevisionNoPermitida("Solo se pueden revisar las narrativas terminadas (estado lista)")
+    if trabajo["revision"] != "pendiente":
+        raise RevisionNoPermitida(
+            f"Esta narrativa ya fue {trabajo['revision']} por {trabajo['revisada_por']}; "
+            "si hace falta otra versión, solicita una nueva"
+        )
+    raise RevisionNoPermitida(
+        "No puedes revisar una narrativa que tú solicitaste: debe hacerlo otra persona de RRHH",
+        conflicto=False,
+    )

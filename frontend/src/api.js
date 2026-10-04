@@ -62,8 +62,9 @@ async function pedir(ruta, { metodo = 'GET', cuerpo, formulario } = {}) {
   } catch {
     // respuesta sin JSON
   }
-  // FastAPI devuelve una lista cuando falla la validacion de parametros
-  const mensaje = typeof detalle === 'string' ? detalle : `Error ${respuesta.status} de la API`
+  // FastAPI devuelve una lista cuando falla la validacion (422)
+  const deValidacion = Array.isArray(detalle) ? detalle[0]?.msg?.replace(/^Value error, /, '') : null
+  const mensaje = typeof detalle === 'string' ? detalle : deValidacion || `Error ${respuesta.status} de la API`
   if (respuesta.status === 401 && token) {
     window.dispatchEvent(new CustomEvent(SESION_VENCIDA, { detail: mensaje }))
   }
@@ -87,6 +88,8 @@ export const api = {
   solicitarNarrativa: (periodo, areaId) =>
     pedir('/narrativas', { metodo: 'POST', cuerpo: { periodo, area_id: areaId } }),
   narrativa: (id) => pedir(`/narrativas/${id}`),
-  historial: ({ areaId, periodo, limite = 50 } = {}) =>
-    pedir('/narrativas' + consulta({ area_id: areaId, periodo, limite })),
+  historial: ({ areaId, periodo, revision, limite = 50 } = {}) =>
+    pedir('/narrativas' + consulta({ area_id: areaId, periodo, revision, limite })),
+  revisar: (id, decision, comentario) =>
+    pedir(`/narrativas/${id}/revision`, { metodo: 'POST', cuerpo: { decision, comentario } }),
 }

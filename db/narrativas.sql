@@ -30,3 +30,12 @@ CREATE INDEX IF NOT EXISTS narrativas_area_periodo ON narrativas (area_id, perio
 -- Paso 6: quien la solicito (bitacora RF-11). ADD COLUMN IF NOT EXISTS para
 -- que funcione tambien en bases creadas antes de este paso.
 ALTER TABLE narrativas ADD COLUMN IF NOT EXISTS solicitada_por TEXT;
+
+-- Paso 8: revision humana antes de distribuir (RF-05) y quien la reviso
+-- (bitacora RF-11). Solo se revisan las narrativas en estado 'lista'; la
+-- decision es definitiva: si se rechaza, se solicita una nueva.
+ALTER TABLE narrativas ADD COLUMN IF NOT EXISTS revision TEXT NOT NULL DEFAULT 'pendiente'
+    CHECK (revision IN ('pendiente', 'aprobada', 'rechazada'));
+ALTER TABLE narrativas ADD COLUMN IF NOT EXISTS revisada_por TEXT;
+ALTER TABLE narrativas ADD COLUMN IF NOT EXISTS revisada_en TIMESTAMPTZ;
+ALTER TABLE narrativas ADD COLUMN IF NOT EXISTS comentario_revision TEXT;

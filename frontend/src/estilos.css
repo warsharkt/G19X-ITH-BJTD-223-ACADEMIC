@@ -341,7 +341,49 @@ select {
 .mensaje-advertencia {
   background: var(--fondo-atencion);
   border-color: var(--estado-atencion);
-  display: block;
+}
+
+.mensaje-exito {
+  background: var(--fondo-bueno);
+  border-color: var(--estado-bueno);
+}
+
+.formulario-revision {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}
+
+.formulario-revision .mensaje {
+  margin: 0;
+}
+
+textarea {
+  font: inherit;
+  background: var(--superficie);
+  color: var(--texto);
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  padding: 0.5rem 0.65rem;
+  resize: vertical;
+  font-weight: 400;
+}
+
+.botones {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.boton-peligro {
+  color: var(--estado-critico);
+  border-color: var(--estado-critico);
+}
+
+.boton-secundario:disabled {
+  opacity: 0.6;
+  cursor: progress;
 }
 
 /* ------------------------------------------------------------ semaforo */
