@@ -34,6 +34,26 @@ class Umbral(BaseModel):
     umbral_critico: float
 
 
+class UmbralCambio(BaseModel):
+    """Nuevos umbrales de un indicador (solo RRHH)."""
+    umbral_atencion: float
+    umbral_critico: float
+
+
+class CambioUmbral(BaseModel):
+    """Bitacora: quien cambio un umbral, cuando y de que valores a cuales."""
+    id: int
+    indicador: str
+    nombre: str
+    unidad: str
+    atencion_antes: float
+    critico_antes: float
+    atencion_nuevo: float
+    critico_nuevo: float
+    usuario: str
+    cambiado_en: datetime
+
+
 class KpiFila(BaseModel):
     indicador: str
     nombre: str
@@ -173,6 +193,7 @@ class TrabajoNarrativa(BaseModel):
     revisada_por: str | None = Field(None, description="Usuario que la aprobo o rechazo (bitacora RF-11)")
     revisada_en: datetime | None = None
     comentario_revision: str | None = None
+    programada: bool = Field(False, description="La solicito la programacion mensual, no una persona")
     narrativa: Narrativa | None = Field(None, description="Presente cuando estado = lista")
 
 
@@ -189,3 +210,40 @@ class RevisionSolicitud(BaseModel):
         if self.decision == "rechazada" and (self.comentario is None or len(self.comentario) < 10):
             raise ValueError("Al rechazar, explica el motivo en el comentario (mínimo 10 caracteres)")
         return self
+
+# ------------------------------------------------------------ paso 10
+class Aviso(BaseModel):
+    id: int
+    tipo: str = Field(description="alerta, revision, aprobado, rechazado o error")
+    area_id: int
+    titulo: str
+    enlace: str = Field(description="Ruta del tablero a la que lleva el aviso")
+    creado_en: datetime
+    leido_en: datetime | None
+
+
+class Avisos(BaseModel):
+    no_leidos: int
+    avisos: list[Aviso]
+
+
+class Corrida(BaseModel):
+    periodo: str = Field(description="Mes reportado, AAAA-MM")
+    iniciada_en: datetime
+    origen: str = Field(description="api o script")
+    narrativas: int = Field(description="Reportes que se solicitaron")
+
+
+class Programacion(BaseModel):
+    activa: bool
+    dia_del_mes: int = Field(description="A partir de este dia se generan los reportes del mes cerrado")
+    modificada_por: str | None
+    modificada_en: datetime | None
+    correo_activo: bool = Field(description="True si el servidor tiene SMTP para avisar por correo")
+    corridas: list[Corrida]
+
+
+class ProgramacionCambio(BaseModel):
+    """Configuracion de la programacion mensual (solo RRHH)."""
+    activa: bool
+    dia_del_mes: int = Field(ge=1, le=28, description="1 a 28: todos los meses tienen ese dia")

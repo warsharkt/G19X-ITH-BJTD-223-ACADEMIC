@@ -27,3 +27,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
     ultimo_acceso      TIMESTAMPTZ,
     CHECK ((rol = 'gerente') = (area_id IS NOT NULL))
 );
+
+-- Paso 10: correo opcional para avisar que hay avisos nuevos. El
+-- correo nunca lleva datos de RRHH, solo la liga para entrar.
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS correo TEXT;

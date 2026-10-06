@@ -35,6 +35,9 @@ export class ErrorDeApi extends Error {
 // cierra en toda la aplicacion (ver sesion.jsx).
 export const SESION_VENCIDA = 'rrhh:sesion-vencida'
 
+// Al marcar avisos como leidos, el contador del menu se vuelve a consultar.
+export const AVISOS_CAMBIARON = 'rrhh:avisos-cambiaron'
+
 // archivo: true devuelve { blob, nombre } en lugar de JSON (exportaciones).
 async function pedir(ruta, { metodo = 'GET', cuerpo, formulario, archivo = false } = {}) {
   const encabezados = {}
@@ -59,6 +62,7 @@ async function pedir(ruta, { metodo = 'GET', cuerpo, formulario, archivo = false
     const nombre = (respuesta.headers.get('Content-Disposition') ?? '').match(/filename="([^"]+)"/)?.[1]
     return { blob: await respuesta.blob(), nombre }
   }
+  if (respuesta.status === 204) return null
   if (respuesta.ok) return respuesta.json()
 
   let detalle = null
@@ -99,4 +103,19 @@ export const api = {
     pedir(`/narrativas/${id}/revision`, { metodo: 'POST', cuerpo: { decision, comentario } }),
   // Solo reportes aprobados; formato: 'pdf' o 'pptx'
   exportar: (id, formato) => pedir(`/narrativas/${id}/exportar` + consulta({ formato }), { archivo: true }),
+  // Avisos (RF-09): { no_leidos, avisos }
+  avisos: ({ soloNoLeidos, limite } = {}) =>
+    pedir('/avisos' + consulta({ solo_no_leidos: soloNoLeidos, limite })),
+  marcarAvisoLeido: (id) => pedir(`/avisos/${id}/leido`, { metodo: 'POST' }),
+  marcarAvisosLeidos: () => pedir('/avisos/leidos', { metodo: 'POST' }),
+  // Configuracion (RF-12): solo RRHH la cambia; la API responde 403 a los demas
+  actualizarUmbral: (indicador, umbralAtencion, umbralCritico) =>
+    pedir(`/umbrales/${encodeURIComponent(indicador)}`, {
+      metodo: 'PUT',
+      cuerpo: { umbral_atencion: umbralAtencion, umbral_critico: umbralCritico },
+    }),
+  cambiosUmbrales: () => pedir('/umbrales/cambios'),
+  programacion: () => pedir('/programacion'),
+  guardarProgramacion: (activa, diaDelMes) =>
+    pedir('/programacion', { metodo: 'PUT', cuerpo: { activa, dia_del_mes: diaDelMes } }),
 }

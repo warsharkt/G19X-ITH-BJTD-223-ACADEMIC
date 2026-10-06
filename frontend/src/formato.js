@@ -53,6 +53,12 @@ export function mesCorto(periodo) {
   return `${MESES_CORTOS[mes - 1]} ${String(anio).slice(2)}`
 }
 
+// Quien pidio un reporte: una persona o la programacion mensual (RF-07)
+export function solicitante(trabajo) {
+  if (trabajo.solicitada_por) return trabajo.solicitada_por
+  return trabajo.programada ? 'la programación mensual' : '—'
+}
+
 export function fechaHora(iso) {
   if (!iso) return '—'
   return new Date(iso).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })

@@ -17,6 +17,7 @@ Que ve cada rol (PRD, seccion 5 y regla 10.3.2):
 import hashlib
 import hmac
 import os
+import re
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -92,10 +93,28 @@ def validar_contrasena_nueva(contrasena: str, usuario: str):
 
 
 # ---------------------------------------------------------------- usuarios
-def crear_usuario(usuario: str, nombre: str, rol: str, contrasena: str, area_id: int | None = None) -> int:
-    """Crea un usuario y devuelve su id. ErrorDeUsuario si los datos no son validos."""
+_PATRON_CORREO = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def normalizar_correo(correo: str | None) -> str | None:
+    """Correo en minusculas, None si viene vacio; ErrorDeUsuario si no parece un correo."""
+    correo = (correo or "").strip().lower()
+    if not correo:
+        return None
+    if not _PATRON_CORREO.match(correo):
+        raise ErrorDeUsuario(f"'{correo}' no es un correo valido")
+    return correo
+
+
+def crear_usuario(
+    usuario: str, nombre: str, rol: str, contrasena: str, area_id: int | None = None, correo: str | None = None
+) -> int:
+    """Crea un usuario y devuelve su id. ErrorDeUsuario si los datos no son validos.
+
+    correo es opcional: solo sirve para avisar que hay avisos nuevos (paso 10)."""
     asegurar_tabla()
     usuario = usuario.strip().lower()
+    correo = normalizar_correo(correo)
     if not usuario or not nombre.strip():
         raise ErrorDeUsuario("Usuario y nombre son obligatorios")
     if rol not in ROLES:
@@ -114,11 +133,25 @@ def crear_usuario(usuario: str, nombre: str, rol: str, contrasena: str, area_id:
             raise ErrorDeUsuario(f"El usuario '{usuario}' ya existe")
         return conn.execute(
             text(
-                "INSERT INTO usuarios (usuario, nombre, rol, area_id, contrasena_hash) "
-                "VALUES (:u, :n, :r, :a, :h) RETURNING id"
+                "INSERT INTO usuarios (usuario, nombre, rol, area_id, contrasena_hash, correo) "
+                "VALUES (:u, :n, :r, :a, :h, :c) RETURNING id"
             ),
-            {"u": usuario, "n": nombre.strip(), "r": rol, "a": area_id, "h": hash_contrasena(contrasena)},
+            {"u": usuario, "n": nombre.strip(), "r": rol, "a": area_id, "h": hash_contrasena(contrasena),
+             "c": correo},
         ).scalar_one()
+
+
+def cambiar_correo(usuario: str, correo: str | None):
+    """Pone o quita (correo vacio) el correo de un usuario."""
+    asegurar_tabla()
+    usuario = usuario.strip().lower()
+    correo = normalizar_correo(correo)
+    with engine.begin() as conn:
+        filas = conn.execute(
+            text("UPDATE usuarios SET correo = :c WHERE usuario = :u"), {"u": usuario, "c": correo}
+        ).rowcount
+    if not filas:
+        raise ErrorDeUsuario(f"El usuario '{usuario}' no existe")
 
 
 def cambiar_contrasena(usuario: str, contrasena: str):

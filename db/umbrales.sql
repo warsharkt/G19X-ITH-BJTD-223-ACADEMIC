@@ -1,7 +1,8 @@
 -- ============================================================
 -- Umbrales de atencion y criticos por indicador (regla 10.3.3)
 -- Los valores iniciales son PLACEHOLDERS: RRHH los debe validar
--- y luego editarlos desde el panel admin (RF-12).
+-- y editarlos desde el panel de configuracion (RF-12). Solo el rol
+-- rrhh los edita, y cada cambio queda en `umbrales_cambios`.
 --
 -- Es seguro ejecutarlo varias veces: no borra la tabla y no
 -- pisa los umbrales que ya hayas modificado (ON CONFLICT DO NOTHING).
@@ -35,3 +36,17 @@ INSERT INTO umbrales (indicador, nombre, unidad, sentido, umbral_atencion, umbra
     ('enps',                   'eNPS',                              'puntos', 'menor_es_peor', 10,    0),
     ('indice_productividad',   'Índice de productividad',           '%',      'menor_es_peor', 68,    62)
 ON CONFLICT (indicador) DO NOTHING;
+
+-- Paso 10: bitacora de cambios de umbrales (RF-11, RF-12). Un umbral
+-- decide que se pinta de rojo y a quien le llega una alerta: debe
+-- quedar quien lo cambio, cuando y que valores tenia antes.
+CREATE TABLE IF NOT EXISTS umbrales_cambios (
+    id              SERIAL PRIMARY KEY,
+    indicador       TEXT NOT NULL,
+    atencion_antes  NUMERIC NOT NULL,
+    critico_antes   NUMERIC NOT NULL,
+    atencion_nuevo  NUMERIC NOT NULL,
+    critico_nuevo   NUMERIC NOT NULL,
+    usuario         TEXT NOT NULL,
+    cambiado_en     TIMESTAMPTZ NOT NULL DEFAULT now()
+);

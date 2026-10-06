@@ -51,3 +51,8 @@ CREATE TABLE IF NOT EXISTS exportaciones (
 );
 
 CREATE INDEX IF NOT EXISTS exportaciones_narrativa ON exportaciones (narrativa_id);
+
+-- Paso 10: narrativas que genero la programacion mensual (RF-07). No
+-- tienen solicitada_por, asi que las puede revisar cualquier persona
+-- de RRHH (seccion 10.3.9).
+ALTER TABLE narrativas ADD COLUMN IF NOT EXISTS programada BOOLEAN NOT NULL DEFAULT false;

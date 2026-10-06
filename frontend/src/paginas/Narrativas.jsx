@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api'
 import Mensaje from '../componentes/Mensaje'
-import { fechaHora, nombreMes } from '../formato'
+import { fechaHora, nombreMes, solicitante } from '../formato'
 import { useConsulta } from '../useConsulta'
 
 // Estado de cada reporte: primero la generacion y, si termino, la revision
@@ -196,7 +196,7 @@ export default function Narrativas() {
                           {e.texto}
                         </span>
                       </td>
-                      <td>{t.solicitada_por ?? '—'}</td>
+                      <td>{solicitante(t)}</td>
                       <td>{t.revisada_por ?? '—'}</td>
                       <td>{fechaHora(t.solicitada_en)}</td>
                       <td className="num">{duracion(t)}</td>

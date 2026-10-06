@@ -1,5 +1,47 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { api, AVISOS_CAMBIARON } from '../api'
 import { NOMBRES_ROL, puedeVerDatos, useSesion } from '../sesion'
+
+export const SEGUNDOS_ENTRE_AVISOS = 60
+
+// Enlace a los avisos con cuantos faltan por leer. Se actualiza cada minuto,
+// al cambiar de pagina y cuando la pagina de avisos marca alguno como leido.
+function EnlaceAvisos() {
+  const { pathname } = useLocation()
+  const [noLeidos, setNoLeidos] = useState(0)
+
+  useEffect(() => {
+    let vigente = true
+    const consultar = () =>
+      api
+        .avisos({ limite: 1 })
+        .then((r) => vigente && setNoLeidos(r.no_leidos))
+        .catch(() => {}) // el contador no es critico: la pagina de avisos muestra el error
+    consultar()
+    const reloj = setInterval(consultar, SEGUNDOS_ENTRE_AVISOS * 1000)
+    window.addEventListener(AVISOS_CAMBIARON, consultar)
+    return () => {
+      vigente = false
+      clearInterval(reloj)
+      window.removeEventListener(AVISOS_CAMBIARON, consultar)
+    }
+  }, [pathname])
+
+  return (
+    <NavLink to="/avisos">
+      Avisos
+      {noLeidos > 0 && (
+        <>
+          <span className="insignia" aria-hidden="true">
+            {noLeidos}
+          </span>
+          <span className="oculto-visual">, {noLeidos} sin leer</span>
+        </>
+      )}
+    </NavLink>
+  )
+}
 
 // Estructura comun de las paginas con sesion: encabezado, menu y contenido.
 export default function Marco() {
@@ -16,7 +58,9 @@ export default function Marco() {
           <nav className="menu" aria-label="Secciones">
             {conDatos && <NavLink to="/tablero">Tablero</NavLink>}
             {conDatos && <NavLink to="/narrativas">Narrativas</NavLink>}
-            <NavLink to="/umbrales">Umbrales</NavLink>
+            {/* TI no recibe avisos: todos hablan de datos de colaboradores */}
+            {conDatos && <EnlaceAvisos />}
+            <NavLink to="/configuracion">Configuración</NavLink>
           </nav>
           <div className="cuenta">
             <span className="cuenta-nombre">

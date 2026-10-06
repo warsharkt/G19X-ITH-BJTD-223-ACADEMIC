@@ -1,9 +1,9 @@
-"""API del Motor Inteligente de Reportes de RRHH (pasos 4 a 9).
+"""API del Motor Inteligente de Reportes de RRHH (pasos 4 a 10).
 
-KPIs de solo lectura y narrativas generadas por IA en segundo plano (se
-guardan en la tabla `narrativas`). Todo, salvo /health y /auth/login,
-requiere iniciar sesion; cada rol ve solo lo que le corresponde (ver
-app/seguridad.py y la regla 10.3.2 del PRD).
+KPIs de solo lectura, narrativas generadas por IA en segundo plano (se
+guardan en la tabla `narrativas`), avisos, umbrales editables y programacion
+mensual. Todo, salvo /health y /auth/login, requiere iniciar sesion; cada rol
+ve solo lo que le corresponde (ver app/seguridad.py y la regla 10.3.2 del PRD).
 """
 import time
 from contextlib import asynccontextmanager
@@ -16,7 +16,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from app import exportar, narrativa, schemas, seguridad, trabajos
+from app import avisos, exportar, narrativa, programacion, schemas, seguridad, trabajos, umbrales
 from app.database import ejecutar_sql, engine
 from app.kpis import CORPORATIVO, calcular_kpis, inicializar_umbrales
 from app.llm import ConfiguracionIA, obtener_proveedor
@@ -36,10 +36,14 @@ async def ciclo_de_vida(_app):
         seguridad.asegurar_tabla()
         trabajos.marcar_interrumpidas()
         inicializar_umbrales()
+        avisos.asegurar_tabla()
+        programacion.asegurar_tabla()
         ejecutar_sql("rls.sql")  # al final: cubre todas las tablas ya creadas
     except SQLAlchemyError:
         pass  # sin BD la API arranca igual; /health lo reporta
+    programacion.iniciar()  # alertas y reportes del mes; si no hay BD, reintenta solo
     yield
+    programacion.detener()
 
 
 app = FastAPI(
@@ -50,14 +54,14 @@ app = FastAPI(
         "(sin IA): rotacion, clima, desempeno, capacitacion, reclutamiento y "
         "productividad, con tendencias y semaforo."
     ),
-    version="0.9.0",
+    version="0.10.0",
 )
 
 # El frontend de React (paso 7) se sirve en local desde estos origenes.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:3000"],
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PUT"],
     allow_headers=["*"],
     expose_headers=["Content-Disposition"],  # nombre del archivo al exportar
 )
@@ -153,19 +157,12 @@ def periodos(_u: Usuario = Depends(usuario_actual)):
 
 
 @app.get("/umbrales", response_model=list[schemas.Umbral], tags=["Catalogos"])
-def umbrales(_u: Usuario = Depends(usuario_actual)):
+def ver_umbrales(_u: Usuario = Depends(usuario_actual)):
     """Umbrales de atencion y criticos que definen el semaforo de cada indicador."""
-    kpis_df()  # asegura que la tabla exista
-    with engine.connect() as conn:
-        filas = conn.execute(
-            text(
-                "SELECT indicador, nombre, unidad, sentido, "
-                "umbral_atencion::float8 AS umbral_atencion, "
-                "umbral_critico::float8 AS umbral_critico "
-                "FROM umbrales ORDER BY indicador"
-            )
-        ).mappings().all()
-    return [dict(f) for f in filas]
+    try:
+        return umbrales.listar()
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
 
 
 @app.get("/kpis", response_model=list[schemas.KpiFila], tags=["KPIs"])
@@ -366,5 +363,104 @@ def historial_narrativas(
         area_ids = None if u.rol == "rrhh" else areas_visibles(u, [])
     try:
         return trabajos.listar(area_ids, _mes(periodo) if periodo else None, limite, revision)
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
+
+
+# ------------------------------------------------- configuracion (RF-12)
+def solo_rrhh(u: Usuario = Depends(usuario_actual)) -> Usuario:
+    """Dependencia: los umbrales y la programacion los cambia solo RRHH (regla 10.3.3)."""
+    if u.rol != "rrhh":
+        raise HTTPException(status_code=403, detail="Solo Recursos Humanos puede cambiar esta configuración")
+    return u
+
+
+@app.put("/umbrales/{indicador}", response_model=schemas.Umbral, tags=["Configuración"])
+def cambiar_umbral(indicador: str, cambio: schemas.UmbralCambio, u: Usuario = Depends(solo_rrhh)):
+    """Cambia los umbrales de un indicador (solo RRHH). Queda en la bitacora.
+
+    El semaforo se recalcula de inmediato. Las alertas que resulten se avisan
+    en la siguiente revision de la programacion (cada hora)."""
+    try:
+        nuevo = umbrales.actualizar(indicador, cambio.umbral_atencion, cambio.umbral_critico, u.usuario)
+    except umbrales.UmbralInvalido as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
+    if nuevo is None:
+        raise HTTPException(status_code=404, detail=f"El indicador '{indicador}' no existe")
+    _cache["df"] = None  # el semaforo cambio: recalcular en la siguiente consulta
+    return nuevo
+
+
+@app.get("/umbrales/cambios", response_model=list[schemas.CambioUmbral], tags=["Configuración"])
+def cambios_de_umbrales(limite: int = Query(20, ge=1, le=100), _u: Usuario = Depends(usuario_actual)):
+    """Bitacora de cambios de umbrales: quien, cuando, y valores de antes y despues."""
+    try:
+        return umbrales.cambios(limite)
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
+
+
+@app.get("/programacion", response_model=schemas.Programacion, tags=["Configuración"])
+def ver_programacion(_u: Usuario = Depends(usuario_actual)):
+    """Programacion mensual de reportes (RF-07) y los meses que ya genero."""
+    try:
+        return {
+            **programacion.leer(),
+            "correo_activo": avisos.configuracion_smtp() is not None,
+            "corridas": programacion.corridas(),
+        }
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
+
+
+@app.put("/programacion", response_model=schemas.Programacion, tags=["Configuración"])
+def cambiar_programacion(cambio: schemas.ProgramacionCambio, u: Usuario = Depends(solo_rrhh)):
+    """Activa o desactiva la programacion y elige el dia del mes (solo RRHH).
+
+    Cada mes, a partir de ese dia, se generan los reportes del ultimo mes
+    cerrado con datos: el consolidado y cada area. Al guardar, la API revisa
+    de inmediato si ya toca."""
+    try:
+        programacion.guardar(cambio.activa, cambio.dia_del_mes, u.usuario)
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
+    programacion.revisar_pronto()
+    return ver_programacion(u)
+
+
+# ----------------------------------------------------------- avisos (RF-09)
+@app.get("/avisos", response_model=schemas.Avisos, tags=["Avisos"])
+def ver_avisos(
+    solo_no_leidos: bool = False,
+    limite: int = Query(50, ge=1, le=200),
+    u: Usuario = Depends(usuario_actual),
+):
+    """Tus avisos (alertas en rojo, reportes por revisar, aprobados o
+    rechazados), del mas reciente al mas antiguo, y cuantos no has leido.
+    Solo los de las areas que puedes ver hoy."""
+    try:
+        return avisos.listar(u, solo_no_leidos, limite)
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
+
+
+@app.post("/avisos/{id_aviso}/leido", status_code=204, tags=["Avisos"])
+def marcar_aviso_leido(id_aviso: int, u: Usuario = Depends(usuario_actual)):
+    try:
+        existe = avisos.marcar_leido(u, id_aviso)
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
+    if not existe:
+        raise HTTPException(status_code=404, detail=f"El aviso {id_aviso} no existe")
+    return Response(status_code=204)
+
+
+@app.post("/avisos/leidos", tags=["Avisos"])
+def marcar_todos_los_avisos(u: Usuario = Depends(usuario_actual)) -> dict[str, int]:
+    """Marca como leidos todos tus avisos."""
+    try:
+        return {"marcados": avisos.marcar_todos(u)}
     except SQLAlchemyError:
         raise HTTPException(status_code=503, detail="Base de datos no disponible")

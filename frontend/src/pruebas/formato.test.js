@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { evolucion, formatoN, formatoValor, formatoVariacion, mesCorto, nombreMes } from '../formato'
+import { evolucion, formatoN, formatoValor, formatoVariacion, mesCorto, nombreMes, solicitante } from '../formato'
 
 describe('formatoValor', () => {
   it('muestra cada unidad como la lee RRHH', () => {
@@ -57,4 +57,12 @@ it('formatoN explica qué cuenta la base de cada indicador', () => {
   expect(formatoN(1234, 'enps')).toBe('1,234 respuestas')
   expect(formatoN(1, 'tiempo_contratacion')).toBe('1 vacante cubierta')
   expect(formatoN(3, 'desconocido')).toBe('3 registros')
+})
+
+describe('solicitante', () => {
+  it('distingue a una persona de la programación mensual', () => {
+    expect(solicitante({ solicitada_por: 'ana', programada: false })).toBe('ana')
+    expect(solicitante({ solicitada_por: null, programada: true })).toBe('la programación mensual')
+    expect(solicitante({ solicitada_por: null, programada: false })).toBe('—')
+  })
 })

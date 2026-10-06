@@ -9,6 +9,8 @@ paralelo, solo se vuelven todas mas lentas).
 Si el modelo responde pero no pasa los guardarrailes, se pide de nuevo desde
 cero (hasta NARRATIVA_RONDAS veces en total). Si no esta disponible, no se
 insiste: queda en "error" con el motivo para que RRHH lo vea.
+
+Al terminar, y al revisarla, se avisa a quien corresponde (app/avisos.py).
 """
 import json
 import os
@@ -17,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 from sqlalchemy import text
 
-from app import schemas
+from app import avisos, schemas
 from app.database import engine, ejecutar_sql
 from app.narrativa import NarrativaNoGenerada, generar_narrativa
 
@@ -30,7 +32,7 @@ _tabla_lista = False
 _COLUMNAS = (
     "id, area_id, to_char(periodo, 'YYYY-MM') AS periodo, estado, solicitada_en, terminada_en, "
     "proveedor, modelo, version_prompt, rondas, error, detalle_error, solicitada_por, "
-    "revision, revisada_por, revisada_en, comentario_revision"
+    "revision, revisada_por, revisada_en, comentario_revision, programada"
 )
 
 
@@ -57,18 +59,24 @@ def marcar_interrumpidas() -> int:
 
 
 def encolar(
-    periodo: pd.Timestamp, area_id: int, proveedor, df: pd.DataFrame, solicitante: str | None = None
+    periodo: pd.Timestamp,
+    area_id: int,
+    proveedor,
+    df: pd.DataFrame,
+    solicitante: str | None = None,
+    programada: bool = False,
 ) -> int:
-    """Registra la solicitud (con quien la pidio) y la manda al hilo de trabajo. Devuelve su id."""
+    """Registra la solicitud (con quien la pidio, o programada = la pidio la
+    programacion mensual) y la manda al hilo de trabajo. Devuelve su id."""
     asegurar_tabla()
     with engine.begin() as conn:
         id_ = conn.execute(
             text(
-                "INSERT INTO narrativas (area_id, periodo, proveedor, modelo, solicitada_por) "
-                "VALUES (:a, :p, :prov, :mod, :sol) RETURNING id"
+                "INSERT INTO narrativas (area_id, periodo, proveedor, modelo, solicitada_por, programada) "
+                "VALUES (:a, :p, :prov, :mod, :sol, :prog) RETURNING id"
             ),
             {"a": area_id, "p": periodo.date(), "prov": proveedor.nombre, "mod": proveedor.modelo,
-             "sol": solicitante},
+             "sol": solicitante, "prog": programada},
         ).scalar_one()
     ejecutor.submit(_ejecutar, id_, periodo, area_id, proveedor, df)
     return id_
@@ -94,10 +102,12 @@ def _ejecutar(id_: int, periodo, area_id, proveedor, df):
             id_, estado="lista", resultado=json.dumps(resultado, ensure_ascii=False),
             version_prompt=n["version_prompt"], terminada=True,
         )
+        avisos.avisar_narrativa_terminada(id_)
         return
     _actualizar(
         id_, estado="error", error=motivo, detalle_error=json.dumps(detalle, ensure_ascii=False), terminada=True
     )
+    avisos.avisar_narrativa_terminada(id_)
 
 
 def _actualizar(id_: int, terminada=False, **campos):
@@ -179,6 +189,7 @@ def revisar(id_: int, decision: str, revisor: str, comentario: str | None) -> di
             {"id": id_, "d": decision, "u": revisor, "c": comentario},
         ).first()
     if actualizada:
+        avisos.avisar_revision(id_)
         return obtener(id_)
     trabajo = obtener(id_)
     if trabajo is None:

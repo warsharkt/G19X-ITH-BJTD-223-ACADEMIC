@@ -127,13 +127,15 @@ describe('tablero', () => {
     expect(screen.getByLabelText('Área')).toBeDisabled()
   })
 
-  it('TI no ve datos de colaboradores: solo umbrales', async () => {
+  it('TI no ve datos de colaboradores: solo la configuración', async () => {
     const { contrasena, fetch } = instalarApiFalsa()
     await entrar('ti', contrasena, '/tablero')
     expect(await screen.findByRole('heading', { name: 'Umbrales del semáforo' })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Tablero' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Narrativas' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /Avisos/ })).not.toBeInTheDocument()
     expect(fetch.mock.calls.some(([url]) => String(url).includes('/kpis'))).toBe(false)
+    expect(fetch.mock.calls.some(([url]) => String(url).includes('/avisos'))).toBe(false)
   })
 })
 
@@ -269,5 +271,105 @@ describe('exportación (RF-08)', () => {
     await persona.click(screen.getByRole('button', { name: 'Rechazar' }))
     expect(await screen.findByText(/Rechazado por eva/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Descargar PDF' })).not.toBeInTheDocument()
+  })
+})
+
+describe('avisos (RF-09)', () => {
+  it('el menú dice cuántos avisos faltan por leer', async () => {
+    const { contrasena } = instalarApiFalsa()
+    await entrar('ana', contrasena)
+    const enlace = await screen.findByRole('link', { name: 'Avisos, 2 sin leer' })
+    expect(enlace).toHaveAttribute('href', '/avisos')
+  })
+
+  it('al abrir un aviso se marca como leído y lleva a donde se atiende', async () => {
+    const { contrasena, estado } = instalarApiFalsa()
+    const persona = await entrar('ana', contrasena, '/avisos')
+    const lista = await screen.findByRole('list', { name: 'Avisos' })
+    expect(within(lista).getAllByRole('listitem')).toHaveLength(3)
+    expect(lista).toHaveTextContent('Alerta')
+    expect(lista).toHaveTextContent('Por revisar')
+    expect(within(lista).getAllByText(/Nuevo/)).toHaveLength(2)
+
+    await persona.click(screen.getByRole('link', { name: /1 indicador en rojo/ }))
+    expect(await screen.findByRole('heading', { name: 'Indicadores de Corporativo' })).toBeInTheDocument()
+    expect(estado.avisos.ana.find((a) => a.id === 11).leido_en).not.toBeNull()
+    expect(await screen.findByRole('link', { name: 'Avisos, 1 sin leer' })).toBeInTheDocument()
+  })
+
+  it('marca todos como leídos', async () => {
+    const { contrasena, estado } = instalarApiFalsa()
+    const persona = await entrar('ana', contrasena, '/avisos')
+    await persona.click(await screen.findByRole('button', { name: 'Marcar todos como leídos' }))
+    await waitFor(() => expect(screen.queryByText(/Nuevo/)).not.toBeInTheDocument())
+    expect(estado.avisos.ana.every((a) => a.leido_en)).toBe(true)
+    expect(await screen.findByRole('link', { name: 'Avisos' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Marcar todos como leídos' })).not.toBeInTheDocument()
+  })
+
+  it('sin avisos lo dice', async () => {
+    const { contrasena } = instalarApiFalsa()
+    await entrar('dir', contrasena, '/avisos')
+    expect(await screen.findByText('No tienes avisos.')).toBeInTheDocument()
+  })
+})
+
+describe('configuración (RF-12)', () => {
+  it('RRHH edita un umbral y el cambio queda en la bitácora', async () => {
+    const { contrasena, estado } = instalarApiFalsa()
+    const persona = await entrar('ana', contrasena, '/configuracion')
+    await persona.click(await screen.findByRole('button', { name: 'Editar Tasa de rotación mensual' }))
+    const atencion = screen.getByLabelText('Atención de Tasa de rotación mensual')
+    const critico = screen.getByLabelText('Crítico de Tasa de rotación mensual')
+    await persona.clear(atencion)
+    await persona.type(atencion, '2.5')
+    await persona.clear(critico)
+    await persona.type(critico, '4')
+    await persona.click(screen.getAllByRole('button', { name: 'Guardar' })[0])
+
+    const cambios = await screen.findByRole('table', { name: 'Cambios de umbrales' })
+    expect(cambios).toHaveTextContent('Tasa de rotación mensual')
+    expect(cambios).toHaveTextContent('2.0 % / 3.5 %')
+    expect(cambios).toHaveTextContent('2.5 % / 4.0 %')
+    expect(cambios).toHaveTextContent('ana')
+    expect(estado.umbrales.find((u) => u.indicador === 'rotacion_total').umbral_critico).toBe(4)
+    expect(screen.queryByLabelText('Atención de Tasa de rotación mensual')).not.toBeInTheDocument()
+  })
+
+  it('muestra el motivo si la API rechaza el umbral', async () => {
+    const { contrasena } = instalarApiFalsa()
+    const persona = await entrar('ana', contrasena, '/configuracion')
+    await persona.click(await screen.findByRole('button', { name: 'Editar Tasa de rotación mensual' }))
+    const critico = screen.getByLabelText('Crítico de Tasa de rotación mensual')
+    await persona.clear(critico)
+    await persona.type(critico, '1')
+    await persona.click(screen.getAllByRole('button', { name: 'Guardar' })[0])
+    expect(await screen.findByRole('alert')).toHaveTextContent('un valor más alto es peor')
+    expect(screen.getByLabelText('Crítico de Tasa de rotación mensual')).toBeInTheDocument() // sigue editando
+  })
+
+  it('RRHH activa la programación mensual', async () => {
+    const { contrasena, estado } = instalarApiFalsa()
+    const persona = await entrar('ana', contrasena, '/configuracion')
+    const formulario = await screen.findByRole('checkbox', { name: 'Generar los reportes cada mes' })
+    const guardar = formulario.closest('form').querySelector('button[type=submit]')
+    expect(guardar).toBeDisabled() // sin cambios no hay nada que guardar
+    expect(screen.getByRole('table', { name: 'Meses generados' })).toHaveTextContent('julio 2026')
+
+    await persona.click(formulario)
+    await persona.selectOptions(screen.getByLabelText('A partir del día'), '3')
+    await persona.click(guardar)
+    expect(await screen.findByText('Programación guardada.')).toBeInTheDocument()
+    expect(estado.programacion).toMatchObject({ activa: true, dia_del_mes: 3, modificada_por: 'ana' })
+    expect(screen.getByText(/Último cambio: ana/)).toBeInTheDocument()
+  })
+
+  it('Dirección ve la configuración pero no puede cambiarla', async () => {
+    const { contrasena } = instalarApiFalsa()
+    await entrar('dir', contrasena, '/configuracion')
+    expect(await screen.findByText('Solo Recursos Humanos puede cambiar esta configuración.')).toBeInTheDocument()
+    expect(await screen.findByText('Desactivada')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Editar/ })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Generar los reportes cada mes')).not.toBeInTheDocument()
   })
 })

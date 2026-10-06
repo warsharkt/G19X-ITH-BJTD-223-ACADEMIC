@@ -104,6 +104,36 @@ function exportar(id, formato, estado) {
   )
 }
 
+// Avisos de cada persona al empezar la prueba (como los genera la API)
+function avisosIniciales() {
+  return {
+    ana: [
+      { id: 12, tipo: 'revision', area_id: 0, titulo: 'Reporte de Corporativo, agosto 2026 listo para revisión', enlace: '/narrativas/5', creado_en: '2026-10-03T18:00:00Z', leido_en: null },
+      { id: 11, tipo: 'alerta', area_id: 0, titulo: 'Corporativo, agosto 2026: 1 indicador en rojo (Tasa de rotación mensual)', enlace: '/tablero?area=0&periodo=2026-08', creado_en: '2026-10-03T07:00:00Z', leido_en: null },
+      { id: 10, tipo: 'aprobado', area_id: 1, titulo: 'Reporte de Ventas, julio 2026 aprobado: ya se puede descargar', enlace: '/narrativas/4', creado_en: '2026-09-05T10:00:00Z', leido_en: '2026-09-05T11:00:00Z' },
+    ],
+    dir: [],
+    eva: [],
+    ti: [],
+  }
+}
+
+// Mismas reglas que PUT /umbrales/{indicador} de la API real
+function actualizarUmbral(usuario, indicador, { umbral_atencion, umbral_critico }, estado) {
+  if (usuario.rol !== 'rrhh') return respuesta(403, { detail: 'Solo Recursos Humanos puede cambiar esta configuración' })
+  const u = estado.umbrales.find((x) => x.indicador === indicador)
+  if (!u) return respuesta(404, { detail: `El indicador '${indicador}' no existe` })
+  if (u.sentido === 'mayor_es_peor' && umbral_critico < umbral_atencion)
+    return respuesta(422, { detail: `En ${u.nombre} un valor más alto es peor: el umbral crítico debe ser mayor o igual que el de atención` })
+  estado.cambios.unshift({
+    id: estado.cambios.length + 1, indicador, nombre: u.nombre, unidad: u.unidad,
+    atencion_antes: u.umbral_atencion, critico_antes: u.umbral_critico,
+    atencion_nuevo: umbral_atencion, critico_nuevo: umbral_critico, usuario: usuario.usuario, cambiado_en: '2026-10-06T12:00:00Z',
+  })
+  Object.assign(u, { umbral_atencion, umbral_critico })
+  return respuesta(200, u)
+}
+
 function respuesta(estado, cuerpo) {
   return Promise.resolve(new Response(JSON.stringify(cuerpo), { status: estado, headers: { 'Content-Type': 'application/json' } }))
 }
@@ -111,7 +141,16 @@ function respuesta(estado, cuerpo) {
 // Instala la API falsa. `opciones.consultasHastaLista`: cuantas veces se
 // consulta la narrativa nueva antes de que pase de en_proceso a lista.
 export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = false } = {}) {
-  const estado = { tokenValido: null, consultas: 0, solicitudes: [], exportaciones: [] }
+  const estado = {
+    tokenValido: null, consultas: 0, solicitudes: [], exportaciones: [],
+    avisos: avisosIniciales(),
+    umbrales: UMBRALES.map((u) => ({ ...u })),
+    cambios: [],
+    programacion: {
+      activa: false, dia_del_mes: 5, modificada_por: null, modificada_en: null, correo_activo: false,
+      corridas: [{ periodo: '2026-07', iniciada_en: '2026-08-05T07:00:00Z', origen: 'api', narrativas: 7 }],
+    },
+  }
   revisiones = {}
   const tokens = Object.fromEntries(Object.keys(USUARIOS).map((u) => [`token-${u}`, USUARIOS[u]]))
 
@@ -135,7 +174,35 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
     if (pathname === '/auth/yo') return respuesta(200, usuario)
     if (pathname === '/areas') return respuesta(200, AREAS.filter((a) => usuario.areas_permitidas.includes(a.id)))
     if (pathname === '/periodos') return respuesta(200, PERIODOS)
-    if (pathname === '/umbrales') return respuesta(200, UMBRALES)
+    if (pathname === '/umbrales') return respuesta(200, estado.umbrales)
+    if (pathname === '/umbrales/cambios') return respuesta(200, estado.cambios)
+    const enUmbral = pathname.match(/^\/umbrales\/(\w+)$/)
+    if (enUmbral && metodo === 'PUT') return actualizarUmbral(usuario, enUmbral[1], JSON.parse(opciones.body), estado)
+    if (pathname === '/programacion' && metodo === 'PUT') {
+      if (usuario.rol !== 'rrhh') return respuesta(403, { detail: 'Solo Recursos Humanos puede cambiar esta configuración' })
+      const { activa, dia_del_mes } = JSON.parse(opciones.body)
+      Object.assign(estado.programacion, { activa, dia_del_mes, modificada_por: usuario.usuario, modificada_en: '2026-10-06T12:00:00Z' })
+      return respuesta(200, estado.programacion)
+    }
+    if (pathname === '/programacion') return respuesta(200, estado.programacion)
+
+    const propios = estado.avisos[usuario.usuario]
+    if (pathname === '/avisos') {
+      const lista = searchParams.get('solo_no_leidos') === 'true' ? propios.filter((a) => !a.leido_en) : propios
+      return respuesta(200, { no_leidos: propios.filter((a) => !a.leido_en).length, avisos: lista })
+    }
+    const enAviso = pathname.match(/^\/avisos\/(\d+)\/leido$/)
+    if (enAviso && metodo === 'POST') {
+      const aviso = propios.find((a) => a.id === Number(enAviso[1]))
+      if (!aviso) return respuesta(404, { detail: 'El aviso no existe' })
+      aviso.leido_en ??= '2026-10-06T12:00:00Z'
+      return Promise.resolve(new Response(null, { status: 204 }))
+    }
+    if (pathname === '/avisos/leidos' && metodo === 'POST') {
+      const pendientes = propios.filter((a) => !a.leido_en)
+      pendientes.forEach((a) => (a.leido_en = '2026-10-06T12:00:00Z'))
+      return respuesta(200, { marcados: pendientes.length })
+    }
     if (!conDatos) return sinPermiso()
 
     if (pathname === '/kpis') return respuesta(200, KPIS[Number(searchParams.get('area_id') ?? 0)])

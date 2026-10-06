@@ -9,6 +9,7 @@ import os
 import pytest
 from sqlalchemy import text
 
+from app import avisos
 from app.database import DB_URL, ES_REMOTA, engine
 from app.main import app
 from app.seguridad import Usuario, usuario_actual
@@ -56,3 +57,17 @@ def _sesion_de_rrhh():
     app.dependency_overrides[usuario_actual] = lambda: USUARIO_RRHH
     yield
     app.dependency_overrides.pop(usuario_actual, None)
+
+
+@pytest.fixture(autouse=True)
+def _sin_correo_ni_avisos_residuales(monkeypatch):
+    """Las pruebas nunca mandan correos reales (aunque el .env tenga SMTP) y
+    borran los avisos que generen: una narrativa de prueba que termina avisa
+    a todo RRHH, incluidos los usuarios reales de la base local."""
+    monkeypatch.setenv("SMTP_HOST", "")
+    avisos.asegurar_tabla()
+    with engine.connect() as conn:
+        ultimo = conn.execute(text("SELECT COALESCE(MAX(id), 0) FROM avisos")).scalar()
+    yield
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM avisos WHERE id > :u"), {"u": ultimo})

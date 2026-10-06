@@ -7,6 +7,7 @@ Consolida los datos de Recursos Humanos (reclutamiento, desempeño, capacitació
 - **Acceso por rol:** Dirección ve el consolidado, RRHH ve todo, cada gerente ve solo su área y TI ve la configuración.
 - **Tablero web (React):** indicadores del mes con semáforo, tendencia de 24 meses con umbrales, generación de reportes con IA e historial.
 - **Exportación:** los reportes aprobados se descargan en PDF y como presentación de PowerPoint.
+- **Avisos y programación mensual:** cada persona recibe avisos de indicadores en rojo y de reportes por revisar o aprobados. Los reportes del mes se pueden generar solos, y RRHH ajusta los umbrales desde el panel de configuración.
 
 Requisitos, decisiones y reglas de negocio: [`docs/PRD.md`](docs/PRD.md).
 
@@ -68,9 +69,10 @@ Abre http://localhost:5173 e inicia sesión con tu usuario. Si la API no está e
 |---|---|
 | **Tablero** | Indicadores del mes con semáforo (siempre con icono y texto), variación contra el mes y el año anterior, y la tendencia del indicador elegido con sus umbrales. Filtros por área, mes e indicador; quedan en la dirección de la página, así que se pueden compartir |
 | **Narrativas** | Solicita el reporte con IA de un área y mes, muestra el avance mientras se redacta, permite aprobarlo o rechazarlo, descargar los aprobados en PDF o presentación, y guarda el historial consultable por área, mes y revisión |
-| **Umbrales** | Valores de atención y crítico de cada indicador (solo lectura) |
+| **Avisos** | Indicadores en rojo, reportes por revisar y reportes aprobados o rechazados de tus áreas. El menú muestra cuántos faltan por leer |
+| **Configuración** | Umbrales del semáforo con su bitácora de cambios, y programación mensual. Todos la ven; solo RRHH la cambia |
 
-Cada rol ve solo lo suyo: Dirección no puede cambiar de área, y TI solo ve los umbrales. La API aplica los mismos permisos, así que no dependen de la interfaz. La sesión se guarda solo en la pestaña (`sessionStorage`) y se cierra sola cuando el token vence.
+Cada rol ve solo lo suyo: Dirección no puede cambiar de área, y TI solo ve la configuración, sin poder cambiarla. La API aplica los mismos permisos, así que no dependen de la interfaz. La sesión se guarda solo en la pestaña (`sessionStorage`) y se cierra sola cuando el token vence.
 
 ## Inteligencia artificial
 
@@ -98,6 +100,31 @@ El archivo se arma con la narrativa aprobada tal como quedó guardada: no se rec
 
 Si ya tenías el entorno instalado, vuelve a correr `pip install -r requirements.txt` para instalar las bibliotecas de exportación.
 
+## Avisos y programación mensual
+
+**Avisos.** Llegan a la sección **Avisos** del tablero:
+
+| Evento | Lo reciben |
+|---|---|
+| Indicador en rojo del consolidado | Dirección y RRHH |
+| Indicador en rojo de un área | El gerente del área y RRHH |
+| Reporte listo para revisión | RRHH, menos quien lo pidió |
+| Reporte aprobado | Su audiencia y quien lo pidió |
+| Reporte rechazado | Quien lo pidió |
+
+**Programación mensual.** En **Configuración**, una persona de RRHH la activa y elige el día. A partir de ese día se generan los reportes del último mes cerrado con datos (el consolidado y cada área), una sola vez por mes. Nacen pendientes de revisión y los puede aprobar cualquier persona de RRHH. Nace **desactivada**: con Ollama en CPU, cada mes son varios reportes de minutos cada uno.
+
+La API revisa al arrancar y cada hora, así que si estuvo apagada el día programado se pone al día al encenderse. Para que funcione aunque la API esté apagada, programa el script en el Programador de tareas de Windows (cambia la ruta):
+
+```powershell
+python -m scripts.programar          # revisa y genera lo que falte; espera a que terminen
+python -m scripts.programar --ver    # solo muestra la configuración y los meses generados
+
+schtasks /create /tn "Motor RRHH" /sc daily /st 07:00 /tr "cmd /c cd /d C:\ruta\backend && .venv\Scripts\python.exe -m scripts.programar"
+```
+
+**Correo (opcional).** Está apagado por defecto. Si llenas `SMTP_HOST` y los demás datos `SMTP_*` en el `.env`, quien tenga correo registrado recibe un correo con "tienes N avisos nuevos" y la liga al sistema. **El correo nunca lleva datos**: ni áreas, ni indicadores, ni cifras. Con Gmail usa `smtp.gmail.com`, puerto `587` y una [contraseña de aplicación](https://myaccount.google.com/apppasswords), nunca tu contraseña normal.
+
 ## Usuarios y roles
 
 ```powershell
@@ -106,14 +133,17 @@ python -m scripts.crear_usuario --usuario luis --nombre "Gerente Ventas" --rol g
 python -m scripts.crear_usuario --usuario ti   --nombre "Soporte TI"     --rol admin_ti
 python -m scripts.crear_usuario --listar
 python -m scripts.crear_usuario --usuario luis --cambiar-contrasena   # también desbloquea la cuenta
+python -m scripts.crear_usuario --usuario luis --cambiar-correo luis@empresa.com   # "" lo quita
 ```
+
+Al crear un usuario puedes agregar `--correo` para que reciba el correo de avisos.
 
 | Rol | Ve |
 |---|---|
 | `direccion` | Solo el consolidado corporativo |
-| `rrhh` | Todo; aprueba o rechaza los reportes que solicitó otra persona |
+| `rrhh` | Todo; aprueba o rechaza los reportes que solicitó otra persona; cambia umbrales y programación |
 | `gerente` | Solo su área |
-| `admin_ti` | Catálogos y configuración, sin datos de colaboradores |
+| `admin_ti` | Catálogos y configuración (sin cambiarla), sin datos de colaboradores ni avisos |
 
 ## Base de datos compartida en Supabase (opcional)
 
@@ -160,10 +190,13 @@ backend/
     guardrails.py    validación de lo que redacta la IA
     llm.py           proveedores de IA (Ollama, Groq) y candado de datos
     trabajos.py      generación de narrativas en segundo plano, revisión y bitácora
+    avisos.py        avisos por persona y correo opcional sin datos
+    programacion.py  programación mensual (hilo de la API y script)
+    umbrales.py      edición de umbrales con bitácora
     exportar.py      reporte aprobado en PDF y presentación
     seguridad.py     inicio de sesión, contraseñas, tokens y permisos por rol
     database.py      conexión a PostgreSQL (local o Supabase)
-  scripts/           seed, crear_usuario, generar_narrativa, evaluar_narrativa
+  scripts/           seed, crear_usuario, programar, generar_narrativa, evaluar_narrativa
   tests/             pruebas automáticas
   reportes/          resultados de las evaluaciones del modelo de IA
 frontend/
@@ -171,7 +204,7 @@ frontend/
     api.js           cliente de la API (token de sesión y errores)
     sesion.jsx       inicio y cierre de sesión, permisos por rol
     formato.js       cifras, fechas, semáforo y variaciones
-    paginas/         Login, Tablero, Narrativas, DetalleNarrativa, Umbrales
+    paginas/         Login, Tablero, Narrativas, DetalleNarrativa, Avisos, Configuracion
     componentes/     tarjetas de KPI, gráfica de tendencia, vista del reporte
     pruebas/         pruebas automáticas (Vitest) con una API simulada
 db/                  esquema y tablas (SQL)

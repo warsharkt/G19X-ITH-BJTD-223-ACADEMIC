@@ -4,7 +4,7 @@ import { api } from '../api'
 import Mensaje from '../componentes/Mensaje'
 import PanelRevision from '../componentes/PanelRevision'
 import VistaNarrativa from '../componentes/VistaNarrativa'
-import { fechaHora, nombreMes } from '../formato'
+import { fechaHora, nombreMes, solicitante } from '../formato'
 import { useConsulta } from '../useConsulta'
 
 export const SEGUNDOS_ENTRE_CONSULTAS = 5
@@ -103,7 +103,7 @@ export default function DetalleNarrativa() {
             </ul>
           )}
           <p className="nota">
-            Solicitado por {trabajo.solicitada_por ?? '—'} el {fechaHora(trabajo.solicitada_en)}. El sistema nunca
+            Solicitado por {solicitante(trabajo)} el {fechaHora(trabajo.solicitada_en)}. El sistema nunca
             rellena el reporte con texto que no haya redactado la IA; puedes volver a solicitarlo.
           </p>
         </Mensaje>
@@ -115,7 +115,7 @@ export default function DetalleNarrativa() {
       {volver}
       <VistaNarrativa narrativa={trabajo.narrativa} aviso={<PanelRevision trabajo={trabajo} alRevisar={setTrabajo} />} />
       <p className="nota bitacora">
-        Reporte #{trabajo.id} · solicitado por {trabajo.solicitada_por ?? '—'} el {fechaHora(trabajo.solicitada_en)} ·
+        Reporte #{trabajo.id} · solicitado por {solicitante(trabajo)} el {fechaHora(trabajo.solicitada_en)} ·
         terminado el {fechaHora(trabajo.terminada_en)}
         {trabajo.revisada_por &&
           ` · ${trabajo.revision} por ${trabajo.revisada_por} el ${fechaHora(trabajo.revisada_en)}`}
