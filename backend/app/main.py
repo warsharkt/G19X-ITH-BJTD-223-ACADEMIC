@@ -16,16 +16,18 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from app import avisos, exportar, narrativa, programacion, schemas, seguridad, trabajos, umbrales
+from app import avisos, exportar, mfa, narrativa, programacion, schemas, seguridad, trabajos, umbrales
 from app.database import ejecutar_sql, engine
 from app.kpis import CORPORATIVO, calcular_kpis, inicializar_umbrales
 from app.llm import ConfiguracionIA, obtener_proveedor
 from app.seguridad import (
+    ErrorDeUsuario,
     Usuario,
     area_por_defecto,
     areas_visibles,
     con_acceso_a_datos,
     exigir_acceso_a_datos,
+    sesion_actual,
     usuario_actual,
 )
 
@@ -61,7 +63,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:3000"],
-    allow_methods=["GET", "POST", "PUT"],
+    allow_methods=["GET", "POST", "PUT", "PATCH"],
     allow_headers=["*"],
     expose_headers=["Content-Disposition"],  # nombre del archivo al exportar
 )
@@ -107,25 +109,96 @@ def health():
 
 
 # ------------------------------------------------------------------ sesion
+def _token_de_sesion(u: Usuario) -> dict:
+    return {
+        "access_token": seguridad.crear_token(u),
+        "token_type": "bearer",
+        "expira_en_minutos": seguridad.minutos_de_sesion(),
+    }
+
+
 @app.post("/auth/login", response_model=schemas.Token, tags=["Sesión"])
 def login(formulario: OAuth2PasswordRequestForm = Depends()):
     """Inicia sesion con usuario y contrasena; devuelve un token que caduca.
 
-    En /docs usa el boton "Authorize". Tras varios intentos fallidos seguidos
-    la cuenta se bloquea unos minutos.
+    Con verificacion en dos pasos activa, no devuelve el token: devuelve
+    `mfa_requerido` y un `mfa_token` para mandar con el codigo a POST
+    /auth/mfa. En /docs, el boton "Authorize" solo sirve para cuentas sin MFA.
+    Tras varios intentos fallidos seguidos la cuenta se bloquea unos minutos.
     """
     try:
         u = seguridad.autenticar(formulario.username, formulario.password)
-        token = seguridad.crear_token(u)
+        if u.mfa_activo:
+            return {
+                "mfa_requerido": True,
+                "mfa_token": seguridad.crear_token(u, "mfa"),
+                "expira_en_minutos": seguridad.MINUTOS_PASO_MFA,
+            }
+        return _token_de_sesion(u)
     except SQLAlchemyError:
         raise HTTPException(status_code=503, detail="Base de datos no disponible")
-    return {"access_token": token, "token_type": "bearer", "expira_en_minutos": seguridad.minutos_de_sesion()}
+
+
+@app.post("/auth/mfa", response_model=schemas.Token, tags=["Sesión"])
+def segundo_paso(paso: schemas.MfaPaso):
+    """Segundo paso: el codigo de 6 digitos de la app o un codigo de respaldo."""
+    try:
+        u = seguridad.usuario_del_token(paso.mfa_token, "mfa")
+        if u is None:
+            raise HTTPException(
+                status_code=401, detail="La verificación venció; vuelve a escribir tu usuario y contraseña"
+            )
+        mfa.verificar_entrada(u, paso.codigo)
+        return _token_de_sesion(u)
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
 
 
 @app.get("/auth/yo", response_model=schemas.UsuarioOut, tags=["Sesión"])
-def yo(u: Usuario = Depends(usuario_actual)):
-    """Quien eres y que areas puedes consultar (para armar el menu del frontend)."""
-    return {**u.__dict__, "areas_permitidas": areas_visibles(u, _ids_de_areas())}
+def yo(u: Usuario = Depends(sesion_actual)):
+    """Quien eres, que areas puedes consultar y si tienes algo pendiente
+    (contrasena temporal o MFA por configurar)."""
+    return {
+        **u.__dict__,
+        "areas_permitidas": areas_visibles(u, _ids_de_areas()),
+        "mfa_obligatorio": u.rol in seguridad.roles_con_mfa(),
+        "codigos_respaldo_restantes": mfa.respaldos_restantes(u.id) if u.mfa_activo else 0,
+    }
+
+
+@app.post("/auth/contrasena", response_model=schemas.Token, tags=["Sesión"])
+def cambiar_mi_contrasena(cambio: schemas.CambioContrasena, u: Usuario = Depends(sesion_actual)):
+    """Cambia tu contrasena (obligatorio si era temporal). Cierra tus otras
+    sesiones y devuelve un token nuevo para esta."""
+    try:
+        nuevo = seguridad.cambiar_mi_contrasena(u, cambio.actual, cambio.nueva)
+    except ErrorDeUsuario as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
+    return _token_de_sesion(nuevo)
+
+
+@app.post("/auth/mfa/configurar", response_model=schemas.MfaConfiguracion, tags=["Sesión"])
+def configurar_mfa(u: Usuario = Depends(sesion_actual)):
+    """Genera el QR para la app de autenticacion. Se activa con POST /auth/mfa/activar."""
+    try:
+        return mfa.iniciar_configuracion(u)
+    except ErrorDeUsuario as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
+
+
+@app.post("/auth/mfa/activar", response_model=schemas.CodigosRespaldo, tags=["Sesión"])
+def activar_mfa(solicitud: schemas.MfaActivar, u: Usuario = Depends(sesion_actual)):
+    """Confirma con un codigo de la app. Devuelve los codigos de respaldo (una sola vez)."""
+    try:
+        return {"codigos": mfa.activar(u, solicitud.codigo)}
+    except ErrorDeUsuario as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
 
 
 def _ids_de_areas() -> list[int]:
@@ -464,3 +537,84 @@ def marcar_todos_los_avisos(u: Usuario = Depends(usuario_actual)) -> dict[str, i
         return {"marcados": avisos.marcar_todos(u)}
     except SQLAlchemyError:
         raise HTTPException(status_code=503, detail="Base de datos no disponible")
+
+
+# ------------------------------------------------- cuentas (RF-11, RF-12)
+def solo_ti(u: Usuario = Depends(usuario_actual)) -> Usuario:
+    """Las cuentas las administra solo TI: quien administra cuentas no aprueba
+    reportes, y RRHH no puede crearse una segunda cuenta (regla 10.3.9)."""
+    if u.rol != "admin_ti":
+        raise HTTPException(status_code=403, detail="Solo Administración de TI puede administrar cuentas")
+    return u
+
+
+def ti_o_rrhh(u: Usuario = Depends(usuario_actual)) -> Usuario:
+    """Ver las cuentas y su bitacora: TI y RRHH (para auditar a TI)."""
+    if u.rol not in ("admin_ti", "rrhh"):
+        raise HTTPException(status_code=403, detail="Solo TI y Recursos Humanos pueden ver las cuentas")
+    return u
+
+
+def _cuentas(funcion, *args):
+    """Traduce los errores de las operaciones de cuentas a HTTP."""
+    try:
+        return funcion(*args)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc.args[0]))
+    except ErrorDeUsuario as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
+
+
+@app.get("/usuarios", response_model=list[schemas.Cuenta], tags=["Cuentas"])
+def ver_cuentas(_u: Usuario = Depends(ti_o_rrhh)):
+    """Cuentas del sistema (sin contrasenas ni secretos)."""
+    return _cuentas(seguridad.listar_cuentas)
+
+
+@app.get("/usuarios/cambios", response_model=list[schemas.CambioCuenta], tags=["Cuentas"])
+def bitacora_de_cuentas(
+    usuario: str | None = Query(None, description="Solo los cambios de esa cuenta"),
+    limite: int = Query(50, ge=1, le=200),
+    _u: Usuario = Depends(ti_o_rrhh),
+):
+    """Quien creo o modifico cada cuenta, cuando y que cambio (RF-11)."""
+    return _cuentas(seguridad.cambios, limite, usuario)
+
+
+@app.post("/usuarios", status_code=201, response_model=schemas.CuentaCreada, tags=["Cuentas"])
+def crear_cuenta(nueva: schemas.CuentaNueva, u: Usuario = Depends(solo_ti)):
+    """Crea una cuenta con una contrasena temporal que se muestra UNA vez: la
+    persona la cambia al entrar, asi TI nunca conoce la definitiva."""
+    temporal = seguridad.generar_contrasena_temporal()
+    id_ = _cuentas(
+        lambda: seguridad.crear_usuario(
+            nueva.usuario, nueva.nombre, nueva.rol, temporal, nueva.area_id, nueva.correo, por=u.usuario, temporal=True
+        )
+    )
+    return {"cuenta": seguridad.obtener_cuenta(id_), "contrasena_temporal": temporal}
+
+
+@app.patch("/usuarios/{usuario_id}", response_model=schemas.Cuenta, tags=["Cuentas"])
+def modificar_cuenta(usuario_id: int, cambio: schemas.CuentaCambio, u: Usuario = Depends(solo_ti)):
+    """Cambia nombre, rol, area, correo o desactiva/reactiva una cuenta. Nadie
+    cambia su propio rol ni se desactiva. Las cuentas no se borran."""
+    pedidos = cambio.model_dump(exclude_unset=True)
+    pedidos = {c: v for c, v in pedidos.items() if v is not None or c in ("area_id", "correo")}
+    return _cuentas(seguridad.modificar_usuario, usuario_id, pedidos, u.usuario)
+
+
+@app.post("/usuarios/{usuario_id}/contrasena", response_model=schemas.ContrasenaTemporal, tags=["Cuentas"])
+def restablecer_contrasena(usuario_id: int, u: Usuario = Depends(solo_ti)):
+    """Pone una contrasena temporal (se muestra UNA vez), desbloquea la cuenta
+    y cierra sus sesiones. La persona elige la suya al entrar."""
+    return {"contrasena_temporal": _cuentas(seguridad.restablecer_contrasena, usuario_id, u.usuario)}
+
+
+@app.post("/usuarios/{usuario_id}/mfa/reiniciar", response_model=schemas.Cuenta, tags=["Cuentas"])
+def reiniciar_mfa(usuario_id: int, u: Usuario = Depends(solo_ti)):
+    """Borra la verificacion en dos pasos (telefono perdido) y cierra sus
+    sesiones: al entrar, la persona la vuelve a configurar."""
+    _cuentas(mfa.reiniciar, usuario_id, u.usuario)
+    return seguridad.obtener_cuenta(usuario_id)

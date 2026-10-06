@@ -6,7 +6,7 @@ import { SESION_VENCIDA } from '../api'
 import App from '../App'
 import { SEGUNDOS_ENTRE_CONSULTAS } from '../paginas/DetalleNarrativa'
 import { ProveedorSesion } from '../sesion'
-import { instalarApiFalsa } from './apiFalsa'
+import { CODIGO_MFA, instalarApiFalsa } from './apiFalsa'
 
 function montar(ruta = '/') {
   return render(
@@ -371,5 +371,141 @@ describe('configuración (RF-12)', () => {
     expect(await screen.findByText('Desactivada')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Editar/ })).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Generar los reportes cada mes')).not.toBeInTheDocument()
+  })
+})
+
+describe('verificación en dos pasos (MFA)', () => {
+  it('pide el código de la app después de la contraseña', async () => {
+    const { contrasena } = instalarApiFalsa()
+    const persona = await entrar('lia', contrasena)
+    await persona.type(await screen.findByLabelText('Código de verificación'), '000000')
+    await persona.click(screen.getByRole('button', { name: 'Verificar' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('El código no es correcto')
+    expect(sessionStorage.getItem('rrhh.token')).toBeNull()
+
+    await persona.type(screen.getByLabelText('Código de verificación'), CODIGO_MFA)
+    await persona.click(screen.getByRole('button', { name: 'Verificar' }))
+    expect(await screen.findByRole('heading', { name: 'Indicadores de Corporativo' })).toBeInTheDocument()
+    expect(sessionStorage.getItem('rrhh.token')).toBe('token-lia')
+  })
+
+  it('si el rol lo exige, hay que configurarlo antes de usar el sistema', async () => {
+    const { contrasena } = instalarApiFalsa()
+    const persona = await entrar('sinmfa', contrasena)
+    expect(await screen.findByRole('heading', { name: 'Configura la verificación en dos pasos' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Tablero' })).not.toBeInTheDocument()
+
+    await persona.click(screen.getByRole('button', { name: 'Generar código QR' }))
+    expect(await screen.findByRole('img', { name: 'Código QR para tu app de autenticación' })).toBeInTheDocument()
+    expect(screen.getByText('JBSWY3DPEHPK3PXP')).toBeInTheDocument()
+    const codigo = screen.getByLabelText(/código de 6 dígitos/)
+    await persona.type(codigo, '111111')
+    await persona.click(screen.getByRole('button', { name: 'Activar' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('El código no es correcto')
+
+    await persona.type(screen.getByLabelText(/código de 6 dígitos/), CODIGO_MFA)
+    await persona.click(screen.getByRole('button', { name: 'Activar' }))
+    const codigos = await screen.findByRole('list', { name: 'Códigos de respaldo' })
+    expect(within(codigos).getAllByRole('listitem')).toHaveLength(10)
+    await persona.click(screen.getByRole('button', { name: 'Ya los guardé' }))
+    expect(await screen.findByRole('heading', { name: 'Indicadores de Corporativo' })).toBeInTheDocument()
+  })
+})
+
+describe('contraseña temporal', () => {
+  it('obliga a elegir una propia antes de usar el sistema', async () => {
+    const { contrasena, estado } = instalarApiFalsa()
+    const persona = await entrar('nuevo', contrasena)
+    expect(await screen.findByRole('heading', { name: 'Cambia tu contraseña' })).toBeInTheDocument()
+
+    await persona.type(screen.getByLabelText('Contraseña actual'), contrasena)
+    await persona.type(screen.getByLabelText('Contraseña nueva'), 'Mi-clave-nueva-1')
+    await persona.type(screen.getByLabelText('Repite la contraseña nueva'), 'Mi-clave-nueva-2')
+    await persona.click(screen.getByRole('button', { name: 'Guardar y continuar' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('no coinciden')
+    expect(estado.contrasenasCambiadas).toEqual([])
+
+    await persona.clear(screen.getByLabelText('Repite la contraseña nueva'))
+    await persona.type(screen.getByLabelText('Repite la contraseña nueva'), 'Mi-clave-nueva-1')
+    await persona.click(screen.getByRole('button', { name: 'Guardar y continuar' }))
+    expect(await screen.findByRole('heading', { name: 'Indicadores de Corporativo' })).toBeInTheDocument()
+    expect(estado.contrasenasCambiadas).toEqual([{ usuario: 'nuevo', nueva: 'Mi-clave-nueva-1' }])
+  })
+})
+
+describe('mi cuenta', () => {
+  it('cualquiera cambia su contraseña', async () => {
+    const { contrasena } = instalarApiFalsa()
+    const persona = await entrar('ana', contrasena)
+    await persona.click(await screen.findByRole('link', { name: /Ana López/ }))
+    expect(await screen.findByRole('heading', { name: 'Mi cuenta' })).toBeInTheDocument()
+    await persona.type(screen.getByLabelText('Contraseña actual'), contrasena)
+    await persona.type(screen.getByLabelText('Contraseña nueva'), 'Otra-clave-segura-9')
+    await persona.type(screen.getByLabelText('Repite la contraseña nueva'), 'Otra-clave-segura-9')
+    await persona.click(screen.getByRole('button', { name: 'Cambiar contraseña' }))
+    expect(await screen.findByText(/Contraseña cambiada/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Activar verificación en dos pasos' })).toBeInTheDocument()
+  })
+})
+
+describe('cuentas (RF-11, RF-12)', () => {
+  it('TI crea una cuenta y ve la contraseña temporal una sola vez', async () => {
+    const { contrasena } = instalarApiFalsa()
+    const persona = await entrar('ti', contrasena)
+    await persona.click(await screen.findByRole('link', { name: 'Usuarios' }))
+    await persona.click(await screen.findByRole('button', { name: 'Nueva cuenta' }))
+    await persona.type(screen.getByLabelText('Usuario'), 'luis')
+    await persona.type(screen.getByLabelText('Nombre'), 'Luis Pérez')
+    await persona.selectOptions(screen.getByLabelText('Rol'), 'gerente')
+    await persona.selectOptions(screen.getByLabelText('Área'), '1')
+    await persona.click(screen.getByRole('button', { name: 'Crear cuenta' }))
+
+    expect(await screen.findByText('Tmp7-Kq3x-Pa9t')).toBeInTheDocument()
+    expect(screen.getByRole('table', { name: 'Cuentas' })).toHaveTextContent('Luis Pérez')
+    const bitacora = await screen.findByRole('table', { name: 'Bitácora de cuentas' })
+    expect(bitacora).toHaveTextContent('Creó la cuenta')
+    expect(bitacora).toHaveTextContent('área: Ventas')
+    await persona.click(screen.getByRole('button', { name: 'Listo, ya la entregué' }))
+    expect(screen.queryByText('Tmp7-Kq3x-Pa9t')).not.toBeInTheDocument()
+  })
+
+  it('TI desactiva una cuenta solo tras confirmar', async () => {
+    const { contrasena } = instalarApiFalsa()
+    const confirmar = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
+    const persona = await entrar('ti', contrasena, '/usuarios')
+    const fila = () => within(screen.getByRole('table', { name: 'Cuentas' })).getByText('Dirección General').closest('tr')
+
+    await persona.click(await screen.findByRole('button', { name: 'Desactivar dir' }))
+    expect(fila()).toHaveTextContent('Activa')
+    await persona.click(screen.getByRole('button', { name: 'Desactivar dir' }))
+    await waitFor(() => expect(fila()).toHaveTextContent('Desactivada'))
+    expect(confirmar).toHaveBeenCalledTimes(2)
+    expect(await screen.findByRole('table', { name: 'Bitácora de cuentas' })).toHaveTextContent('Desactivó la cuenta')
+  })
+
+  it('TI restablece una contraseña y no puede tocar la suya desde aquí', async () => {
+    const { contrasena } = instalarApiFalsa()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const persona = await entrar('ti', contrasena, '/usuarios')
+    await persona.click(await screen.findByRole('button', { name: 'Restablecer contraseña de ana' }))
+    expect(await screen.findByText('Nva2-Rst8-Xm4p')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Editar ti' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Desactivar ti' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Restablecer contraseña de ti' })).not.toBeInTheDocument()
+  })
+
+  it('RRHH audita las cuentas pero no las administra', async () => {
+    const { contrasena } = instalarApiFalsa()
+    await entrar('ana', contrasena, '/usuarios')
+    expect(await screen.findByRole('table', { name: 'Cuentas' })).toHaveTextContent('Soporte TI')
+    expect(screen.queryByRole('button', { name: 'Nueva cuenta' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Editar/ })).not.toBeInTheDocument()
+  })
+
+  it('Dirección no ve las cuentas', async () => {
+    const { contrasena } = instalarApiFalsa()
+    await entrar('dir', contrasena)
+    await screen.findByRole('heading', { name: 'Indicadores de Corporativo' })
+    expect(screen.queryByRole('link', { name: 'Usuarios' })).not.toBeInTheDocument()
   })
 })

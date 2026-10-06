@@ -6,9 +6,13 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class Token(BaseModel):
-    access_token: str
+    """Respuesta del inicio de sesion. Con MFA activo, el primer paso NO trae
+    access_token sino mfa_token: se manda con el codigo a POST /auth/mfa."""
+    access_token: str | None = None
     token_type: str = "bearer"
     expira_en_minutos: int
+    mfa_requerido: bool = False
+    mfa_token: str | None = Field(None, description="Solo sirve para POST /auth/mfa, por unos minutos")
 
 
 class UsuarioOut(BaseModel):
@@ -18,6 +22,89 @@ class UsuarioOut(BaseModel):
     rol: str = Field(description="direccion, rrhh, gerente o admin_ti")
     area_id: int | None = Field(description="Solo los gerentes tienen area")
     areas_permitidas: list[int] = Field(description="Areas que puede consultar (0 = corporativo)")
+    pendiente: str | None = Field(
+        None, description="cambiar_contrasena o configurar_mfa: hasta resolverlo, el resto de la API da 403"
+    )
+    mfa_activo: bool = False
+    mfa_obligatorio: bool = Field(False, description="Su rol debe usar verificacion en dos pasos")
+    codigos_respaldo_restantes: int = 0
+
+
+class MfaPaso(BaseModel):
+    """Segundo paso del inicio de sesion."""
+    mfa_token: str
+    codigo: str = Field(max_length=20, description="6 digitos de la app, o un codigo de respaldo")
+
+
+class MfaConfiguracion(BaseModel):
+    secreto: str = Field(description="Para escribirlo a mano si no se puede escanear el QR")
+    uri: str
+    qr: str = Field(description="Imagen SVG del QR como data URI")
+
+
+class MfaActivar(BaseModel):
+    codigo: str = Field(max_length=10)
+
+
+class CodigosRespaldo(BaseModel):
+    codigos: list[str] = Field(description="De un solo uso. No se vuelven a mostrar")
+
+
+class CambioContrasena(BaseModel):
+    actual: str = Field(max_length=200)
+    nueva: str = Field(max_length=200)
+
+
+# ---------------------------------------------------------- cuentas (TI)
+class Cuenta(BaseModel):
+    id: int
+    usuario: str
+    nombre: str
+    rol: str
+    area_id: int | None
+    correo: str | None
+    activo: bool
+    bloqueado: bool
+    debe_cambiar_contrasena: bool
+    mfa_activo: bool
+    creado_en: datetime
+    ultimo_acceso: datetime | None
+
+
+class CuentaNueva(BaseModel):
+    usuario: str = Field(min_length=2, max_length=40, pattern=r"^[A-Za-z0-9._-]+$")
+    nombre: str = Field(min_length=1, max_length=120)
+    rol: str
+    area_id: int | None = None
+    correo: str | None = None
+
+
+class CuentaCambio(BaseModel):
+    """Solo los campos que se mandan se cambian."""
+    nombre: str | None = Field(None, min_length=1, max_length=120)
+    rol: str | None = None
+    area_id: int | None = None
+    correo: str | None = None
+    activo: bool | None = None
+
+
+class CuentaCreada(BaseModel):
+    cuenta: Cuenta
+    contrasena_temporal: str = Field(description="Se muestra una sola vez; la persona la cambia al entrar")
+
+
+class ContrasenaTemporal(BaseModel):
+    contrasena_temporal: str = Field(description="Se muestra una sola vez; la persona la cambia al entrar")
+
+
+class CambioCuenta(BaseModel):
+    """Bitacora de cuentas: quien hizo que, a que cuenta y cuando."""
+    id: int
+    usuario: str
+    accion: str
+    detalle: dict
+    hecho_por: str
+    hecho_en: datetime
 
 
 class Area(BaseModel):

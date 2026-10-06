@@ -46,6 +46,15 @@ def _base_de_datos_lista():
             returncode=2,
         )
 
+@pytest.fixture(scope="session", autouse=True)
+def _sin_bitacora_de_cuentas_de_prueba(_base_de_datos_lista):
+    """Las cuentas de prueba (prefijo zz_) se crean por modulo y se borran al
+    final, pero su bitacora no tiene llave foranea: se limpia aqui."""
+    yield
+    with engine.begin() as conn:
+        conn.execute(text(r"DELETE FROM usuarios_cambios WHERE usuario LIKE 'zz\_%' OR hecho_por LIKE 'pruebas\_%'"))
+
+
 # Usuario con el que corren las pruebas que no son de seguridad: RRHH ve todo.
 # Las pruebas de permisos (test_seguridad.py) quitan este atajo y usan
 # usuarios reales con su contrasena y su token.
@@ -60,14 +69,20 @@ def _sesion_de_rrhh():
 
 
 @pytest.fixture(autouse=True)
-def _sin_correo_ni_avisos_residuales(monkeypatch):
-    """Las pruebas nunca mandan correos reales (aunque el .env tenga SMTP) y
-    borran los avisos que generen: una narrativa de prueba que termina avisa
-    a todo RRHH, incluidos los usuarios reales de la base local."""
+def _entorno_de_prueba(monkeypatch):
+    """- Nunca se mandan correos reales, aunque el .env tenga SMTP.
+    - El MFA obligatorio se prueba en test_cuentas.py; en las demas pruebas
+      las cuentas de cada rol entran solo con contrasena.
+    - Se borran los avisos y la bitacora de cuentas que genere la prueba: una
+      narrativa de prueba que termina avisa a todo RRHH, incluidos los
+      usuarios reales de la base local."""
     monkeypatch.setenv("SMTP_HOST", "")
+    monkeypatch.setenv("MFA_OBLIGATORIO", "")
     avisos.asegurar_tabla()
     with engine.connect() as conn:
-        ultimo = conn.execute(text("SELECT COALESCE(MAX(id), 0) FROM avisos")).scalar()
+        ultimo_aviso = conn.execute(text("SELECT COALESCE(MAX(id), 0) FROM avisos")).scalar()
+        ultimo_cambio = conn.execute(text("SELECT COALESCE(MAX(id), 0) FROM usuarios_cambios")).scalar()
     yield
     with engine.begin() as conn:
-        conn.execute(text("DELETE FROM avisos WHERE id > :u"), {"u": ultimo})
+        conn.execute(text("DELETE FROM avisos WHERE id > :u"), {"u": ultimo_aviso})
+        conn.execute(text("DELETE FROM usuarios_cambios WHERE id > :u"), {"u": ultimo_cambio})

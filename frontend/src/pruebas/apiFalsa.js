@@ -6,7 +6,15 @@ export const USUARIOS = {
   eva: { id: 4, usuario: 'eva', nombre: 'Eva Ruiz', rol: 'rrhh', area_id: null, areas_permitidas: [0, 1, 2] },
   dir: { id: 2, usuario: 'dir', nombre: 'Dirección General', rol: 'direccion', area_id: null, areas_permitidas: [0] },
   ti: { id: 3, usuario: 'ti', nombre: 'Soporte TI', rol: 'admin_ti', area_id: null, areas_permitidas: [0, 1, 2] },
+  // con contrasena temporal: debe cambiarla antes de usar el sistema
+  nuevo: { id: 5, usuario: 'nuevo', nombre: 'Nuevo Director', rol: 'direccion', area_id: null, areas_permitidas: [0], pendiente: 'cambiar_contrasena' },
+  // con MFA activo: el inicio de sesion pide el codigo
+  lia: { id: 6, usuario: 'lia', nombre: 'Lía Torres', rol: 'rrhh', area_id: null, areas_permitidas: [0, 1, 2], mfa_activo: true, mfa_obligatorio: true, codigos_respaldo_restantes: 10 },
+  // su rol exige MFA y aun no lo configura
+  sinmfa: { id: 7, usuario: 'sinmfa', nombre: 'Raúl Díaz', rol: 'rrhh', area_id: null, areas_permitidas: [0, 1, 2], pendiente: 'configurar_mfa', mfa_obligatorio: true },
 }
+export const CODIGO_MFA = '123456'
+const CODIGO_RESPALDO = 'abcde-fghij'
 const CONTRASENA = 'contrasena-correcta'
 const AREAS = [
   { id: 0, nombre: 'Corporativo' },
@@ -115,6 +123,9 @@ function avisosIniciales() {
     dir: [],
     eva: [],
     ti: [],
+    nuevo: [],
+    lia: [],
+    sinmfa: [],
   }
 }
 
@@ -134,6 +145,51 @@ function actualizarUmbral(usuario, indicador, { umbral_atencion, umbral_critico 
   return respuesta(200, u)
 }
 
+// Cuentas como las devuelve GET /usuarios
+function cuentasIniciales() {
+  return Object.values(USUARIOS).map((u) => ({
+    id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol, area_id: u.area_id, correo: null, activo: true,
+    bloqueado: false, debe_cambiar_contrasena: u.pendiente === 'cambiar_contrasena', mfa_activo: Boolean(u.mfa_activo),
+    creado_en: '2026-09-01T10:00:00Z', ultimo_acceso: null,
+  }))
+}
+
+// Mismas reglas que /usuarios de la API real: solo TI administra; RRHH consulta
+function cuentas(usuario, pathname, metodo, cuerpo, estado) {
+  const soloTi = () => respuesta(403, { detail: 'Solo Administración de TI puede administrar cuentas' })
+  const anotar = (cuenta, accion, detalle = {}) =>
+    estado.bitacora.unshift({ id: estado.bitacora.length + 1, usuario: cuenta, accion, detalle, hecho_por: usuario.usuario, hecho_en: '2026-10-06T12:00:00Z' })
+  if (metodo === 'GET') {
+    if (!['admin_ti', 'rrhh'].includes(usuario.rol)) return respuesta(403, { detail: 'Solo TI y Recursos Humanos pueden ver las cuentas' })
+    return respuesta(200, pathname === '/usuarios/cambios' ? estado.bitacora : estado.cuentas)
+  }
+  if (usuario.rol !== 'admin_ti') return soloTi()
+  if (pathname === '/usuarios' && metodo === 'POST') {
+    if (estado.cuentas.some((c) => c.usuario === cuerpo.usuario)) return respuesta(422, { detail: `El usuario '${cuerpo.usuario}' ya existe` })
+    const cuenta = { ...cuerpo, id: 100 + estado.cuentas.length, activo: true, bloqueado: false, debe_cambiar_contrasena: true, mfa_activo: false, creado_en: '2026-10-06T12:00:00Z', ultimo_acceso: null }
+    estado.cuentas.push(cuenta)
+    anotar(cuenta.usuario, 'crear', { nombre: cuenta.nombre, rol: cuenta.rol, area_id: cuenta.area_id, correo: cuenta.correo })
+    return respuesta(201, { cuenta, contrasena_temporal: 'Tmp7-Kq3x-Pa9t' })
+  }
+  const [, , id, que] = pathname.split('/')
+  const cuenta = estado.cuentas.find((c) => c.id === Number(id))
+  if (!cuenta) return respuesta(404, { detail: `El usuario ${id} no existe` })
+  if (metodo === 'PATCH') {
+    const diferencias = Object.fromEntries(Object.entries(cuerpo).filter(([k, v]) => cuenta[k] !== v).map(([k, v]) => [k, [cuenta[k], v]]))
+    Object.assign(cuenta, cuerpo)
+    if (Object.keys(diferencias).length) anotar(cuenta.usuario, 'activo' in cuerpo ? (cuerpo.activo ? 'reactivar' : 'desactivar') : 'modificar', diferencias)
+    return respuesta(200, cuenta)
+  }
+  if (que === 'contrasena') {
+    Object.assign(cuenta, { debe_cambiar_contrasena: true, bloqueado: false })
+    anotar(cuenta.usuario, 'restablecer_contrasena')
+    return respuesta(200, { contrasena_temporal: 'Nva2-Rst8-Xm4p' })
+  }
+  cuenta.mfa_activo = false
+  anotar(cuenta.usuario, 'reiniciar_mfa')
+  return respuesta(200, cuenta)
+}
+
 function respuesta(estado, cuerpo) {
   return Promise.resolve(new Response(JSON.stringify(cuerpo), { status: estado, headers: { 'Content-Type': 'application/json' } }))
 }
@@ -143,6 +199,10 @@ function respuesta(estado, cuerpo) {
 export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = false } = {}) {
   const estado = {
     tokenValido: null, consultas: 0, solicitudes: [], exportaciones: [],
+    pendientes: Object.fromEntries(Object.values(USUARIOS).map((u) => [u.usuario, u.pendiente ?? null])),
+    contrasenasCambiadas: [],
+    cuentas: cuentasIniciales(),
+    bitacora: [],
     avisos: avisosIniciales(),
     umbrales: UMBRALES.map((u) => ({ ...u })),
     cambios: [],
@@ -160,9 +220,18 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
 
     if (pathname === '/auth/login') {
       const f = new URLSearchParams(opciones.body)
-      if (USUARIOS[f.get('username')] && f.get('password') === CONTRASENA)
-        return respuesta(200, { access_token: `token-${f.get('username')}`, token_type: 'bearer', expira_en_minutos: 60 })
-      return respuesta(401, { detail: 'Usuario o contraseña incorrectos' })
+      const quien = USUARIOS[f.get('username')]
+      if (!quien || f.get('password') !== CONTRASENA) return respuesta(401, { detail: 'Usuario o contraseña incorrectos' })
+      if (quien.mfa_activo)
+        return respuesta(200, { access_token: null, mfa_requerido: true, mfa_token: `mfa-${quien.usuario}`, token_type: 'bearer', expira_en_minutos: 5 })
+      return respuesta(200, { access_token: `token-${quien.usuario}`, mfa_requerido: false, token_type: 'bearer', expira_en_minutos: 60 })
+    }
+    if (pathname === '/auth/mfa') {
+      const { mfa_token, codigo } = JSON.parse(opciones.body)
+      const quien = USUARIOS[mfa_token.replace('mfa-', '')]
+      if (!quien) return respuesta(401, { detail: 'La verificación venció; vuelve a escribir tu usuario y contraseña' })
+      if (codigo !== CODIGO_MFA && codigo !== CODIGO_RESPALDO) return respuesta(401, { detail: 'El código no es correcto' })
+      return respuesta(200, { access_token: `token-${quien.usuario}`, mfa_requerido: false, token_type: 'bearer', expira_en_minutos: 60 })
     }
 
     const usuario = tokens[(opciones.headers?.Authorization ?? '').replace('Bearer ', '')]
@@ -171,7 +240,24 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
     const conDatos = usuario.rol !== 'admin_ti'
     const sinPermiso = () => respuesta(403, { detail: 'Tu rol no tiene acceso a datos de colaboradores' })
 
-    if (pathname === '/auth/yo') return respuesta(200, usuario)
+    const pendiente = estado.pendientes[usuario.usuario]
+    if (pathname === '/auth/yo') return respuesta(200, { mfa_activo: false, mfa_obligatorio: false, codigos_respaldo_restantes: 0, ...usuario, pendiente })
+    if (pathname === '/auth/contrasena') {
+      const { actual, nueva } = JSON.parse(opciones.body)
+      if (actual !== CONTRASENA) return respuesta(422, { detail: 'La contraseña actual no es correcta' })
+      estado.contrasenasCambiadas.push({ usuario: usuario.usuario, nueva })
+      if (pendiente === 'cambiar_contrasena') estado.pendientes[usuario.usuario] = null
+      return respuesta(200, { access_token: `token-${usuario.usuario}`, token_type: 'bearer', expira_en_minutos: 60 })
+    }
+    if (pathname === '/auth/mfa/configurar')
+      return respuesta(200, { secreto: 'JBSWY3DPEHPK3PXP', uri: 'otpauth://totp/Motor%20RRHH:sinmfa', qr: 'data:image/svg+xml;base64,PHN2Zy8+' })
+    if (pathname === '/auth/mfa/activar') {
+      if (JSON.parse(opciones.body).codigo !== CODIGO_MFA) return respuesta(422, { detail: 'El código no es correcto. Revisa que la hora de tu teléfono sea la correcta' })
+      if (pendiente === 'configurar_mfa') estado.pendientes[usuario.usuario] = null
+      return respuesta(200, { codigos: Array.from({ length: 10 }, (_, i) => `cod${i}a-bcdef`) })
+    }
+    if (pendiente) return respuesta(403, { detail: 'Antes de continuar resuelve lo pendiente' })
+    if (pathname.startsWith('/usuarios')) return cuentas(usuario, pathname, metodo, opciones.body && JSON.parse(opciones.body), estado)
     if (pathname === '/areas') return respuesta(200, AREAS.filter((a) => usuario.areas_permitidas.includes(a.id)))
     if (pathname === '/periodos') return respuesta(200, PERIODOS)
     if (pathname === '/umbrales') return respuesta(200, estado.umbrales)

@@ -12,8 +12,11 @@ export const NOMBRES_ROL = {
   admin_ti: 'Administración de TI',
 }
 
-// admin_ti administra catalogos y configuracion, sin datos de colaboradores
+// admin_ti administra catalogos, configuracion y cuentas, sin datos de colaboradores
 export const puedeVerDatos = (usuario) => usuario?.rol !== 'admin_ti'
+
+// Cuentas: TI las administra y RRHH las consulta (para auditar)
+export const puedeVerCuentas = (usuario) => ['admin_ti', 'rrhh'].includes(usuario?.rol)
 
 export function ProveedorSesion({ children }) {
   const [usuario, setUsuario] = useState(null)
@@ -43,9 +46,9 @@ export function ProveedorSesion({ children }) {
     return () => window.removeEventListener(SESION_VENCIDA, alVencer)
   }, [cerrarSesion])
 
-  const iniciarSesion = useCallback(async (nombreUsuario, contrasena) => {
-    const { access_token } = await api.login(nombreUsuario, contrasena)
-    guardarToken(access_token)
+  // Guarda el token y carga quien es la persona
+  const abrirSesion = useCallback(async (token) => {
+    guardarToken(token)
     try {
       setUsuario(await api.yo())
       setAviso(null)
@@ -55,8 +58,33 @@ export function ProveedorSesion({ children }) {
     }
   }, [])
 
+  // Primer paso. Si la cuenta tiene verificacion en dos pasos, devuelve el
+  // mfa_token para el segundo paso; si no, la sesion queda abierta.
+  const iniciarSesion = useCallback(
+    async (nombreUsuario, contrasena) => {
+      const r = await api.login(nombreUsuario, contrasena)
+      if (r.mfa_requerido) return r.mfa_token
+      await abrirSesion(r.access_token)
+      return null
+    },
+    [abrirSesion],
+  )
+
+  const verificarMfa = useCallback(
+    async (mfaToken, codigo) => {
+      const { access_token } = await api.verificarMfa(mfaToken, codigo)
+      await abrirSesion(access_token)
+    },
+    [abrirSesion],
+  )
+
+  // Tras cambiar la contrasena o activar el MFA: datos y pendientes al dia
+  const recargarUsuario = useCallback(async () => setUsuario(await api.yo()), [])
+
   return (
-    <ContextoSesion.Provider value={{ usuario, cargando, aviso, iniciarSesion, cerrarSesion }}>
+    <ContextoSesion.Provider
+      value={{ usuario, cargando, aviso, iniciarSesion, verificarMfa, recargarUsuario, cerrarSesion }}
+    >
       {children}
     </ContextoSesion.Provider>
   )

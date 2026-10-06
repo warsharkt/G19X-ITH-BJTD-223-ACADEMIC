@@ -4,7 +4,7 @@ Consolida los datos de Recursos Humanos (reclutamiento, desempeño, capacitació
 
 - **Motor analítico (sin IA):** calcula los KPIs con SQL y pandas, de forma reproducible y verificada con pruebas.
 - **Motor de narrativa (con IA):** el modelo redacta **solo** a partir de los KPIs ya calculados. Unos guardarrailes rechazan cifras inventadas, causas no demostradas y alertas omitidas. Todo reporte requiere revisión humana.
-- **Acceso por rol:** Dirección ve el consolidado, RRHH ve todo, cada gerente ve solo su área y TI ve la configuración.
+- **Acceso por rol:** Dirección ve el consolidado, RRHH ve todo, cada gerente ve solo su área y TI ve la configuración y administra las cuentas. Dirección, TI y RRHH entran con verificación en dos pasos.
 - **Tablero web (React):** indicadores del mes con semáforo, tendencia de 24 meses con umbrales, generación de reportes con IA e historial.
 - **Exportación:** los reportes aprobados se descargan en PDF y como presentación de PowerPoint.
 - **Avisos y programación mensual:** cada persona recibe avisos de indicadores en rojo y de reportes por revisar o aprobados. Los reportes del mes se pueden generar solos, y RRHH ajusta los umbrales desde el panel de configuración.
@@ -15,7 +15,7 @@ Requisitos, decisiones y reglas de negocio: [`docs/PRD.md`](docs/PRD.md).
 
 ## Tecnologías
 
-Python 3.14 · FastAPI · PostgreSQL 16 (Docker local o Supabase) · pandas · Ollama + Qwen3 8B (IA local) o Groq (IA en la nube, solo con datos sintéticos) · ReportLab (PDF) y python-pptx (presentación) · React + Vite + Recharts · pytest y Vitest
+Python 3.14 · FastAPI · PyOTP (verificación en dos pasos) · PostgreSQL 16 (Docker local o Supabase) · pandas · Ollama + Qwen3 8B (IA local) o Groq (IA en la nube, solo con datos sintéticos) · ReportLab (PDF) y python-pptx (presentación) · React + Vite + Recharts · pytest y Vitest
 
 ## Instalación local
 
@@ -44,6 +44,8 @@ python -m scripts.seed
 
 # 5. Tu usuario (la contraseña se escribe oculta; mínimo 10 caracteres)
 python -m scripts.crear_usuario --usuario admin --nombre "Tu Nombre" --rol rrhh
+#    y una cuenta de TI para administrar las demás desde el tablero
+python -m scripts.crear_usuario --usuario ti --nombre "Soporte TI" --rol admin_ti
 
 # 6. Arrancar la API
 python -m uvicorn app.main:app --reload
@@ -71,6 +73,8 @@ Abre http://localhost:5173 e inicia sesión con tu usuario. Si la API no está e
 | **Narrativas** | Solicita el reporte con IA de un área y mes, muestra el avance mientras se redacta, permite aprobarlo o rechazarlo, descargar los aprobados en PDF o presentación, y guarda el historial consultable por área, mes y revisión |
 | **Avisos** | Indicadores en rojo, reportes por revisar y reportes aprobados o rechazados de tus áreas. El menú muestra cuántos faltan por leer |
 | **Configuración** | Umbrales del semáforo con su bitácora de cambios, y programación mensual. Todos la ven; solo RRHH la cambia |
+| **Usuarios** | Cuentas y su bitácora. TI las crea, modifica, desactiva y les restablece la contraseña o la verificación en dos pasos; RRHH solo las consulta |
+| **Mi cuenta** (tu nombre, arriba a la derecha) | Cambiar tu contraseña y activar la verificación en dos pasos |
 
 Cada rol ve solo lo suyo: Dirección no puede cambiar de área, y TI solo ve la configuración, sin poder cambiarla. La API aplica los mismos permisos, así que no dependen de la interfaz. La sesión se guarda solo en la pestaña (`sessionStorage`) y se cierra sola cuando el token vence.
 
@@ -127,6 +131,12 @@ schtasks /create /tn "Motor RRHH" /sc daily /st 07:00 /tr "cmd /c cd /d C:\ruta\
 
 ## Usuarios y roles
 
+Lo normal es que **TI administre las cuentas desde la sección Usuarios** del tablero. Al crear una cuenta o restablecer una contraseña, el sistema genera una **contraseña temporal** que se muestra una sola vez; la persona la cambia al entrar. Las cuentas no se borran, se desactivan, y cada cambio queda en la bitácora de cuentas.
+
+**Verificación en dos pasos.** Dirección, TI y RRHH la configuran la primera vez que entran: escanean un QR con una app como Google Authenticator o Microsoft Authenticator y, desde entonces, después de la contraseña escriben el código de 6 dígitos de la app. Al activarla reciben 10 códigos de respaldo de un solo uso. Si alguien pierde el teléfono, TI la reinicia desde Usuarios. Los roles obligados se cambian con `MFA_OBLIGATORIO` en el `.env`.
+
+El script sirve para crear la primera cuenta de TI y como respaldo desde la consola:
+
 ```powershell
 python -m scripts.crear_usuario --usuario dir  --nombre "Dirección"      --rol direccion
 python -m scripts.crear_usuario --usuario luis --nombre "Gerente Ventas" --rol gerente --area Ventas
@@ -134,6 +144,7 @@ python -m scripts.crear_usuario --usuario ti   --nombre "Soporte TI"     --rol a
 python -m scripts.crear_usuario --listar
 python -m scripts.crear_usuario --usuario luis --cambiar-contrasena   # también desbloquea la cuenta
 python -m scripts.crear_usuario --usuario luis --cambiar-correo luis@empresa.com   # "" lo quita
+python -m scripts.crear_usuario --usuario ti --reiniciar-mfa          # si TI perdió su teléfono
 ```
 
 Al crear un usuario puedes agregar `--correo` para que reciba el correo de avisos.
@@ -143,7 +154,7 @@ Al crear un usuario puedes agregar `--correo` para que reciba el correo de aviso
 | `direccion` | Solo el consolidado corporativo |
 | `rrhh` | Todo; aprueba o rechaza los reportes que solicitó otra persona; cambia umbrales y programación |
 | `gerente` | Solo su área |
-| `admin_ti` | Catálogos y configuración (sin cambiarla), sin datos de colaboradores ni avisos |
+| `admin_ti` | Administra las cuentas; ve la configuración sin cambiarla; sin datos de colaboradores ni avisos |
 
 ## Base de datos compartida en Supabase (opcional)
 
@@ -194,7 +205,8 @@ backend/
     programacion.py  programación mensual (hilo de la API y script)
     umbrales.py      edición de umbrales con bitácora
     exportar.py      reporte aprobado en PDF y presentación
-    seguridad.py     inicio de sesión, contraseñas, tokens y permisos por rol
+    seguridad.py     inicio de sesión, cuentas con bitácora, contraseñas, tokens y permisos por rol
+    mfa.py           verificación en dos pasos (TOTP) y códigos de respaldo
     database.py      conexión a PostgreSQL (local o Supabase)
   scripts/           seed, crear_usuario, programar, generar_narrativa, evaluar_narrativa
   tests/             pruebas automáticas
@@ -204,7 +216,7 @@ frontend/
     api.js           cliente de la API (token de sesión y errores)
     sesion.jsx       inicio y cierre de sesión, permisos por rol
     formato.js       cifras, fechas, semáforo y variaciones
-    paginas/         Login, Tablero, Narrativas, DetalleNarrativa, Avisos, Configuracion
+    paginas/         Login, Tablero, Narrativas, DetalleNarrativa, Avisos, Configuracion, Usuarios, Cuenta, Pendiente
     componentes/     tarjetas de KPI, gráfica de tendencia, vista del reporte
     pruebas/         pruebas automáticas (Vitest) con una API simulada
 db/                  esquema y tablas (SQL)

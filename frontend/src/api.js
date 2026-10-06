@@ -88,7 +88,21 @@ function consulta(parametros) {
 export const api = {
   login: (usuario, contrasena) =>
     pedir('/auth/login', { metodo: 'POST', formulario: { username: usuario, password: contrasena } }),
+  // Con MFA activo, login devuelve { mfa_requerido, mfa_token } en lugar del token
+  verificarMfa: (mfaToken, codigo) =>
+    pedir('/auth/mfa', { metodo: 'POST', cuerpo: { mfa_token: mfaToken, codigo } }),
   yo: () => pedir('/auth/yo'),
+  // Devuelve un token nuevo: las demas sesiones de la persona se cierran
+  cambiarContrasena: (actual, nueva) => pedir('/auth/contrasena', { metodo: 'POST', cuerpo: { actual, nueva } }),
+  configurarMfa: () => pedir('/auth/mfa/configurar', { metodo: 'POST' }),
+  activarMfa: (codigo) => pedir('/auth/mfa/activar', { metodo: 'POST', cuerpo: { codigo } }),
+  // Cuentas: TI las administra; RRHH solo las consulta
+  cuentas: () => pedir('/usuarios'),
+  cambiosCuentas: () => pedir('/usuarios/cambios' + consulta({ limite: 100 })),
+  crearCuenta: (datos) => pedir('/usuarios', { metodo: 'POST', cuerpo: datos }),
+  modificarCuenta: (id, cambios) => pedir(`/usuarios/${id}`, { metodo: 'PATCH', cuerpo: cambios }),
+  restablecerContrasena: (id) => pedir(`/usuarios/${id}/contrasena`, { metodo: 'POST' }),
+  reiniciarMfa: (id) => pedir(`/usuarios/${id}/mfa/reiniciar`, { metodo: 'POST' }),
   areas: () => pedir('/areas'),
   periodos: () => pedir('/periodos'),
   umbrales: () => pedir('/umbrales'),

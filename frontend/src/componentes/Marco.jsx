@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { api, AVISOS_CAMBIARON } from '../api'
-import { NOMBRES_ROL, puedeVerDatos, useSesion } from '../sesion'
+import { NOMBRES_ROL, puedeVerCuentas, puedeVerDatos, useSesion } from '../sesion'
 
 export const SEGUNDOS_ENTRE_AVISOS = 60
 
@@ -61,12 +61,13 @@ export default function Marco() {
             {/* TI no recibe avisos: todos hablan de datos de colaboradores */}
             {conDatos && <EnlaceAvisos />}
             <NavLink to="/configuracion">Configuración</NavLink>
+            {puedeVerCuentas(usuario) && <NavLink to="/usuarios">Usuarios</NavLink>}
           </nav>
           <div className="cuenta">
-            <span className="cuenta-nombre">
+            <NavLink to="/cuenta" className="cuenta-nombre" title="Mi cuenta">
               {usuario.nombre}
               <span className="cuenta-rol">{NOMBRES_ROL[usuario.rol] ?? usuario.rol}</span>
-            </span>
+            </NavLink>
             <button type="button" className="boton-secundario" onClick={() => cerrarSesion()}>
               Cerrar sesión
             </button>
