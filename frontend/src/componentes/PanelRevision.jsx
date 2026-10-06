@@ -1,20 +1,9 @@
 import { useState } from 'react'
 import { api } from '../api'
+import { guardarArchivo } from '../archivos'
 import { fechaHora } from '../formato'
 import { useSesion } from '../sesion'
 import Mensaje from './Mensaje'
-
-// Entrega el archivo al navegador como descarga.
-function guardarArchivo(blob, nombre) {
-  const url = URL.createObjectURL(blob)
-  const enlace = document.createElement('a')
-  enlace.href = url
-  enlace.download = nombre
-  document.body.appendChild(enlace)
-  enlace.click()
-  enlace.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 0)
-}
 
 // Descargas del reporte aprobado (RF-08). La API vuelve a exigir que este
 // aprobado y registra quien descargo cada archivo.

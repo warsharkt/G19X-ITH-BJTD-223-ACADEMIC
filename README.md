@@ -1,21 +1,55 @@
-# Motor Inteligente de Reportes Ejecutivos de RRHH
+# Talentia Insights
 
-Consolida los datos de Recursos Humanos (reclutamiento, desempeño, capacitación, rotación, clima laboral y productividad), calcula indicadores con su semáforo y genera con IA la narrativa ejecutiva de cada área y mes: resumen, hallazgos y recomendaciones.
+**Analítica de Recursos Humanos con IA responsable.** Talentia Insights consolida lo que exportan los sistemas de RRHH (reclutamiento, nómina, desempeño, capacitación, clima laboral y productividad), calcula los indicadores con su semáforo y redacta con IA el reporte ejecutivo de cada área y mes, que una persona de RRHH aprueba antes de distribuirse.
 
-- **Motor analítico (sin IA):** calcula los KPIs con SQL y pandas, de forma reproducible y verificada con pruebas.
-- **Motor de narrativa (con IA):** el modelo redacta **solo** a partir de los KPIs ya calculados. Unos guardarrailes rechazan cifras inventadas, causas no demostradas y alertas omitidas. Todo reporte requiere revisión humana.
-- **Acceso por rol:** Dirección ve el consolidado, RRHH ve todo, cada gerente ve solo su área y TI ve la configuración y administra las cuentas. Dirección, TI y RRHH entran con verificación en dos pasos.
-- **Tablero web (React):** indicadores del mes con semáforo, tendencia de 24 meses con umbrales, generación de reportes con IA e historial.
-- **Exportación:** los reportes aprobados se descargan en PDF y como presentación de PowerPoint.
-- **Avisos y programación mensual:** cada persona recibe avisos de indicadores en rojo y de reportes por revisar o aprobados. Los reportes del mes se pueden generar solos, y RRHH ajusta los umbrales desde el panel de configuración.
+La demostración corre con **Nordika Logística**, una empresa ficticia: operador logístico en Guadalajara con unas 350 personas en Operaciones, Ventas, Transporte, Finanzas, Almacén y Jurídico, y 24 meses de historia.
 
-Requisitos, decisiones y reglas de negocio: [`docs/PRD.md`](docs/PRD.md).
+- **Carga de datos:** RRHH sube el Excel o CSV que exporta cada sistema. Se valida completo (todo o nada), se descartan los datos personales, se concilia contra la base y queda en bitácora con la huella del archivo.
+- **Motor analítico (sin IA):** calcula los indicadores con SQL y pandas, de forma reproducible y verificada con pruebas.
+- **Motor de narrativa (con IA):** el modelo redacta **solo** a partir de los indicadores ya calculados. Unos guardarrailes rechazan cifras inventadas, causas no demostradas y alertas omitidas.
+- **Seguridad:** verificación en dos pasos obligatoria para Dirección, TI y RRHH; acceso por rol y área; contraseñas temporales; bloqueo por intentos; bitácoras de cuentas, umbrales, reportes y cargas; IA local que no saca los datos del servidor.
+- **Revisión humana y distribución:** nadie aprueba lo que pidió; los aprobados se descargan en PDF y presentación.
+- **Avisos y programación mensual:** alertas de indicadores en rojo y de reportes por revisar; los reportes del mes se pueden generar solos.
 
-> Los datos incluidos son **sintéticos** (empleados ficticios generados por `scripts/seed.py`). No contienen información de personas reales.
+> Todos los datos son **ficticios** (generados por `scripts/seed.py`). No contienen información de personas reales.
+
+## Demostración
+
+La demostración recorre el sistema completo como en producción. Ninguna medida de seguridad se apaga: se pide la verificación en dos pasos, cuentan los intentos fallidos y todo queda en las bitácoras. Para que se pueda probar sin celular, un **teléfono simulado en pantalla** muestra la app de autenticación con el código vigente, con la leyenda de que en producción solo aparece en el celular de cada persona.
+
+1. Haz la instalación local (abajo) y, en tu `.env`, pon:
+   ```
+   MODO_DATOS=sinteticos
+   MODO_DEMO=si
+   ```
+2. Crea las cuentas de prueba (con la API apagada o encendida):
+   ```powershell
+   python -m scripts.demo
+   ```
+3. Abre el tablero. La pantalla de inicio muestra las cuentas y su contraseña (`Demo-RRHH-2026`). Pulsa **Usar** junto a una cuenta y luego **Entrar**.
+
+| Cuenta | Persona | Para mostrar |
+|---|---|---|
+| `demo_rrhh` | Ana Ríos, Gerente de RRHH | Carga de datos, tablero de todas las áreas, solicitar reportes, umbrales y programación |
+| `demo_rrhh2` | Eva Muñoz, Analista de RRHH | Aprobar o rechazar los reportes que pidió Ana (nadie aprueba lo que pidió) |
+| `demo_direccion` | Andrea Salinas, Dirección General | Solo el consolidado de la empresa; recibe los reportes aprobados |
+| `demo_gerente` | Luis Ortega, Gerente de Ventas | Solo su área; la verificación en dos pasos es opcional |
+| `demo_ti` | Carlos Peña, Soporte TI | Administrar cuentas (contraseña temporal, desactivar, reiniciar MFA) sin ver datos de colaboradores |
+
+**Un recorrido sugerido:**
+1. Entra como **Ana**: configura la verificación en dos pasos con el QR y el teléfono simulado, y guarda los códigos de respaldo.
+2. En **Carga de datos**, descarga los archivos de ejemplo de septiembre de 2026 y súbelos en orden. Vienen como los exporta cada sistema, con nombres de personas incluidos: el sistema los descarta, valida cada fila y, al aplicar, concilia archivo contra base.
+3. En el **Tablero** aparece septiembre. Revisa los **Avisos** de indicadores en rojo y **genera el reporte con IA**.
+4. Entra como **Eva** para aprobarlo, y como **Andrea** para verlo aprobado y descargarlo en PDF o presentación.
+5. Entra como **Carlos** (TI) para crear una cuenta con contraseña temporal y revisar la bitácora de cuentas.
+
+Para dejar las cuentas como nuevas después de una demostración, vuelve a correr `python -m scripts.demo`. Para volver a los datos originales de Nordika, corre `python -m scripts.seed`.
+
+El modo demostración **se niega a funcionar con `MODO_DATOS=reales`**, y nunca muestra el código de una cuenta que no sea `demo_`. Con `MODO_DATOS=sinteticos` también puedes usar Groq para que los reportes salgan en segundos (sección Inteligencia artificial).
 
 ## Tecnologías
 
-Python 3.14 · FastAPI · PyOTP (verificación en dos pasos) · PostgreSQL 16 (Docker local o Supabase) · pandas · Ollama + Qwen3 8B (IA local) o Groq (IA en la nube, solo con datos sintéticos) · ReportLab (PDF) y python-pptx (presentación) · React + Vite + Recharts · pytest y Vitest
+Python 3.14 · FastAPI · PyOTP (verificación en dos pasos) · openpyxl (Excel) · PostgreSQL 16 (Docker local o Supabase) · pandas · Ollama + Qwen3 8B (IA local) o Groq (IA en la nube, solo con datos sintéticos) · ReportLab (PDF) y python-pptx (presentación) · React + Vite + Recharts · pytest y Vitest
 
 ## Instalación local
 
@@ -39,7 +73,7 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 
-# 4. Datos sintéticos (24 meses, 6 áreas)
+# 4. Datos de Nordika Logística (ficticios: 24 meses, 6 áreas)
 python -m scripts.seed
 
 # 5. Tu usuario (la contraseña se escribe oculta; mínimo 10 caracteres)
@@ -72,6 +106,7 @@ Abre http://localhost:5173 e inicia sesión con tu usuario. Si la API no está e
 | **Tablero** | Indicadores del mes con semáforo (siempre con icono y texto), variación contra el mes y el año anterior, y la tendencia del indicador elegido con sus umbrales. Filtros por área, mes e indicador; quedan en la dirección de la página, así que se pueden compartir |
 | **Narrativas** | Solicita el reporte con IA de un área y mes, muestra el avance mientras se redacta, permite aprobarlo o rechazarlo, descargar los aprobados en PDF o presentación, y guarda el historial consultable por área, mes y revisión |
 | **Avisos** | Indicadores en rojo, reportes por revisar y reportes aprobados o rechazados de tus áreas. El menú muestra cuántos faltan por leer |
+| **Carga de datos** (solo RRHH) | Subir el Excel o CSV de cada sistema, revisar la validación y lo que se descarta, aplicar y ver la conciliación. Plantillas y archivos de ejemplo del mes siguiente. Bitácora de cargas con la huella SHA-256 de cada archivo |
 | **Configuración** | Umbrales del semáforo con su bitácora de cambios, y programación mensual. Todos la ven; solo RRHH la cambia |
 | **Usuarios** | Cuentas y su bitácora. TI las crea, modifica, desactiva y les restablece la contraseña o la verificación en dos pasos; RRHH solo las consulta |
 | **Mi cuenta** (tu nombre, arriba a la derecha) | Cambiar tu contraseña y activar la verificación en dos pasos |
@@ -124,7 +159,7 @@ La API revisa al arrancar y cada hora, así que si estuvo apagada el día progra
 python -m scripts.programar          # revisa y genera lo que falte; espera a que terminen
 python -m scripts.programar --ver    # solo muestra la configuración y los meses generados
 
-schtasks /create /tn "Motor RRHH" /sc daily /st 07:00 /tr "cmd /c cd /d C:\ruta\backend && .venv\Scripts\python.exe -m scripts.programar"
+schtasks /create /tn "Talentia Insights" /sc daily /st 07:00 /tr "cmd /c cd /d C:\ruta\backend && .venv\Scripts\python.exe -m scripts.programar"
 ```
 
 **Correo (opcional).** Está apagado por defecto. Si llenas `SMTP_HOST` y los demás datos `SMTP_*` en el `.env`, quien tenga correo registrado recibe un correo con "tienes N avisos nuevos" y la liga al sistema. **El correo nunca lleva datos**: ni áreas, ni indicadores, ni cifras. Con Gmail usa `smtp.gmail.com`, puerto `587` y una [contraseña de aplicación](https://myaccount.google.com/apppasswords), nunca tu contraseña normal.
@@ -207,8 +242,11 @@ backend/
     exportar.py      reporte aprobado en PDF y presentación
     seguridad.py     inicio de sesión, cuentas con bitácora, contraseñas, tokens y permisos por rol
     mfa.py           verificación en dos pasos (TOTP) y códigos de respaldo
+    demo.py          modo demostración: cuentas de prueba y teléfono simulado
+    cargas.py        carga de archivos de los sistemas fuente: validación y conciliación
+    marca.py         nombre del producto y de la empresa
     database.py      conexión a PostgreSQL (local o Supabase)
-  scripts/           seed, crear_usuario, programar, generar_narrativa, evaluar_narrativa
+  scripts/           seed, crear_usuario, demo, programar, generar_narrativa, evaluar_narrativa
   tests/             pruebas automáticas
   reportes/          resultados de las evaluaciones del modelo de IA
 frontend/
@@ -216,9 +254,8 @@ frontend/
     api.js           cliente de la API (token de sesión y errores)
     sesion.jsx       inicio y cierre de sesión, permisos por rol
     formato.js       cifras, fechas, semáforo y variaciones
-    paginas/         Login, Tablero, Narrativas, DetalleNarrativa, Avisos, Configuracion, Usuarios, Cuenta, Pendiente
+    paginas/         Login, Tablero, Narrativas, DetalleNarrativa, Avisos, CargaDatos, Configuracion, Usuarios, Cuenta, Pendiente
     componentes/     tarjetas de KPI, gráfica de tendencia, vista del reporte
     pruebas/         pruebas automáticas (Vitest) con una API simulada
 db/                  esquema y tablas (SQL)
-docs/PRD.md          documento de requerimientos del producto
 ```

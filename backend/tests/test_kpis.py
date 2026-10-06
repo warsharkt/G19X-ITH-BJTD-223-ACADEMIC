@@ -77,7 +77,7 @@ def test_rotacion_reconcilia_con_calculo_independiente(kpis):
 
 
 def test_rotacion_total_es_voluntaria_mas_involuntaria(kpis):
-    for area in ("Corporativo", "Operaciones", "TI"):
+    for area in ("Corporativo", "Operaciones", "Transporte"):
         total = serie(kpis, "rotacion_total", area)["valor"]
         vol = serie(kpis, "rotacion_voluntaria", area)["valor"]
         invol = serie(kpis, "rotacion_involuntaria", area)["valor"]
@@ -168,24 +168,24 @@ def test_primer_mes_no_tiene_variacion_contra_mes_anterior(kpis):
 
 # ------------------------------------------- reglas de negocio y escenario
 def test_area_pequena_se_suprime(kpis):
-    """Legal tiene 4 personas: clima, desempeno y rotacion no se deben mostrar
+    """Jurídico tiene 4 personas: clima, desempeno y rotacion no se deben mostrar
     (10.3.4). En la rotacion, una sola baja en un equipo de 4 identifica a la persona."""
     for indicador in (
         "enps", "cumplimiento_metas", "rotacion_total", "rotacion_voluntaria", "rotacion_involuntaria",
     ):
-        s = serie(kpis, indicador, "Legal")
+        s = serie(kpis, indicador, "Jurídico")
         assert s["suprimido"].all()
         assert s["valor"].isna().all()
         assert (s["estado"] == "suprimido").all()
 
 
 def test_baja_y_reemplazo_el_mismo_mes_no_destapa_area_pequena(kpis):
-    """Si en Legal sale una persona y entra su reemplazo el mismo mes, hay 5
+    """Si en Jurídico sale una persona y entra su reemplazo el mismo mes, hay 5
     personas evaluadas pero el equipo sigue siendo de 4: debe seguir oculto."""
-    s = serie(kpis, "cumplimiento_metas", "Legal")
+    s = serie(kpis, "cumplimiento_metas", "Jurídico")
     meses_con_5 = s[s["n"] >= MIN_GRUPO]
     if meses_con_5.empty:
-        pytest.skip("Con estos datos Legal no tuvo baja y reemplazo el mismo mes")
+        pytest.skip("Con estos datos Jurídico no tuvo baja y reemplazo el mismo mes")
     assert meses_con_5["suprimido"].all()
 
 

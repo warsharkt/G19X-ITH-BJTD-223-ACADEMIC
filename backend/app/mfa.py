@@ -29,9 +29,10 @@ from sqlalchemy import text
 
 from app import seguridad
 from app.database import engine
+from app.marca import PRODUCTO
 from app.seguridad import ErrorDeUsuario, Usuario
 
-EMISOR = "Motor RRHH"
+EMISOR = PRODUCTO  # el nombre que muestra la app del telefono
 CODIGOS_RESPALDO = 10
 _ALFABETO_RESPALDO = "abcdefghjkmnpqrstuvwxyz23456789"
 

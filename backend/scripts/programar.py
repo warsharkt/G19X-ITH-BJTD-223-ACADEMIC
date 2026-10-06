@@ -15,7 +15,7 @@ Uso (desde la carpeta backend, con el entorno virtual activo):
     python -m scripts.programar --ver     # solo muestra la configuracion
 
 Programador de tareas de Windows, todos los dias a las 7:00 (cambia la ruta):
-    schtasks /create /tn "Motor RRHH" /sc daily /st 07:00 /tr "cmd /c cd /d C:\\ruta\\backend && .venv\\Scripts\\python.exe -m scripts.programar"
+    schtasks /create /tn "Talentia Insights" /sc daily /st 07:00 /tr "cmd /c cd /d C:\\ruta\\backend && .venv\\Scripts\\python.exe -m scripts.programar"
 """
 import argparse
 

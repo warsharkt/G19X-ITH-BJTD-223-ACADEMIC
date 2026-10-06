@@ -199,7 +199,7 @@ def test_direccion_solo_ve_el_consolidado(client, como, areas):
     assert [a["id"] for a in client.get("/areas", headers=h).json()] == [0]
     assert client.get("/kpis", headers=h).status_code == 200  # por defecto, corporativo
     assert client.get("/kpis", params={"area_id": areas["Ventas"]}, headers=h).status_code == 403
-    assert client.get("/kpis/serie/enps", params={"area_id": areas["TI"]}, headers=h).status_code == 403
+    assert client.get("/kpis/serie/enps", params={"area_id": areas["Transporte"]}, headers=h).status_code == 403
 
 
 def test_gerente_solo_ve_su_area(client, como, areas):
@@ -208,7 +208,7 @@ def test_gerente_solo_ve_su_area(client, como, areas):
     filas = client.get("/kpis", headers=h).json()  # por defecto, su area
     assert filas and {f["area"] for f in filas} == {"Ventas"}
     assert client.get("/kpis/serie/enps", headers=h).status_code == 200
-    for otra in (0, areas["TI"]):
+    for otra in (0, areas["Transporte"]):
         assert client.get("/kpis", params={"area_id": otra}, headers=h).status_code == 403
         assert client.get("/kpis/serie/enps", params={"area_id": otra}, headers=h).status_code == 403
 
@@ -249,9 +249,9 @@ def test_narrativas_respetan_el_area_y_registran_quien_las_pidio(client, como, a
         assert propia.status_code == 202
         assert propia.json()["area_id"] == areas["Ventas"]
         assert propia.json()["solicitada_por"] == PREFIJO + "gerente"  # bitacora RF-11
-        assert client.post("/narrativas", json={"area_id": areas["TI"]}, headers=gerente).status_code == 403
+        assert client.post("/narrativas", json={"area_id": areas["Transporte"]}, headers=gerente).status_code == 403
 
-        de_ti = client.post("/narrativas", json={"area_id": areas["TI"]}, headers=rrhh).json()
+        de_ti = client.post("/narrativas", json={"area_id": areas["Transporte"]}, headers=rrhh).json()
         assert client.get(f"/narrativas/{de_ti['id']}", headers=gerente).status_code == 403
         assert client.get(f"/narrativas/{de_ti['id']}", headers=direccion).status_code == 403
         assert client.get(f"/narrativas/{propia.json()['id']}", headers=gerente).status_code == 200

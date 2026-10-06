@@ -1,4 +1,7 @@
-"""Genera datos SINTETICOS de RRHH (24 meses) y los carga en PostgreSQL.
+"""Genera datos SINTETICOS de RRHH (24 meses) de Nordika Logistica, la
+empresa ficticia de la demostracion, y los carga en PostgreSQL.
+
+Nordika Logistica: operador logistico en Guadalajara, ~350 personas.
 
 Uso (desde la carpeta backend, con el entorno virtual activo):
     python -m scripts.seed
@@ -23,15 +26,17 @@ random.seed(SEED)
 PRIMER_MES = date(2024, 9, 1)
 N_MESES = 24
 
-# Headcount inicial por area. Legal tiene menos de 5 personas a proposito,
-# para probar la regla de tamano minimo de grupo (10.3.4).
+# Headcount inicial por area. Juridico tiene menos de 5 personas a proposito,
+# para mostrar la regla de tamano minimo de grupo (10.3.4).
+# El orden y los tamanos no se cambian: con la misma SEED producen las mismas
+# cifras, y las pruebas dependen de ellas.
 AREAS = {
     "Ventas": 90,
     "Operaciones": 120,
-    "TI": 60,
+    "Transporte": 60,
     "Finanzas": 40,
-    "Marketing": 35,
-    "Legal": 4,
+    "Almacén": 35,
+    "Jurídico": 4,
 }
 NOMBRE_AREA = {i: nombre for i, nombre in enumerate(AREAS, start=1)}
 
@@ -142,9 +147,10 @@ for mes in MESES:
             e["tipo_baja"] = "voluntaria" if random.random() < prob_voluntaria else "involuntaria"
 
         n_contrataciones = len(bajas)
-        if nombre != "Legal" and random.random() < 0.15:
+        if nombre != "Jurídico" and random.random() < 0.15:
             n_contrataciones += 1  # crecimiento del area
-        dias_medios = 55 if nombre == "TI" else 35  # TI tarda mas en contratar
+        # Transporte tarda mas en contratar: operadores con licencia federal
+        dias_medios = 55 if nombre == "Transporte" else 35
 
         for _ in range(n_contrataciones):
             ingreso = dia_al_azar(mes)

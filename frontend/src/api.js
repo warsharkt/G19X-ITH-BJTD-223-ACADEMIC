@@ -39,13 +39,16 @@ export const SESION_VENCIDA = 'rrhh:sesion-vencida'
 export const AVISOS_CAMBIARON = 'rrhh:avisos-cambiaron'
 
 // archivo: true devuelve { blob, nombre } en lugar de JSON (exportaciones).
-async function pedir(ruta, { metodo = 'GET', cuerpo, formulario, archivo = false } = {}) {
+// datos: FormData para subir archivos (el navegador pone el Content-Type).
+async function pedir(ruta, { metodo = 'GET', cuerpo, formulario, datos, archivo = false } = {}) {
   const encabezados = {}
   const token = leerToken()
   if (token) encabezados.Authorization = `Bearer ${token}`
   let body
   if (formulario) {
     body = new URLSearchParams(formulario)
+  } else if (datos) {
+    body = datos
   } else if (cuerpo !== undefined) {
     encabezados['Content-Type'] = 'application/json'
     body = JSON.stringify(cuerpo)
@@ -103,6 +106,23 @@ export const api = {
   modificarCuenta: (id, cambios) => pedir(`/usuarios/${id}`, { metodo: 'PATCH', cuerpo: cambios }),
   restablecerContrasena: (id) => pedir(`/usuarios/${id}/contrasena`, { metodo: 'POST' }),
   reiniciarMfa: (id) => pedir(`/usuarios/${id}/mfa/reiniciar`, { metodo: 'POST' }),
+  // Modo demostracion: cuentas de prueba y el codigo que daria el telefono
+  demo: () => pedir('/demo'),
+  marca: () => pedir('/marca'),
+  // Carga de datos de los sistemas fuente (solo RRHH)
+  fuentesDeDatos: () => pedir('/cargas/fuentes'),
+  cargas: () => pedir('/cargas'),
+  subirArchivo: (fuente, archivo) => {
+    const datos = new FormData()
+    datos.append('archivo', archivo)
+    return pedir(`/cargas/${encodeURIComponent(fuente)}`, { metodo: 'POST', datos })
+  },
+  aplicarCarga: (id) => pedir(`/cargas/${id}/aplicar`, { metodo: 'POST' }),
+  descartarCarga: (id) => pedir(`/cargas/${id}/descartar`, { metodo: 'POST' }),
+  plantilla: (fuente) => pedir(`/cargas/plantillas/${encodeURIComponent(fuente)}`, { archivo: true }),
+  ejemploDeCarga: (fuente) => pedir(`/cargas/ejemplos/${encodeURIComponent(fuente)}`, { archivo: true }),
+  codigoDemo: (mfaToken) => pedir('/demo/codigo', { metodo: 'POST', cuerpo: { mfa_token: mfaToken } }),
+  codigoDemoConfiguracion: () => pedir('/demo/codigo-configuracion'),
   areas: () => pedir('/areas'),
   periodos: () => pedir('/periodos'),
   umbrales: () => pedir('/umbrales'),

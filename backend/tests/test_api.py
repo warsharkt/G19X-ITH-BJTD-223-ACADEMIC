@@ -37,7 +37,7 @@ def test_health(client):
 def test_areas_incluye_corporativo_y_las_6_areas(client):
     areas = client.get("/areas").json()
     assert areas[0] == {"id": 0, "nombre": "Corporativo"}
-    assert {a["nombre"] for a in areas} >= {"Ventas", "Operaciones", "TI", "Finanzas", "Marketing", "Legal"}
+    assert {a["nombre"] for a in areas} >= {"Ventas", "Operaciones", "Transporte", "Finanzas", "Almacén", "Jurídico"}
     assert len(areas) == 7
 
 
@@ -73,7 +73,7 @@ def test_kpis_de_operaciones_en_la_crisis(client, id_area):
 
 
 def test_area_pequena_devuelve_null_no_un_numero(client, id_area):
-    r = client.get("/kpis", params={"area_id": id_area("Legal"), "indicador": "enps"})
+    r = client.get("/kpis", params={"area_id": id_area("Jurídico"), "indicador": "enps"})
     [fila] = r.json()
     assert fila["valor"] is None
     assert fila["suprimido"] is True
@@ -81,8 +81,8 @@ def test_area_pequena_devuelve_null_no_un_numero(client, id_area):
 
 
 def test_json_valido_sin_nan(client, id_area):
-    """Si hubiera NaN, la serializacion fallaria; aqui se pide todo Legal."""
-    r = client.get("/kpis", params={"area_id": id_area("Legal")})
+    """Si hubiera NaN, la serializacion fallaria; aqui se pide todo Jurídico."""
+    r = client.get("/kpis", params={"area_id": id_area("Jurídico")})
     assert r.status_code == 200
     assert all(f["valor"] is None or isinstance(f["valor"], float) for f in r.json())
 

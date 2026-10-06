@@ -42,6 +42,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from app.marca import PRODUCTO, empresa, pie_confidencial
 from app.narrativa import MESES_ES
 
 FORMATOS = {
@@ -50,7 +51,6 @@ FORMATOS = {
 }
 
 ZONA = ZoneInfo(os.getenv("ZONA_HORARIA", "America/Mexico_City"))
-PIE = "Confidencial: uso interno de la empresa"
 
 # Formulas de la seccion 10.2 del PRD, para el anexo de metodologia.
 FORMULAS = {
@@ -124,6 +124,13 @@ def variacion(texto: str | None, evolucion: str | None) -> str:
 def respaldo(ids: list[str], hechos: dict, fuentes: list[str]) -> str:
     citas = "; ".join(f"{hechos[i]['nombre']}: {hechos[i]['valor_texto']}" if i in hechos else i for i in ids)
     return f"Respaldo: {citas}. Fuente: {', '.join(fuentes)}."
+
+
+def solicitante(t: dict) -> str:
+    """Quien pidio el reporte: una persona o la programacion mensual."""
+    if t.get("solicitada_por"):
+        return t["solicitada_por"]
+    return "la programación mensual" if t.get("programada") else "—"
 
 
 def linea_aprobacion(t: dict) -> str:
@@ -298,7 +305,7 @@ def pdf(t: dict) -> bytes:
 
     # Portada
     historia += [
-        _p(f"{n['area'].upper()} · {nombre_mes(n['periodo']).upper()}", "alcance"),
+        _p(f"{empresa().upper()} · {n['area'].upper()} · {nombre_mes(n['periodo']).upper()}", "alcance"),
         _p("Reporte ejecutivo de Recursos Humanos", "titulo"),
         _p(linea_origen(n), "nota"),
         Spacer(1, 8),
@@ -306,7 +313,7 @@ def pdf(t: dict) -> bytes:
     aprobacion = [_p(linea_aprobacion(t) + ".", "h3")]
     if t.get("comentario_revision"):
         aprobacion.append(_p(f"Comentario: {t['comentario_revision']}", "texto"))
-    aprobacion.append(_p(f"Solicitado por {t.get('solicitada_por') or '—'}. Revisado por una persona de RRHH "
+    aprobacion.append(_p(f"Solicitado por {solicitante(t)}. Revisado por una persona de RRHH "
                          "distinta de quien lo solicitó.", "nota"))
     historia.append(_recuadro(aprobacion, "#e6f4e6", APROBADO, ancho))
 
@@ -413,10 +420,10 @@ def pdf(t: dict) -> bytes:
     doc = SimpleDocTemplate(
         salida, pagesize=LETTER, leftMargin=2 * cm, rightMargin=2 * cm, topMargin=1.8 * cm, bottomMargin=2 * cm,
         title=f"Reporte ejecutivo de RRHH: {n['area']}, {nombre_mes(n['periodo'])}",
-        author="Motor Inteligente de Reportes de RRHH", subject=linea_aprobacion(t), creator="rrhh-motor-reportes",
+        author=PRODUCTO, subject=linea_aprobacion(t), creator=PRODUCTO,
     )
     pie_der = f"Reporte #{t['id']} · {n['area']} · {nombre_mes(n['periodo'])}"
-    doc.build(historia, canvasmaker=lambda *a, **k: CanvasNumerado(*a, pie_izq=PIE, pie_der=pie_der, **k))
+    doc.build(historia, canvasmaker=lambda *a, **k: CanvasNumerado(*a, pie_izq=pie_confidencial(), pie_der=pie_der, **k))
     return salida.getvalue()
 
 
@@ -468,7 +475,7 @@ def _diapositiva(prs, titulo: str, pie: str):
     d = prs.slides.add_slide(prs.slide_layouts[6])  # en blanco
     _rectangulo(d, 0, 0, ANCHO, Inches(0.12), ACENTO)
     _caja(d, MARGEN, Inches(0.35), ANCHO - 2 * MARGEN, Inches(0.8), [(titulo, 28, True, TINTA)])
-    _caja(d, MARGEN, ALTO - Inches(0.5), Inches(6), Inches(0.3), [(PIE, 10, False, SECUNDARIO)])
+    _caja(d, MARGEN, ALTO - Inches(0.5), Inches(6), Inches(0.3), [(pie_confidencial(), 10, False, SECUNDARIO)])
     _caja(d, ANCHO - MARGEN - Inches(6), ALTO - Inches(0.5), Inches(6), Inches(0.3), [(pie, 10, False, SECUNDARIO)])
     d.shapes[-1].text_frame.paragraphs[0].alignment = PP_ALIGN.RIGHT
     return d
@@ -520,14 +527,14 @@ def presentacion(t: dict) -> bytes:
     prs = Presentation()
     prs.slide_width, prs.slide_height = ANCHO, ALTO
     prs.core_properties.title = f"Reporte ejecutivo de RRHH: {n['area']}, {nombre_mes(n['periodo'])}"
-    prs.core_properties.author = "Motor Inteligente de Reportes de RRHH"
+    prs.core_properties.author = PRODUCTO
     prs.core_properties.subject = linea_aprobacion(t)
 
     # 1. Portada
     d = prs.slides.add_slide(prs.slide_layouts[6])
     _rectangulo(d, 0, 0, Inches(0.35), ALTO, ACENTO)
     _caja(d, Inches(1.1), Inches(2.0), Inches(11), Inches(0.5),
-          [(f"{n['area'].upper()} · {nombre_mes(n['periodo']).upper()}", 16, True, ACENTO)])
+          [(f"{empresa().upper()} · {n['area'].upper()} · {nombre_mes(n['periodo']).upper()}", 16, True, ACENTO)])
     _caja(d, Inches(1.1), Inches(2.6), Inches(11), Inches(1.4),
           [("Reporte ejecutivo de Recursos Humanos", 40, True, TINTA)])
     _rectangulo(d, Inches(1.1), Inches(4.35), Inches(0.08), Inches(0.9), APROBADO)
@@ -539,7 +546,7 @@ def presentacion(t: dict) -> bytes:
         aprobacion.append((f"Comentario: {comentario}", 13, False, SECUNDARIO))
     _caja(d, Inches(1.35), Inches(4.3), Inches(10.5), Inches(1.0), aprobacion)
     _caja(d, Inches(1.1), Inches(5.6), Inches(11), Inches(0.9), [(linea_origen(n), 12, False, SECUNDARIO)])
-    _caja(d, Inches(1.1), ALTO - Inches(0.5), Inches(6), Inches(0.3), [(PIE, 10, False, SECUNDARIO)])
+    _caja(d, Inches(1.1), ALTO - Inches(0.5), Inches(6), Inches(0.3), [(pie_confidencial(), 10, False, SECUNDARIO)])
 
     # 2. Resumen ejecutivo
     d = _diapositiva(prs, "Resumen ejecutivo", pie)

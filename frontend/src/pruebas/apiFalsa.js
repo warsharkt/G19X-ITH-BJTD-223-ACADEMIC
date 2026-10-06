@@ -190,17 +190,72 @@ function cuentas(usuario, pathname, metodo, cuerpo, estado) {
   return respuesta(200, cuenta)
 }
 
+// Carga de datos: misma forma que /cargas de la API real. El archivo de
+// productividad trae errores; los demas pasan la validacion.
+const FUENTES_DATOS = [
+  { clave: 'hris', nombre: 'Plantilla de personal', sistema: 'HRIS / Nómina', descripcion: 'Altas y bajas.', columnas: [{ nombre: 'codigo', requerida: true, ayuda: '' }, { nombre: 'area', requerida: true, ayuda: '' }] },
+  { clave: 'productividad', nombre: 'Productividad', sistema: 'Proyectos', descripcion: 'Horas por área.', columnas: [{ nombre: 'area', requerida: true, ayuda: '' }] },
+]
+
+function cargasFalsas(usuario, pathname, metodo, cuerpo, estado) {
+  if (usuario.rol !== 'rrhh') return respuesta(403, { detail: 'Solo Recursos Humanos puede cambiar esta configuración' })
+  if (pathname === '/cargas/fuentes')
+    return respuesta(200, { fuentes: FUENTES_DATOS, ejemplos: { mes: '2026-09', nombre_mes: 'septiembre 2026' } })
+  if (pathname === '/cargas' && metodo === 'GET') return respuesta(200, estado.cargas)
+  const aplicar = pathname.match(/^\/cargas\/(\d+)\/(aplicar|descartar)$/)
+  if (aplicar) {
+    const carga = estado.cargas.find((c) => c.id === Number(aplicar[1]))
+    if (aplicar[2] === 'descartar') Object.assign(carga, { estado: 'descartada', aplicada_por: usuario.usuario })
+    else Object.assign(carga, {
+      estado: 'aplicada', aplicada_por: usuario.usuario, aplicada_en: '2026-10-06T12:05:00Z',
+      resultado: { ...carga.resultado, nuevas: 3, actualizadas: 355, conciliacion: [
+        { concepto: 'Colaboradores', archivo: 358, base: 358, cuadra: true },
+        { concepto: 'Bajas registradas', archivo: 5, base: 5, cuadra: true },
+      ] },
+    })
+    return respuesta(200, carga)
+  }
+  const fuente = pathname.split('/')[2]
+  const archivo = cuerpo.get('archivo')
+  estado.subidas.push({ fuente, archivo: archivo.name })
+  const conErrores = fuente === 'productividad'
+  const carga = {
+    id: estado.cargas.length + 1, fuente, archivo: archivo.name, sha256: 'a'.repeat(64), bytes: 1200, filas: 358,
+    estado: conErrores ? 'con_errores' : 'validada',
+    errores: conErrores ? [{ fila: 3, columna: 'area', mensaje: "'Marte' el área 'Marte' no existe" }] : [],
+    descartadas: conErrores ? [] : [{ columna: 'nombre_completo', motivo: 'dato personal: no se guarda' }],
+    periodos: [], subida_por: usuario.usuario, subida_en: '2026-10-06T12:00:00Z', aplicada_por: null, aplicada_en: null,
+    resultado: { previo: { filas: 358, validas: conErrores ? 0 : 358, existentes: 355, nuevas: 3 }, errores_totales: conErrores ? 1 : 0,
+      muestra: { columnas: ['codigo', 'area'], filas: conErrores ? [] : [['E0001', 'Ventas']] } },
+  }
+  estado.cargas.unshift(carga)
+  return respuesta(201, carga)
+}
+
 function respuesta(estado, cuerpo) {
   return Promise.resolve(new Response(JSON.stringify(cuerpo), { status: estado, headers: { 'Content-Type': 'application/json' } }))
 }
 
+export const CONTRASENA_DEMO = 'Demo-RRHH-2026'
+const DEMO = {
+  activo: true,
+  contrasena: CONTRASENA_DEMO,
+  cuentas: [
+    { usuario: 'lia', nombre: 'Lía, RRHH (demostración)', rol: 'rrhh', descripcion: 'Todas las áreas.' },
+    { usuario: 'dir', nombre: 'Dirección (demostración)', rol: 'direccion', descripcion: 'Solo el consolidado.' },
+  ],
+}
+
 // Instala la API falsa. `opciones.consultasHastaLista`: cuantas veces se
 // consulta la narrativa nueva antes de que pase de en_proceso a lista.
-export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = false } = {}) {
+// `opciones.demo`: modo demostracion activo (las cuentas aceptan CONTRASENA_DEMO).
+export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = false, demo = false } = {}) {
   const estado = {
     tokenValido: null, consultas: 0, solicitudes: [], exportaciones: [],
     pendientes: Object.fromEntries(Object.values(USUARIOS).map((u) => [u.usuario, u.pendiente ?? null])),
     contrasenasCambiadas: [],
+    subidas: [],
+    cargas: [],
     cuentas: cuentasIniciales(),
     bitacora: [],
     avisos: avisosIniciales(),
@@ -218,10 +273,18 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
     const { pathname, searchParams } = new URL(url)
     const metodo = opciones.method ?? 'GET'
 
+    if (pathname === '/marca') return respuesta(200, { producto: 'Talentia Insights', empresa: 'Nordika Logística' })
+    if (pathname === '/demo') return respuesta(200, demo ? DEMO : { activo: false, contrasena: null, cuentas: [] })
+    if (pathname === '/demo/codigo') {
+      if (!demo) return respuesta(404, { detail: 'El modo demostración no está activo' })
+      return respuesta(200, { codigo: CODIGO_MFA, segundos: 17 })
+    }
     if (pathname === '/auth/login') {
       const f = new URLSearchParams(opciones.body)
       const quien = USUARIOS[f.get('username')]
-      if (!quien || f.get('password') !== CONTRASENA) return respuesta(401, { detail: 'Usuario o contraseña incorrectos' })
+      const clave = f.get('password')
+      if (!quien || (clave !== CONTRASENA && !(demo && clave === CONTRASENA_DEMO)))
+        return respuesta(401, { detail: 'Usuario o contraseña incorrectos' })
       if (quien.mfa_activo)
         return respuesta(200, { access_token: null, mfa_requerido: true, mfa_token: `mfa-${quien.usuario}`, token_type: 'bearer', expira_en_minutos: 5 })
       return respuesta(200, { access_token: `token-${quien.usuario}`, mfa_requerido: false, token_type: 'bearer', expira_en_minutos: 60 })
@@ -249,6 +312,10 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
       if (pendiente === 'cambiar_contrasena') estado.pendientes[usuario.usuario] = null
       return respuesta(200, { access_token: `token-${usuario.usuario}`, token_type: 'bearer', expira_en_minutos: 60 })
     }
+    if (pathname === '/demo/codigo-configuracion') {
+      if (!demo) return respuesta(404, { detail: 'El modo demostración no está activo' })
+      return respuesta(200, { codigo: CODIGO_MFA, segundos: 17 })
+    }
     if (pathname === '/auth/mfa/configurar')
       return respuesta(200, { secreto: 'JBSWY3DPEHPK3PXP', uri: 'otpauth://totp/Motor%20RRHH:sinmfa', qr: 'data:image/svg+xml;base64,PHN2Zy8+' })
     if (pathname === '/auth/mfa/activar') {
@@ -258,6 +325,7 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
     }
     if (pendiente) return respuesta(403, { detail: 'Antes de continuar resuelve lo pendiente' })
     if (pathname.startsWith('/usuarios')) return cuentas(usuario, pathname, metodo, opciones.body && JSON.parse(opciones.body), estado)
+    if (pathname.startsWith('/cargas')) return cargasFalsas(usuario, pathname, metodo, opciones.body, estado)
     if (pathname === '/areas') return respuesta(200, AREAS.filter((a) => usuario.areas_permitidas.includes(a.id)))
     if (pathname === '/periodos') return respuesta(200, PERIODOS)
     if (pathname === '/umbrales') return respuesta(200, estado.umbrales)

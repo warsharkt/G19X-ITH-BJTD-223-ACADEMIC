@@ -48,8 +48,8 @@ RAIZ_REPORTES = Path(__file__).resolve().parents[1] / "reportes"
 MUESTRA_CURADA = [
     ("Corporativo", "2026-08"), ("Corporativo", "2026-03"),
     ("Operaciones", "2026-04"), ("Operaciones", "2026-02"), ("Operaciones", "2026-07"),
-    ("Ventas", "2026-06"), ("TI", "2026-05"), ("Finanzas", "2026-01"),
-    ("Marketing", "2026-06"), ("Legal", "2026-08"),
+    ("Ventas", "2026-06"), ("Transporte", "2026-05"), ("Finanzas", "2026-01"),
+    ("Almacén", "2026-06"), ("Jurídico", "2026-08"),
     ("Ventas", "2024-10"), ("Finanzas", "2025-04"),
 ]
 

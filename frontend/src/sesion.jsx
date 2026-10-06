@@ -18,10 +18,21 @@ export const puedeVerDatos = (usuario) => usuario?.rol !== 'admin_ti'
 // Cuentas: TI las administra y RRHH las consulta (para auditar)
 export const puedeVerCuentas = (usuario) => ['admin_ti', 'rrhh'].includes(usuario?.rol)
 
+// Carga de datos de los sistemas fuente: solo RRHH (TI no ve datos de colaboradores)
+export const puedeCargarDatos = (usuario) => usuario?.rol === 'rrhh'
+
 export function ProveedorSesion({ children }) {
   const [usuario, setUsuario] = useState(null)
   const [cargando, setCargando] = useState(() => Boolean(leerToken()))
   const [aviso, setAviso] = useState(null) // motivo del ultimo cierre de sesion
+  const [demo, setDemo] = useState({ activo: false }) // modo demostracion (GET /demo)
+  const [marca, setMarca] = useState({ producto: 'Talentia Insights', empresa: '' })
+
+  // Sin API, la pantalla de inicio ya muestra el error al intentar entrar
+  useEffect(() => {
+    api.demo().then(setDemo).catch(() => {})
+    api.marca().then(setMarca).catch(() => {})
+  }, [])
 
   const cerrarSesion = useCallback((motivo = null) => {
     guardarToken(null)
@@ -83,7 +94,7 @@ export function ProveedorSesion({ children }) {
 
   return (
     <ContextoSesion.Provider
-      value={{ usuario, cargando, aviso, iniciarSesion, verificarMfa, recargarUsuario, cerrarSesion }}
+      value={{ usuario, cargando, aviso, demo, marca, iniciarSesion, verificarMfa, recargarUsuario, cerrarSesion }}
     >
       {children}
     </ContextoSesion.Provider>

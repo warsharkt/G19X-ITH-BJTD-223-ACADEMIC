@@ -34,6 +34,7 @@ from sqlalchemy import text
 from app import seguridad
 from app.database import ejecutar_sql, engine
 from app.kpis import CORPORATIVO
+from app.marca import PRODUCTO, empresa
 from app.narrativa import MESES_ES
 from app.seguridad import Usuario
 
@@ -311,10 +312,10 @@ def programar_envio():
 def contenido_correo(nombre: str, nuevos: int, app_url: str) -> tuple[str, str]:
     """Asunto y cuerpo. SOLO el conteo y la liga: ni titulos, ni areas, ni cifras."""
     avisos = "1 aviso nuevo" if nuevos == 1 else f"{nuevos} avisos nuevos"
-    asunto = f"Motor de Reportes de RRHH: tienes {avisos}"
+    asunto = f"{PRODUCTO}: tienes {avisos}"
     cuerpo = (
         f"Hola, {nombre}:\n\n"
-        f"Tienes {avisos} en el Motor de Reportes de RRHH.\n"
+        f"Tienes {avisos} en {PRODUCTO} ({empresa()}).\n"
         f"Entra para verlos: {app_url}/avisos\n\n"
         "Por seguridad, este correo no incluye datos: el detalle solo se ve dentro del sistema, "
         "con tu usuario y contraseña.\n"

@@ -31,7 +31,7 @@ INDICADORES_SUJETOS_A_MIN_GRUPO = {
 # Muestra minima para el semaforo (10.3.3). En las tasas que son porcentaje
 # de un grupo de personas, con menos de MIN_MUESTRA personas una sola mueve el
 # indicador de 100 % a 0 % y disparaba una alerta "critica" de toda el area
-# (Legal: 1 inscrito). El valor SI se muestra, pero no se pinta de color ni
+# (Jurídico: 1 inscrito). El valor SI se muestra, pero no se pinta de color ni
 # llega al modelo como alerta. Reclutamiento no entra: cada vacante es un
 # hecho real, no una muestra ruidosa de una poblacion.
 MIN_MUESTRA = 5

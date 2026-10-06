@@ -94,7 +94,7 @@ def listar():
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Usuarios del Motor de Reportes de RRHH")
+    ap = argparse.ArgumentParser(description="Usuarios de Talentia Insights")
     ap.add_argument("--usuario")
     ap.add_argument("--nombre", help="nombre para mostrar")
     ap.add_argument("--rol", choices=ROLES)

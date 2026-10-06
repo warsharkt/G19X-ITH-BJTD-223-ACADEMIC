@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import Marco from './componentes/Marco'
 import Avisos from './paginas/Avisos'
+import CargaDatos from './paginas/CargaDatos'
 import Configuracion from './paginas/Configuracion'
 import Cuenta from './paginas/Cuenta'
 import DetalleNarrativa from './paginas/DetalleNarrativa'
@@ -9,7 +10,7 @@ import Narrativas from './paginas/Narrativas'
 import Pendiente from './paginas/Pendiente'
 import Tablero from './paginas/Tablero'
 import Usuarios from './paginas/Usuarios'
-import { puedeVerCuentas, puedeVerDatos, useSesion } from './sesion'
+import { puedeCargarDatos, puedeVerCuentas, puedeVerDatos, useSesion } from './sesion'
 
 export default function App() {
   const { usuario, cargando } = useSesion()
@@ -27,6 +28,7 @@ export default function App() {
         {conDatos && <Route path="/narrativas" element={<Narrativas />} />}
         {conDatos && <Route path="/narrativas/:id" element={<DetalleNarrativa />} />}
         {conDatos && <Route path="/avisos" element={<Avisos />} />}
+        {puedeCargarDatos(usuario) && <Route path="/carga" element={<CargaDatos />} />}
         <Route path="/configuracion" element={<Configuracion />} />
         {puedeVerCuentas(usuario) && <Route path="/usuarios" element={<Usuarios />} />}
         <Route path="/cuenta" element={<Cuenta />} />

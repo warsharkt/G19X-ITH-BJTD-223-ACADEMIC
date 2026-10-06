@@ -6,7 +6,7 @@ import { SESION_VENCIDA } from '../api'
 import App from '../App'
 import { SEGUNDOS_ENTRE_CONSULTAS } from '../paginas/DetalleNarrativa'
 import { ProveedorSesion } from '../sesion'
-import { CODIGO_MFA, instalarApiFalsa } from './apiFalsa'
+import { CODIGO_MFA, CONTRASENA_DEMO, instalarApiFalsa } from './apiFalsa'
 
 function montar(ruta = '/') {
   return render(
@@ -507,5 +507,98 @@ describe('cuentas (RF-11, RF-12)', () => {
     await entrar('dir', contrasena)
     await screen.findByRole('heading', { name: 'Indicadores de Corporativo' })
     expect(screen.queryByRole('link', { name: 'Usuarios' })).not.toBeInTheDocument()
+  })
+})
+
+describe('demostración con teléfono simulado', () => {
+  it('sin modo demostración no hay cuentas de prueba ni teléfono', async () => {
+    instalarApiFalsa()
+    montar()
+    expect(await screen.findByRole('button', { name: 'Entrar' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Cuentas de prueba' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/demostración/i)).not.toBeInTheDocument()
+  })
+
+  it('se ve como producto real: marca, empresa y medidas de seguridad', async () => {
+    instalarApiFalsa({ demo: true })
+    montar()
+    expect(await screen.findByText('Nordika Logística')).toBeInTheDocument()
+    expect(screen.getByText('Verificación en dos pasos')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Inicia sesión' })).toBeInTheDocument()
+  })
+
+  it('pide el código y el teléfono simulado lo muestra', async () => {
+    instalarApiFalsa({ demo: true })
+    const persona = userEvent.setup()
+    montar()
+    const cuentas = await screen.findByRole('region', { name: 'Cuentas de prueba' })
+    expect(cuentas).toHaveTextContent(CONTRASENA_DEMO)
+
+    await persona.click(within(cuentas).getByRole('button', { name: 'Usar lia' }))
+    expect(screen.getByLabelText('Usuario')).toHaveValue('lia')
+    await persona.click(screen.getByRole('button', { name: 'Entrar' }))
+
+    // la verificacion en dos pasos se sigue pidiendo
+    expect(await screen.findByRole('heading', { name: 'Verificación en dos pasos' })).toBeInTheDocument()
+    const telefono = await screen.findByRole('note', { name: 'App de autenticación simulada' })
+    await waitFor(() => expect(telefono).toHaveTextContent('123 456'))
+    expect(telefono).toHaveTextContent('lia')
+    expect(telefono).toHaveTextContent('Cambia en 17 s')
+    expect(screen.getByText(/en producción este código solo aparece en el celular/)).toBeInTheDocument()
+
+    await persona.type(screen.getByLabelText('Código de verificación'), CODIGO_MFA)
+    await persona.click(screen.getByRole('button', { name: 'Verificar' }))
+    expect(await screen.findByRole('heading', { name: 'Indicadores de Corporativo' })).toBeInTheDocument()
+  })
+
+  it('al configurar el MFA el teléfono muestra el código del QR', async () => {
+    const { contrasena } = instalarApiFalsa({ demo: true })
+    const persona = await entrar('sinmfa', contrasena)
+    await persona.click(await screen.findByRole('button', { name: 'Generar código QR' }))
+    const telefono = await screen.findByRole('note', { name: 'App de autenticación simulada' })
+    await waitFor(() => expect(telefono).toHaveTextContent('123 456'))
+  })
+})
+
+describe('carga de datos (RF-01)', () => {
+  it('RRHH sube un archivo, ve lo que se descartó y lo aplica con conciliación', async () => {
+    const { contrasena, estado } = instalarApiFalsa()
+    const persona = await entrar('ana', contrasena)
+    await persona.click(await screen.findByRole('link', { name: 'Carga de datos' }))
+    expect(await screen.findByText('Archivos de ejemplo: septiembre 2026')).toBeInTheDocument()
+
+    const archivo = new File(['codigo,nombre_completo,area'], 'hris-2026-09.xlsx')
+    await persona.upload(await screen.findByLabelText('Subir archivo de Plantilla de personal'), archivo)
+    const revision = await screen.findByRole('region', { name: 'Revisión del archivo' })
+    expect(revision).toHaveTextContent('Lista para aplicar')
+    expect(revision).toHaveTextContent('nombre_completo')
+    expect(revision).toHaveTextContent('dato personal: no se guarda')
+    expect(estado.subidas).toEqual([{ fuente: 'hris', archivo: 'hris-2026-09.xlsx' }])
+
+    await persona.click(within(revision).getByRole('button', { name: 'Aplicar a la base de datos' }))
+    const conciliacion = await screen.findByRole('table', { name: 'Conciliación' })
+    expect(conciliacion).toHaveTextContent('Colaboradores')
+    expect(conciliacion).toHaveTextContent('✓ Cuadra')
+    expect(await screen.findByRole('table', { name: 'Bitácora de cargas' })).toHaveTextContent('Aplicada')
+  })
+
+  it('un archivo con errores dice fila y motivo y no se puede aplicar', async () => {
+    const { contrasena } = instalarApiFalsa()
+    const persona = await entrar('ana', contrasena, '/carga')
+    await persona.upload(
+      await screen.findByLabelText('Subir archivo de Productividad'),
+      new File(['x'], 'productividad.csv'),
+    )
+    const errores = await screen.findByRole('table', { name: 'Errores del archivo' })
+    expect(errores).toHaveTextContent("'Marte' el área 'Marte' no existe")
+    expect(screen.getByText('El archivo no se puede cargar')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Aplicar a la base de datos' })).not.toBeInTheDocument()
+  })
+
+  it('solo RRHH ve la carga de datos', async () => {
+    const { contrasena } = instalarApiFalsa()
+    await entrar('dir', contrasena)
+    await screen.findByRole('heading', { name: 'Indicadores de Corporativo' })
+    expect(screen.queryByRole('link', { name: 'Carga de datos' })).not.toBeInTheDocument()
   })
 })

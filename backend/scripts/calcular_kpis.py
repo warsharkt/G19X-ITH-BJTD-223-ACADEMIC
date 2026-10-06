@@ -54,8 +54,8 @@ def main():
             f"  {mes:%Y-%m}   {fmt(e.valor):>9}{e.estado:>11}{fmt(r.valor):>13}{r.estado:>11}"
         )
 
-    print(f"\n=== Legal (4 personas) - {periodo:%Y-%m}: regla de tamano minimo de grupo ===")
-    legal = df[(df["area"] == "Legal") & (df["periodo"] == periodo)]
+    print(f"\n=== Jurídico (4 personas) - {periodo:%Y-%m}: regla de tamano minimo de grupo ===")
+    legal = df[(df["area"] == "Jurídico") & (df["periodo"] == periodo)]
     for f in legal[legal["indicador"].isin(["cumplimiento_metas", "enps"])].itertuples():
         valor = "oculto" if f.suprimido else fmt(f.valor)
         print(f"  {f.nombre:<24} n={f.n}  valor: {valor:<8} estado: {f.estado}")

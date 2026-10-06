@@ -1,4 +1,4 @@
-"""API del Motor Inteligente de Reportes de RRHH (pasos 4 a 10).
+"""API de Talentia Insights: analitica de Recursos Humanos con IA (pasos 4 a 10).
 
 KPIs de solo lectura, narrativas generadas por IA en segundo plano (se
 guardan en la tabla `narrativas`), avisos, umbrales editables y programacion
@@ -10,13 +10,13 @@ from contextlib import asynccontextmanager
 from typing import Literal
 
 import pandas as pd
-from fastapi import Depends, FastAPI, HTTPException, Query, Response
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from app import avisos, exportar, mfa, narrativa, programacion, schemas, seguridad, trabajos, umbrales
+from app import avisos, cargas, demo, exportar, marca, mfa, narrativa, programacion, schemas, seguridad, trabajos, umbrales
 from app.database import ejecutar_sql, engine
 from app.kpis import CORPORATIVO, calcular_kpis, inicializar_umbrales
 from app.llm import ConfiguracionIA, obtener_proveedor
@@ -40,6 +40,7 @@ async def ciclo_de_vida(_app):
         inicializar_umbrales()
         avisos.asegurar_tabla()
         programacion.asegurar_tabla()
+        cargas.asegurar_tabla()
         ejecutar_sql("rls.sql")  # al final: cubre todas las tablas ya creadas
     except SQLAlchemyError:
         pass  # sin BD la API arranca igual; /health lo reporta
@@ -50,7 +51,7 @@ async def ciclo_de_vida(_app):
 
 app = FastAPI(
     lifespan=ciclo_de_vida,
-    title="Motor Inteligente de Reportes de RRHH",
+    title="Talentia Insights",
     description=(
         "Indicadores de Recursos Humanos calculados por el motor analitico "
         "(sin IA): rotacion, clima, desempeno, capacitacion, reclutamiento y "
@@ -95,6 +96,12 @@ def a_registros(df: pd.DataFrame) -> list[dict]:
 
 def _mes(texto: str) -> pd.Timestamp:
     return pd.Timestamp(texto + "-01")
+
+
+@app.get("/marca", tags=["Sistema"])
+def ver_marca() -> dict[str, str]:
+    """Nombre del producto y de la empresa (para la pantalla de inicio). No requiere sesion."""
+    return {"producto": marca.PRODUCTO, "empresa": marca.empresa()}
 
 
 @app.get("/health", tags=["Sistema"])
@@ -618,3 +625,111 @@ def reiniciar_mfa(usuario_id: int, u: Usuario = Depends(solo_ti)):
     sesiones: al entrar, la persona la vuelve a configurar."""
     _cuentas(mfa.reiniciar, usuario_id, u.usuario)
     return seguridad.obtener_cuenta(usuario_id)
+
+
+# --------------------------------------------------- modo demostracion
+@app.get("/demo", response_model=schemas.Demo, tags=["Demostración"])
+def ver_demo():
+    """Si el modo demostracion esta activo (MODO_DEMO=si con datos sinteticos),
+    las cuentas de demostracion y su contrasena. No requiere sesion."""
+    if not demo.activo():
+        return {"activo": False}
+    return {"activo": True, "contrasena": demo.contrasena(), "cuentas": demo.cuentas_publicas()}
+
+
+def _codigo_demo(usuario_id: int) -> dict:
+    try:
+        return demo.codigo_vigente(usuario_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc.args[0]))
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
+
+
+@app.post("/demo/codigo", response_model=schemas.CodigoDemo, tags=["Demostración"])
+def codigo_demo_al_entrar(solicitud: schemas.CodigoDemoSolicitud):
+    """Codigo vigente de una cuenta de demostracion durante el segundo paso del
+    inicio de sesion. Solo en modo demo y solo para cuentas demo_."""
+    u = seguridad.usuario_del_token(solicitud.mfa_token, "mfa")
+    if u is None:
+        raise HTTPException(status_code=401, detail="La verificación venció; vuelve a escribir tu usuario y contraseña")
+    return _codigo_demo(u.id)
+
+
+@app.get("/demo/codigo-configuracion", response_model=schemas.CodigoDemo, tags=["Demostración"])
+def codigo_demo_al_configurar(u: Usuario = Depends(sesion_actual)):
+    """Codigo vigente del QR recien generado, para activar el MFA sin telefono.
+    Solo en modo demo y solo para cuentas demo_."""
+    return _codigo_demo(u.id)
+
+
+# ------------------------------------------------ carga de datos (RF-01)
+def _archivo(contenido: bytes, nombre: str, tipo: str) -> Response:
+    return Response(contenido, media_type=tipo, headers={"Content-Disposition": f'attachment; filename="{nombre}"'})
+
+
+_TIPOS = {"csv": "text/csv; charset=utf-8", "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
+
+
+def _carga(funcion, *args):
+    try:
+        return funcion(*args)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc.args[0]))
+    except cargas.ErrorDeCarga as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
+
+
+@app.get("/cargas/fuentes", tags=["Carga de datos"])
+def fuentes_de_datos(_u: Usuario = Depends(solo_rrhh)) -> dict:
+    """Fuentes que se pueden cargar, sus columnas y el mes de los archivos de ejemplo."""
+    return {"fuentes": cargas.catalogo(), "ejemplos": _carga(cargas.info_ejemplos)}
+
+
+@app.get("/cargas", response_model=list[schemas.Carga], tags=["Carga de datos"])
+def historial_de_cargas(limite: int = Query(50, ge=1, le=200), _u: Usuario = Depends(solo_rrhh)):
+    """Bitacora de cargas: quien subio que archivo, cuando, y como termino."""
+    return _carga(cargas.listar, limite)
+
+
+@app.post("/cargas/{fuente}", status_code=201, response_model=schemas.Carga, tags=["Carga de datos"])
+async def subir_archivo(fuente: str, archivo: UploadFile = File(...), u: Usuario = Depends(solo_rrhh)):
+    """Sube y VALIDA un archivo (CSV o Excel) de una fuente. No cambia nada:
+    queda 'validada' (lista para aplicar) o 'con_errores'. Solo RRHH."""
+    contenido = await archivo.read(cargas.BYTES_MAXIMOS + 1)
+    return _carga(cargas.validar, fuente, archivo.filename or "archivo", contenido, u.usuario)
+
+
+@app.post("/cargas/{id_carga}/aplicar", response_model=schemas.Carga, tags=["Carga de datos"])
+def aplicar_carga(id_carga: int, u: Usuario = Depends(solo_rrhh)):
+    """Aplica una carga validada (todo o nada) y concilia archivo contra base.
+    Los indicadores se recalculan y se revisan las alertas del mes."""
+    resultado = _carga(cargas.aplicar, id_carga, u.usuario)
+    _cache["df"] = None
+    programacion.revisar_pronto()
+    return resultado
+
+
+@app.post("/cargas/{id_carga}/descartar", response_model=schemas.Carga, tags=["Carga de datos"])
+def descartar_carga(id_carga: int, u: Usuario = Depends(solo_rrhh)):
+    return _carga(cargas.descartar, id_carga, u.usuario)
+
+
+@app.get("/cargas/plantillas/{fuente}", tags=["Carga de datos"], response_class=Response)
+def plantilla_de_carga(
+    fuente: str, formato: Literal["csv", "xlsx"] = "xlsx", _u: Usuario = Depends(solo_rrhh)
+):
+    """Archivo vacio con las columnas que espera la fuente."""
+    return _archivo(_carga(cargas.plantilla, fuente, formato), f"plantilla-{fuente}.{formato}", _TIPOS[formato])
+
+
+@app.get("/cargas/ejemplos/{fuente}", tags=["Carga de datos"], response_class=Response)
+def ejemplo_de_carga(
+    fuente: str, formato: Literal["csv", "xlsx"] = "xlsx", _u: Usuario = Depends(solo_rrhh)
+):
+    """Archivo de ejemplo de la empresa de demostracion para el mes siguiente
+    al ultimo cargado, como lo exportaria su sistema (con columnas de mas)."""
+    contenido, nombre = _carga(cargas.ejemplo, fuente, formato)
+    return _archivo(contenido, nombre, _TIPOS[formato])

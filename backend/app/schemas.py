@@ -334,3 +334,46 @@ class ProgramacionCambio(BaseModel):
     """Configuracion de la programacion mensual (solo RRHH)."""
     activa: bool
     dia_del_mes: int = Field(ge=1, le=28, description="1 a 28: todos los meses tienen ese dia")
+
+
+# -------------------------------------------------------- modo demostracion
+class CuentaDemo(BaseModel):
+    usuario: str
+    nombre: str
+    rol: str
+    descripcion: str
+
+
+class Demo(BaseModel):
+    activo: bool
+    contrasena: str | None = Field(None, description="Contrasena de las cuentas de demostracion")
+    cuentas: list[CuentaDemo] = []
+
+
+class CodigoDemo(BaseModel):
+    codigo: str = Field(description="El codigo que en produccion solo se veria en la app del telefono")
+    segundos: int = Field(description="Segundos para que cambie")
+
+
+class CodigoDemoSolicitud(BaseModel):
+    mfa_token: str
+
+
+# ------------------------------------------------------- carga de datos
+class Carga(BaseModel):
+    """Un archivo subido: su validacion y, si se aplico, su conciliacion."""
+    id: int
+    fuente: str
+    archivo: str
+    sha256: str = Field(description="Huella del archivo: prueba que se cargo exactamente ese")
+    bytes: int
+    filas: int
+    estado: str = Field(description="validada, con_errores, aplicada o descartada")
+    errores: list[dict]
+    descartadas: list[dict] = Field(description="Columnas que no se guardaron y por que")
+    periodos: list[str]
+    resultado: dict | None
+    subida_por: str
+    subida_en: datetime
+    aplicada_por: str | None
+    aplicada_en: datetime | None

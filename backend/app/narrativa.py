@@ -107,7 +107,7 @@ def rango_hallazgos(n_hechos: int) -> tuple[int, int]:
 
     Pedir "de 3 a 5" con solo 2 hechos obligaba a un tercer hallazgo que
     repetia un hecho sin su valor, y los guardarrailes lo rechazaban siempre
-    (Legal, agosto 2026: fallo los 3 intentos en la evaluacion real).
+    (Jurídico, agosto 2026: fallo los 3 intentos en la evaluacion real).
     """
     return min(3, n_hechos), min(5, n_hechos)
 

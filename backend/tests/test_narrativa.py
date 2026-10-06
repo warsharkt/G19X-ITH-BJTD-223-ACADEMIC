@@ -484,16 +484,16 @@ def test_el_sistema_detecta_coincidencias_entre_indicadores_en_alerta(caso):
 
 
 def test_los_valores_suprimidos_no_llegan_al_modelo(df, id_area):
-    """Legal (4 personas): clima y desempeno estan ocultos; el prompt no debe ni mencionarlos."""
-    periodo, legal = df["periodo"].max(), id_area("Legal")
+    """Jurídico (4 personas): clima y desempeno estan ocultos; el prompt no debe ni mencionarlos."""
+    periodo, legal = df["periodo"].max(), id_area("Jurídico")
     hechos = construir_hechos(df, periodo, legal)
     assert {h["indicador"] for h in hechos}.isdisjoint({"enps", "cumplimiento_metas"})
-    prompt = "\n".join(m["content"] for m in construir_mensajes(hechos, periodo, "Legal"))
+    prompt = "\n".join(m["content"] for m in construir_mensajes(hechos, periodo, "Jurídico"))
     assert "eNPS" not in prompt and "Cumplimiento de metas" not in prompt
 
 
 def test_muestras_diminutas_tienen_confianza_baja(df, id_area):
-    hechos = construir_hechos(df, df["periodo"].max(), id_area("Legal"))
+    hechos = construir_hechos(df, df["periodo"].max(), id_area("Jurídico"))
     assert {h["confianza"] for h in hechos} == {"baja"}
 
 
@@ -608,15 +608,15 @@ def test_el_error_de_largo_explica_como_corregirlo(caso, visibles):
 
 
 def test_no_pide_mas_hallazgos_que_hechos_citables(df, id_area):
-    """Regresion (evaluacion real, Legal ago-2026): con 2 hechos se pedian
+    """Regresion (evaluacion real, Jurídico ago-2026): con 2 hechos se pedian
     "de 3 a 5" hallazgos y el tercero nunca podia pasar los guardarrailes.
-    Hoy Legal ago-2026 tiene un solo hecho evaluable (la capacitacion quedo
+    Hoy Jurídico ago-2026 tiene un solo hecho evaluable (la capacitacion quedo
     con muestra insuficiente): se pide exactamente 1."""
-    periodo, legal = pd.Timestamp("2026-08-01"), id_area("Legal")
+    periodo, legal = pd.Timestamp("2026-08-01"), id_area("Jurídico")
     hechos = construir_hechos(df, periodo, legal)
     visibles = hechos_para_modelo(hechos)
     assert len(visibles) == 1
-    prompt = construir_mensajes(hechos, periodo, "Legal")[-1]["content"]
+    prompt = construir_mensajes(hechos, periodo, "Jurídico")[-1]["content"]
     assert "hallazgos\" (exactamente 1;" in prompt and "de 3 a 5" not in prompt
     for n, esperado in [(1, (1, 1)), (2, (2, 2)), (4, (3, 4)), (7, (3, 5))]:
         esquema = esquema_narrativa([f"H{i:02d}" for i in range(1, n + 1)])["properties"]["hallazgos"]
@@ -633,7 +633,7 @@ def _hecho_pct(id_, nombre, valor, var_mes, var_anio, n):
 
 
 def test_regresion_salida_real_de_qwen3_en_legal_sin_valores():
-    """Salida real de Qwen3 (Legal ago-2026, antes de la regla de muestra
+    """Salida real de Qwen3 (Jurídico ago-2026, antes de la regla de muestra
     minima): escribe los cambios pero no los valores. El hallazgo 1 pasaba por
     casualidad: su cambio anual (-25.0 pts) coincide con su valor (25.0 %).
     Ambos deben rechazarse, y el error debe decirle al modelo el valor exacto."""
@@ -665,9 +665,9 @@ def test_regresion_salida_real_de_qwen3_en_legal_sin_valores():
 
 
 def test_muestra_insuficiente_no_llega_al_modelo_como_alerta(df, id_area):
-    """Legal ago-2026: la capacitacion (4 empleados, 1 inscrito) se ve en el
+    """Jurídico ago-2026: la capacitacion (4 empleados, 1 inscrito) se ve en el
     dashboard, pero no es un hecho: el modelo solo la nombra, sin cifras."""
-    periodo, legal = pd.Timestamp("2026-08-01"), id_area("Legal")
+    periodo, legal = pd.Timestamp("2026-08-01"), id_area("Jurídico")
     hechos = construir_hechos(df, periodo, legal)
     assert {h["indicador"] for h in hechos}.isdisjoint({"cobertura_capacitacion", "tasa_finalizacion"})
     prov = ProveedorFalso(respuesta_buena(hechos))

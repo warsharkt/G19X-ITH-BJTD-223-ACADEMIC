@@ -276,7 +276,7 @@ def test_correo_sin_datos_uno_por_persona(gente, ventas, smtp):
     assert set(para) == {"rrhh@empresa.com", "dir@empresa.com", "ger@empresa.com"}  # rrhh2 sin correo, TI sin avisos
     assert enviados >= 3
     rrhh = para["rrhh@empresa.com"]
-    assert rrhh["Subject"] == "Motor de Reportes de RRHH: tienes 2 avisos nuevos"
+    assert rrhh["Subject"] == "Talentia Insights: tienes 2 avisos nuevos"
     cuerpo = rrhh.get_content()
     assert "https://rrhh.empresa.com/avisos" in cuerpo
     for dato in ("Ventas", "Corporativo", "rotación", "Rotación", "agosto", "rojo"):

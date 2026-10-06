@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { api } from '../api'
+import { useSesion } from '../sesion'
+import TelefonoSimulado from './TelefonoSimulado'
 import Mensaje from './Mensaje'
 
 // Entrega los codigos de respaldo como archivo de texto
 function descargarCodigos(codigos) {
-  const blob = new Blob([`Códigos de respaldo del Motor de Reportes de RRHH\n\n${codigos.join('\n')}\n`], {
+  const blob = new Blob([`Códigos de respaldo de Talentia Insights\n\n${codigos.join('\n')}\n`], {
     type: 'text/plain',
   })
   const url = URL.createObjectURL(blob)
@@ -20,6 +22,7 @@ function descargarCodigos(codigos) {
 // Verificacion en dos pasos en tres pasos: QR, codigo de prueba y codigos de
 // respaldo (se muestran una sola vez).
 export default function ConfigurarMfa({ alTerminar }) {
+  const { demo, usuario } = useSesion()
   const [qr, setQr] = useState(null) // { secreto, qr }
   const [codigo, setCodigo] = useState('')
   const [respaldo, setRespaldo] = useState(null)
@@ -90,27 +93,30 @@ export default function ConfigurarMfa({ alTerminar }) {
           </button>
         </>
       ) : (
-        <form className="formulario-columna" onSubmit={activar}>
-          <p>1. Escanea este código con tu app.</p>
-          <img className="qr-mfa" src={qr.qr} alt="Código QR para tu app de autenticación" width="200" height="200" />
-          <p className="nota">
-            ¿No puedes escanearlo? Escribe esta clave en la app: <code className="clave-mfa">{qr.secreto}</code>
-          </p>
-          <label>
-            2. Escribe el código de 6 dígitos que muestra la app
-            <input
-              autoComplete="one-time-code"
-              inputMode="numeric"
-              value={codigo}
-              onChange={(e) => setCodigo(e.target.value)}
-              maxLength={6}
-              required
-            />
-          </label>
-          <button type="submit" className="boton-primario" disabled={enviando}>
-            {enviando ? 'Activando…' : 'Activar'}
-          </button>
-        </form>
+        <div className={demo.activo ? 'configurar-con-telefono' : undefined}>
+          <form className="formulario-columna" onSubmit={activar}>
+            <p>1. Escanea este código con tu app.</p>
+            <img className="qr-mfa" src={qr.qr} alt="Código QR para tu app de autenticación" width="200" height="200" />
+            <p className="nota">
+              ¿No puedes escanearlo? Escribe esta clave en la app: <code className="clave-mfa">{qr.secreto}</code>
+            </p>
+            <label>
+              2. Escribe el código de 6 dígitos que muestra la app
+              <input
+                autoComplete="one-time-code"
+                inputMode="numeric"
+                value={codigo}
+                onChange={(e) => setCodigo(e.target.value)}
+                maxLength={6}
+                required
+              />
+            </label>
+            <button type="submit" className="boton-primario" disabled={enviando}>
+              {enviando ? 'Activando…' : 'Activar'}
+            </button>
+          </form>
+          {demo.activo && <TelefonoSimulado usuario={usuario.usuario} enTarjeta />}
+        </div>
       )}
     </div>
   )

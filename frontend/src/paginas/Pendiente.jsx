@@ -1,5 +1,6 @@
 import ConfigurarMfa from '../componentes/ConfigurarMfa'
 import FormularioContrasena from '../componentes/FormularioContrasena'
+import Marca from '../componentes/Marca'
 import { useSesion } from '../sesion'
 
 const TEXTOS = {
@@ -17,13 +18,14 @@ const TEXTOS = {
 // Lo que hay que resolver antes de usar el sistema. La API exige lo mismo:
 // hasta resolverlo, todo lo demas responde 403.
 export default function Pendiente() {
-  const { usuario, recargarUsuario, cerrarSesion } = useSesion()
+  const { usuario, demo, recargarUsuario, cerrarSesion } = useSesion()
   const { titulo, texto } = TEXTOS[usuario.pendiente]
 
   return (
-    <main className="pagina-login">
-      <div className="tarjeta-login tarjeta-ancha">
-        <img src="/icono.svg" alt="" width="40" height="40" />
+    <main className="pagina-centrada">
+      {/* con el telefono simulado al lado, la tarjeta es mas ancha */}
+      <div className={`tarjeta-login${demo.activo && usuario.pendiente === 'configurar_mfa' ? ' tarjeta-amplia' : ''}`}>
+        <Marca tamano={36} />
         <h1>{titulo}</h1>
         <p className="texto-secundario">
           Hola, {usuario.nombre}. {texto}
