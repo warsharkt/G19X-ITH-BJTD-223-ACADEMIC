@@ -35,7 +35,8 @@ export class ErrorDeApi extends Error {
 // cierra en toda la aplicacion (ver sesion.jsx).
 export const SESION_VENCIDA = 'rrhh:sesion-vencida'
 
-async function pedir(ruta, { metodo = 'GET', cuerpo, formulario } = {}) {
+// archivo: true devuelve { blob, nombre } en lugar de JSON (exportaciones).
+async function pedir(ruta, { metodo = 'GET', cuerpo, formulario, archivo = false } = {}) {
   const encabezados = {}
   const token = leerToken()
   if (token) encabezados.Authorization = `Bearer ${token}`
@@ -54,6 +55,10 @@ async function pedir(ruta, { metodo = 'GET', cuerpo, formulario } = {}) {
     throw new ErrorDeApi(`No se pudo conectar con la API (${API_URL}). Revisa que esté encendida.`, 0)
   }
 
+  if (respuesta.ok && archivo) {
+    const nombre = (respuesta.headers.get('Content-Disposition') ?? '').match(/filename="([^"]+)"/)?.[1]
+    return { blob: await respuesta.blob(), nombre }
+  }
   if (respuesta.ok) return respuesta.json()
 
   let detalle = null
@@ -92,4 +97,6 @@ export const api = {
     pedir('/narrativas' + consulta({ area_id: areaId, periodo, revision, limite })),
   revisar: (id, decision, comentario) =>
     pedir(`/narrativas/${id}/revision`, { metodo: 'POST', cuerpo: { decision, comentario } }),
+  // Solo reportes aprobados; formato: 'pdf' o 'pptx'
+  exportar: (id, formato) => pedir(`/narrativas/${id}/exportar` + consulta({ formato }), { archivo: true }),
 }

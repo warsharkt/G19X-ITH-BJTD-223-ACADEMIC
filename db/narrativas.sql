@@ -39,3 +39,15 @@ ALTER TABLE narrativas ADD COLUMN IF NOT EXISTS revision TEXT NOT NULL DEFAULT '
 ALTER TABLE narrativas ADD COLUMN IF NOT EXISTS revisada_por TEXT;
 ALTER TABLE narrativas ADD COLUMN IF NOT EXISTS revisada_en TIMESTAMPTZ;
 ALTER TABLE narrativas ADD COLUMN IF NOT EXISTS comentario_revision TEXT;
+
+-- Paso 9: bitacora de exportaciones (RF-08, RF-11). Solo se exportan las
+-- narrativas aprobadas; cada descarga registra quien, en que formato y cuando.
+CREATE TABLE IF NOT EXISTS exportaciones (
+    id            SERIAL PRIMARY KEY,
+    narrativa_id  INTEGER NOT NULL REFERENCES narrativas (id) ON DELETE CASCADE,
+    formato       TEXT NOT NULL CHECK (formato IN ('pdf', 'pptx')),
+    usuario       TEXT NOT NULL,
+    exportada_en  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS exportaciones_narrativa ON exportaciones (narrativa_id);

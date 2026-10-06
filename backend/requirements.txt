@@ -15,6 +15,11 @@ pandas==3.0.6
 numpy==2.5.3
 python-dotenv==1.2.3
 
+# Exportacion de reportes (paso 9)
+reportlab==5.0.1          # PDF
+python-pptx==1.0.2        # presentacion ejecutiva
+
 # Pruebas
 pytest==9.1.1
 httpx2==2.13.0             # lo usa el TestClient de FastAPI
+pypdf==6.19.0              # lee el texto de los PDF exportados

@@ -6,6 +6,7 @@ Consolida los datos de Recursos Humanos (reclutamiento, desempeño, capacitació
 - **Motor de narrativa (con IA):** el modelo redacta **solo** a partir de los KPIs ya calculados. Unos guardarrailes rechazan cifras inventadas, causas no demostradas y alertas omitidas. Todo reporte requiere revisión humana.
 - **Acceso por rol:** Dirección ve el consolidado, RRHH ve todo, cada gerente ve solo su área y TI ve la configuración.
 - **Tablero web (React):** indicadores del mes con semáforo, tendencia de 24 meses con umbrales, generación de reportes con IA e historial.
+- **Exportación:** los reportes aprobados se descargan en PDF y como presentación de PowerPoint.
 
 Requisitos, decisiones y reglas de negocio: [`docs/PRD.md`](docs/PRD.md).
 
@@ -13,7 +14,7 @@ Requisitos, decisiones y reglas de negocio: [`docs/PRD.md`](docs/PRD.md).
 
 ## Tecnologías
 
-Python 3.14 · FastAPI · PostgreSQL 16 (Docker local o Supabase) · pandas · Ollama + Qwen3 8B (IA local) o Groq (IA en la nube, solo con datos sintéticos) · React + Vite + Recharts · pytest y Vitest
+Python 3.14 · FastAPI · PostgreSQL 16 (Docker local o Supabase) · pandas · Ollama + Qwen3 8B (IA local) o Groq (IA en la nube, solo con datos sintéticos) · ReportLab (PDF) y python-pptx (presentación) · React + Vite + Recharts · pytest y Vitest
 
 ## Instalación local
 
@@ -66,7 +67,7 @@ Abre http://localhost:5173 e inicia sesión con tu usuario. Si la API no está e
 | Sección | Qué hace |
 |---|---|
 | **Tablero** | Indicadores del mes con semáforo (siempre con icono y texto), variación contra el mes y el año anterior, y la tendencia del indicador elegido con sus umbrales. Filtros por área, mes e indicador; quedan en la dirección de la página, así que se pueden compartir |
-| **Narrativas** | Solicita el reporte con IA de un área y mes, muestra el avance mientras se redacta, permite aprobarlo o rechazarlo y guarda el historial consultable por área, mes y revisión |
+| **Narrativas** | Solicita el reporte con IA de un área y mes, muestra el avance mientras se redacta, permite aprobarlo o rechazarlo, descargar los aprobados en PDF o presentación, y guarda el historial consultable por área, mes y revisión |
 | **Umbrales** | Valores de atención y crítico de cada indicador (solo lectura) |
 
 Cada rol ve solo lo suyo: Dirección no puede cambiar de área, y TI solo ve los umbrales. La API aplica los mismos permisos, así que no dependen de la interfaz. La sesión se guarda solo en la pestaña (`sessionStorage`) y se cierra sola cuando el token vence.
@@ -85,6 +86,17 @@ Los reportes se generan en segundo plano: `POST /narrativas` devuelve un id y `G
 ### Revisión antes de distribuir
 
 Todo reporte nace **pendiente de revisión**. Una persona de RRHH lo **aprueba** o lo **rechaza** con motivo desde la pantalla del reporte (o con `POST /narrativas/{id}/revision`). Quien lo solicitó no puede aprobarlo: para probar este flujo necesitas **dos usuarios con rol `rrhh`**. La decisión es definitiva y queda registrada con usuario, fecha y comentario. Si se rechaza, se solicita uno nuevo.
+
+### Exportar
+
+Los reportes **aprobados** se descargan desde la pantalla del reporte (o con `GET /narrativas/{id}/exportar?formato=pdf|pptx`):
+
+- **PDF** (tamaño carta): portada con quién aprobó, resumen, indicadores clave con su semáforo, hallazgos, alertas, recomendaciones y un anexo con fórmulas, umbrales y fuentes.
+- **Presentación** (PowerPoint 16:9): las mismas secciones, una por diapositiva.
+
+El archivo se arma con la narrativa aprobada tal como quedó guardada: no se recalcula nada, así que se distribuye exactamente lo que se revisó. Los pendientes y rechazados no se pueden exportar, y cada descarga queda registrada (quién, formato y fecha) en la tabla `exportaciones`.
+
+Si ya tenías el entorno instalado, vuelve a correr `pip install -r requirements.txt` para instalar las bibliotecas de exportación.
 
 ## Usuarios y roles
 
@@ -147,7 +159,8 @@ backend/
     narrativa.py     motor de narrativa: hechos, prompt, reintentos
     guardrails.py    validación de lo que redacta la IA
     llm.py           proveedores de IA (Ollama, Groq) y candado de datos
-    trabajos.py      generación de narrativas en segundo plano
+    trabajos.py      generación de narrativas en segundo plano, revisión y bitácora
+    exportar.py      reporte aprobado en PDF y presentación
     seguridad.py     inicio de sesión, contraseñas, tokens y permisos por rol
     database.py      conexión a PostgreSQL (local o Supabase)
   scripts/           seed, crear_usuario, generar_narrativa, evaluar_narrativa

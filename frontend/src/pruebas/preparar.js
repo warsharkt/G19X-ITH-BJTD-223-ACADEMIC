@@ -16,3 +16,7 @@ globalThis.ResizeObserver ??= class {
   unobserve() {}
   disconnect() {}
 }
+
+// jsdom no implementa las descargas de archivos (exportar reportes)
+URL.createObjectURL ??= () => 'blob:prueba'
+URL.revokeObjectURL ??= () => {}

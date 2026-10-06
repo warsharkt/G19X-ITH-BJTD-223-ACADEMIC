@@ -225,3 +225,49 @@ describe('revisión humana (RF-05)', () => {
     )
   })
 })
+
+describe('exportación (RF-08)', () => {
+  // Captura las descargas: jsdom no navega a enlaces blob:
+  function espiarDescargas() {
+    const descargas = []
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function () {
+      descargas.push(this.download)
+    })
+    return descargas
+  }
+
+  it('un reporte aprobado se descarga en PDF y como presentación', async () => {
+    const { contrasena, estado } = instalarApiFalsa()
+    const descargas = espiarDescargas()
+    const persona = await entrar('eva', contrasena, '/narrativas/5')
+    await persona.click(await screen.findByRole('button', { name: 'Aprobar' }))
+
+    await persona.click(await screen.findByRole('button', { name: 'Descargar PDF' }))
+    await waitFor(() => expect(descargas).toEqual(['reporte-rrhh-corporativo-2026-08.pdf']))
+    await persona.click(screen.getByRole('button', { name: 'Descargar presentación' }))
+    await waitFor(() => expect(descargas).toHaveLength(2))
+    expect(descargas[1]).toBe('reporte-rrhh-corporativo-2026-08.pptx')
+    expect(estado.exportaciones).toEqual([
+      { id: 5, formato: 'pdf' },
+      { id: 5, formato: 'pptx' },
+    ])
+  })
+
+  it('un reporte pendiente no se puede descargar', async () => {
+    const { contrasena, estado } = instalarApiFalsa()
+    await entrar('dir', contrasena, '/narrativas/5')
+    expect(await screen.findByText(/después se podrá descargar/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Descargar PDF' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Descargar presentación' })).not.toBeInTheDocument()
+    expect(estado.exportaciones).toEqual([])
+  })
+
+  it('un reporte rechazado no ofrece descargas', async () => {
+    const { contrasena } = instalarApiFalsa()
+    const persona = await entrar('eva', contrasena, '/narrativas/5')
+    await persona.type(await screen.findByLabelText(/Comentario/), 'Falta el hallazgo de rotación de Ventas')
+    await persona.click(screen.getByRole('button', { name: 'Rechazar' }))
+    expect(await screen.findByText(/Rechazado por eva/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Descargar PDF' })).not.toBeInTheDocument()
+  })
+})

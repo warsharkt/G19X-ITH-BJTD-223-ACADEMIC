@@ -355,8 +355,13 @@ select {
   margin-top: 0.5rem;
 }
 
-.formulario-revision .mensaje {
+.formulario-revision .mensaje,
+.mensaje .mensaje {
   margin: 0;
+}
+
+.mensaje-exito .botones {
+  margin-top: 0.4rem;
 }
 
 textarea {

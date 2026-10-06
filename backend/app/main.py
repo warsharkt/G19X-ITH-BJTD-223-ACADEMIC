@@ -1,4 +1,4 @@
-"""API del Motor Inteligente de Reportes de RRHH (pasos 4 a 8).
+"""API del Motor Inteligente de Reportes de RRHH (pasos 4 a 9).
 
 KPIs de solo lectura y narrativas generadas por IA en segundo plano (se
 guardan en la tabla `narrativas`). Todo, salvo /health y /auth/login,
@@ -7,15 +7,16 @@ app/seguridad.py y la regla 10.3.2 del PRD).
 """
 import time
 from contextlib import asynccontextmanager
+from typing import Literal
 
 import pandas as pd
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from app import narrativa, schemas, seguridad, trabajos
+from app import exportar, narrativa, schemas, seguridad, trabajos
 from app.database import ejecutar_sql, engine
 from app.kpis import CORPORATIVO, calcular_kpis, inicializar_umbrales
 from app.llm import ConfiguracionIA, obtener_proveedor
@@ -49,7 +50,7 @@ app = FastAPI(
         "(sin IA): rotacion, clima, desempeno, capacitacion, reclutamiento y "
         "productividad, con tendencias y semaforo."
     ),
-    version="0.8.0",
+    version="0.9.0",
 )
 
 # El frontend de React (paso 7) se sirve en local desde estos origenes.
@@ -58,6 +59,7 @@ app.add_middleware(
     allow_origins=["http://localhost:5173", "http://localhost:3000"],
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],  # nombre del archivo al exportar
 )
 
 PATRON_MES = r"^\d{4}-(0[1-9]|1[0-2])$"
@@ -300,6 +302,50 @@ def revisar_narrativa(
     if trabajo is None:
         raise HTTPException(status_code=404, detail=f"La narrativa {id_narrativa} no existe")
     return trabajo
+
+
+@app.get(
+    "/narrativas/{id_narrativa}/exportar",
+    tags=["Narrativa"],
+    response_class=Response,
+    responses={200: {"content": {tipo: {} for tipo in exportar.FORMATOS.values()},
+                     "description": "Archivo del reporte"}},
+)
+def exportar_narrativa(
+    id_narrativa: int,
+    formato: Literal["pdf", "pptx"] = Query("pdf", description="pdf (reporte) o pptx (presentacion ejecutiva)"),
+    u: Usuario = Depends(con_acceso_a_datos),
+):
+    """Descarga el reporte en PDF o como presentacion ejecutiva (RF-08).
+
+    Solo los reportes **aprobados** por RRHH se pueden exportar (regla 10.3.9),
+    y cada quien solo los de las areas que puede ver. El archivo se arma con
+    la narrativa aprobada tal como quedo guardada (no se recalcula nada) y
+    cada descarga queda en la bitacora: quien, en que formato y cuando.
+    """
+    try:
+        trabajo = trabajos.obtener(id_narrativa)
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
+    if trabajo is None:
+        raise HTTPException(status_code=404, detail=f"La narrativa {id_narrativa} no existe")
+    exigir_acceso_a_datos(u, trabajo["area_id"])
+    if trabajo["estado"] != "lista" or trabajo["revision"] != "aprobada":
+        estado = trabajo["revision"] if trabajo["estado"] == "lista" else trabajo["estado"]
+        raise HTTPException(
+            status_code=409,
+            detail=f"Solo se pueden exportar reportes aprobados por RRHH; este está {estado.replace('_', ' ')}",
+        )
+    contenido = exportar.generar(trabajo, formato)
+    try:
+        trabajos.registrar_exportacion(id_narrativa, formato, u.usuario)
+    except SQLAlchemyError:  # sin bitacora no se distribuye
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
+    return Response(
+        contenido,
+        media_type=exportar.FORMATOS[formato],
+        headers={"Content-Disposition": f'attachment; filename="{exportar.nombre_archivo(trabajo, formato)}"'},
+    )
 
 
 @app.get("/narrativas", response_model=list[schemas.TrabajoNarrativa], tags=["Narrativa"])

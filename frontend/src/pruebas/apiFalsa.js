@@ -89,6 +89,21 @@ function revisar(usuario, id, { decision, comentario }) {
   return respuesta(200, trabajo(id, 'lista'))
 }
 
+// Exportacion: igual que la API real, solo reportes aprobados
+function exportar(id, formato, estado) {
+  const actual = trabajo(id, 'lista')
+  if (actual.revision !== 'aprobada')
+    return respuesta(409, { detail: `Solo se pueden exportar reportes aprobados por RRHH; este está ${actual.revision}` })
+  estado.exportaciones.push({ id, formato })
+  const nombre = `reporte-rrhh-corporativo-2026-08.${formato}`
+  return Promise.resolve(
+    new Response(new Blob([formato === 'pdf' ? '%PDF-1.4' : 'PK']), {
+      status: 200,
+      headers: { 'Content-Type': 'application/octet-stream', 'Content-Disposition': `attachment; filename="${nombre}"` },
+    }),
+  )
+}
+
 function respuesta(estado, cuerpo) {
   return Promise.resolve(new Response(JSON.stringify(cuerpo), { status: estado, headers: { 'Content-Type': 'application/json' } }))
 }
@@ -96,7 +111,7 @@ function respuesta(estado, cuerpo) {
 // Instala la API falsa. `opciones.consultasHastaLista`: cuantas veces se
 // consulta la narrativa nueva antes de que pase de en_proceso a lista.
 export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = false } = {}) {
-  const estado = { tokenValido: null, consultas: 0, solicitudes: [] }
+  const estado = { tokenValido: null, consultas: 0, solicitudes: [], exportaciones: [] }
   revisiones = {}
   const tokens = Object.fromEntries(Object.keys(USUARIOS).map((u) => [`token-${u}`, USUARIOS[u]]))
 
@@ -139,6 +154,8 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
     }
     const enRevision = pathname.match(/^\/narrativas\/(\d+)\/revision$/)
     if (enRevision && metodo === 'POST') return revisar(usuario, Number(enRevision[1]), JSON.parse(opciones.body))
+    const enExportar = pathname.match(/^\/narrativas\/(\d+)\/exportar$/)
+    if (enExportar) return exportar(Number(enExportar[1]), searchParams.get('formato'), estado)
     if (pathname === '/narrativas/5') return respuesta(200, trabajo(5, 'lista'))
     if (pathname === '/narrativas/7') {
       estado.consultas += 1

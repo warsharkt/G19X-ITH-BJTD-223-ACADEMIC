@@ -194,3 +194,14 @@ def revisar(id_: int, decision: str, revisor: str, comentario: str | None) -> di
         "No puedes revisar una narrativa que tú solicitaste: debe hacerlo otra persona de RRHH",
         conflicto=False,
     )
+
+
+# --------------------------------------------------------------- exportacion
+def registrar_exportacion(id_: int, formato: str, usuario: str) -> None:
+    """Bitacora de distribucion: quien descargo el reporte, en que formato y cuando (RF-11)."""
+    asegurar_tabla()
+    with engine.begin() as conn:
+        conn.execute(
+            text("INSERT INTO exportaciones (narrativa_id, formato, usuario) VALUES (:i, :f, :u)"),
+            {"i": id_, "f": formato, "u": usuario},
+        )
