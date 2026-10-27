@@ -708,25 +708,6 @@ def _codigo_demo(usuario_id: int) -> dict:
         raise HTTPException(status_code=503, detail="Base de datos no disponible")
 
 
-@app.post("/demo/entrar", response_model=schemas.Token, tags=["Demostración"])
-def entrar_en_demo(entrada: schemas.EntradaDemo):
-    """Entra con un clic con una cuenta de demostracion, sin contrasena ni
-    verificacion en dos pasos, para recorrer el sistema o cambiar de rol.
-    Solo en modo demo (nunca con datos reales) y solo cuentas demo_; las
-    cuentas reales siempre entran con contrasena y MFA."""
-    try:
-        u = demo.entrar(entrada.usuario)
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail=str(exc.args[0]))
-    except SQLAlchemyError:
-        raise HTTPException(status_code=503, detail="Base de datos no disponible")
-    return {
-        "access_token": seguridad.crear_token(u, demo=True),
-        "token_type": "bearer",
-        "expira_en_minutos": seguridad.minutos_de_sesion(),
-    }
-
-
 @app.post("/demo/codigo", response_model=schemas.CodigoDemo, tags=["Demostración"])
 def codigo_demo_al_entrar(solicitud: schemas.CodigoDemoSolicitud):
     """Codigo vigente de una cuenta de demostracion durante el segundo paso del

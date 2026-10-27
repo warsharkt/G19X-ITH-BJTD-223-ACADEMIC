@@ -264,7 +264,7 @@ const DEMO = {
   activo: true,
   contrasena: CONTRASENA_DEMO,
   cuentas: [
-    { usuario: 'ana', nombre: 'Ana López', rol: 'rrhh', cargo: 'Analista de RRHH', descripcion: 'Carga los datos y genera los reportes.' },
+    { usuario: 'lia', nombre: 'Lía Torres', rol: 'rrhh', cargo: 'Analista de RRHH', descripcion: 'Carga los datos y genera los reportes.' },
     { usuario: 'eva', nombre: 'Eva Ruiz', rol: 'rrhh', cargo: 'Responsable de RRHH', descripcion: 'Firma los reportes.' },
     { usuario: 'dir', nombre: 'Dirección General', rol: 'direccion', cargo: 'Dirección General', descripcion: 'Recibe el consolidado.' },
   ],
@@ -292,8 +292,6 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
   }
   revisiones = {}
   const tokens = Object.fromEntries(Object.keys(USUARIOS).map((u) => [`token-${u}`, USUARIOS[u]]))
-  // entrada de un clic del modo demostracion: sin contrasena ni MFA
-  Object.keys(USUARIOS).forEach((u) => (tokens[`demo-${u}`] = USUARIOS[u]))
 
   const fetchFalso = vi.fn(async (url, opciones = {}) => {
     const { pathname, searchParams } = new URL(url)
@@ -304,12 +302,6 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
     if (pathname === '/demo/codigo') {
       if (!demo) return respuesta(404, { detail: 'El modo demostración no está activo' })
       return respuesta(200, { codigo: CODIGO_MFA, segundos: 17 })
-    }
-    if (pathname === '/demo/entrar') {
-      const { usuario: quien } = JSON.parse(opciones.body)
-      if (!demo || !DEMO.cuentas.some((c) => c.usuario === quien))
-        return respuesta(404, { detail: 'Solo las cuentas de demostración entran con un clic' })
-      return respuesta(200, { access_token: `demo-${quien}`, token_type: 'bearer', expira_en_minutos: 60 })
     }
     if (pathname === '/auth/login') {
       const f = new URLSearchParams(opciones.body)
@@ -329,17 +321,15 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
       return respuesta(200, { access_token: `token-${quien.usuario}`, mfa_requerido: false, token_type: 'bearer', expira_en_minutos: 60 })
     }
 
-    const token = (opciones.headers?.Authorization ?? '').replace('Bearer ', '')
-    const usuario = tokens[token]
-    const sesionDemo = token.startsWith('demo-')
+    const usuario = tokens[(opciones.headers?.Authorization ?? '').replace('Bearer ', '')]
     if (!usuario || estado.tokenValido === false)
       return respuesta(401, { detail: 'Sesión no válida o vencida; vuelve a iniciar sesión' })
     const conDatos = usuario.rol !== 'admin_ti'
     const sinPermiso = () => respuesta(403, { detail: 'Tu rol no tiene acceso a datos de colaboradores' })
 
-    const pendiente = sesionDemo && estado.pendientes[usuario.usuario] === 'configurar_mfa' ? null : estado.pendientes[usuario.usuario]
+    const pendiente = estado.pendientes[usuario.usuario]
     if (pathname === '/auth/yo')
-      return respuesta(200, { mfa_activo: false, mfa_obligatorio: false, codigos_respaldo_restantes: 0, firma_reportes: false, ...usuario, pendiente, sesion_demo: sesionDemo })
+      return respuesta(200, { mfa_activo: false, mfa_obligatorio: false, codigos_respaldo_restantes: 0, firma_reportes: false, ...usuario, pendiente })
     if (pathname === '/auth/contrasena') {
       const { actual, nueva } = JSON.parse(opciones.body)
       if (actual !== CONTRASENA) return respuesta(422, { detail: 'La contraseña actual no es correcta' })

@@ -19,7 +19,11 @@ La demostración corre con **Nordika Logística**, una empresa ficticia: operado
 
 ## Demostración
 
-La demostración recorre el flujo completo sin que quien la ve tenga que configurar nada: cada rol se abre **con un clic**, sin contraseña ni código, y desde el menú se **cambia de rol** para ver cómo la Analista prepara, la Responsable firma y Dirección recibe. El encabezado avisa que en producción se pide la verificación en dos pasos. Las cuentas reales no cambian: siempre entran con contraseña y verificación en dos pasos, y permisos y bitácoras funcionan igual.
+La demostración recorre el sistema completo como en producción y enseña **cómo se entra de verdad**: contraseña y código de verificación en dos pasos. Ninguna medida de seguridad se apaga. Para que se pueda probar sin celular, un **teléfono simulado** en pantalla muestra el código vigente, con la leyenda de que en producción solo aparece en el celular de cada persona. La pantalla de inicio explica los pasos:
+
+1. Elige una cuenta de prueba y pulsa **Usar**: se llenan el usuario y la contraseña.
+2. Pulsa **Entrar**.
+3. Escribe el código que muestra el teléfono simulado. La primera vez que entras con cada cuenta se configura la verificación: el teléfono ya muestra el código del QR y al final se guardan los códigos de respaldo.
 
 1. Levántalo con Docker ([Cómo levantarlo](#cómo-levantarlo)), con `MODO_DATOS=sinteticos` y `MODO_DEMO=si` en el `.env`.
 2. Las cuentas de prueba se crean solas al arrancar. En modo desarrollo, créalas con `python -m scripts.demo`.
@@ -34,17 +38,18 @@ La demostración recorre el flujo completo sin que quien la ve tenga que configu
 | `demo_ti` | Carlos Peña, Soporte TI | Administrar cuentas y asignar quién firma, sin ver datos de colaboradores |
 
 **Un recorrido sugerido:**
-1. Entra como **Andrea** (Dirección) y, en **Reportes**, pide a RRHH el reporte del último mes.
-2. Cambia a **Eva** (Analista): el aviso del pedido abre el formulario con el área y el mes ya elegidos. En **Carga de datos** puedes subir antes los archivos de ejemplo de septiembre de 2026 (vienen con nombres de personas: el sistema los descarta, valida cada fila y concilia archivo contra base). Genera el reporte: la pantalla dice que se enviará a Ana para su firma.
-3. Cambia a **Ana** (Responsable): el aviso "listo para tu firma" lleva al reporte. Apruébalo con una Nota de RRHH, o recházalo con motivo.
-4. Cambia a **Andrea** para verlo firmado y descargarlo en PDF o presentación, con la Nota de RRHH.
-5. Cambia a **Carlos** (TI) para crear una cuenta con contraseña temporal y revisar la bitácora de cuentas.
+Para pasar de un rol a otro, cierra sesión y entra con la siguiente cuenta.
 
-Para ver la verificación en dos pasos, en la pantalla de inicio elige **Entrar con usuario y contraseña** con una cuenta de prueba y la contraseña `Demo-RRHH-2026`: un **teléfono simulado** muestra el código que daría la app del celular.
+1. Entra como **Andrea** (Dirección) y, en **Reportes**, pide a RRHH el reporte del último mes.
+2. Entra como **Eva** (Analista): el aviso del pedido abre el formulario con el área y el mes ya elegidos. En **Carga de datos** puedes subir antes los archivos de ejemplo de septiembre de 2026 (vienen con nombres de personas: el sistema los descarta, valida cada fila y concilia archivo contra base). Genera el reporte: la pantalla dice que se enviará a Ana para su firma.
+3. Entra como **Ana** (Responsable): el aviso "listo para tu firma" lleva al reporte. Apruébalo con una Nota de RRHH, o recházalo con motivo.
+4. Vuelve a entrar como **Andrea** para verlo firmado y descargarlo en PDF o presentación, con la Nota de RRHH.
+5. Entra como **Carlos** (TI) para crear una cuenta con contraseña temporal y revisar la bitácora de cuentas.
+
 
 Para dejar las cuentas como nuevas después de una demostración, vuelve a correr `python -m scripts.demo`. Para volver a los datos originales de Nordika, corre `python -m scripts.seed`.
 
-El modo demostración **se niega a funcionar con `MODO_DATOS=reales`**, y la entrada de un clic y el código visible solo existen para cuentas `demo_`. Con `MODO_DATOS=sinteticos` también puedes usar Groq para que los reportes salgan en segundos (sección Inteligencia artificial).
+El modo demostración **se niega a funcionar con `MODO_DATOS=reales`**, y nunca muestra el código de una cuenta que no sea `demo_`. Con `MODO_DATOS=sinteticos` también puedes usar Groq para que los reportes salgan en segundos (sección Inteligencia artificial).
 
 ## Tecnologías
 
@@ -309,7 +314,7 @@ backend/
     exportar.py      reporte aprobado en PDF y presentación
     seguridad.py     inicio de sesión, cuentas con bitácora, contraseñas, tokens y permisos por rol
     mfa.py           verificación en dos pasos (TOTP) y códigos de respaldo
-    demo.py          modo demostración: entrada de un clic por rol y teléfono simulado
+    demo.py          modo demostración: cuentas de prueba por rol y teléfono simulado
     cargas.py        carga de archivos de los sistemas fuente: validación y conciliación
     marca.py         nombre del producto y de la empresa
     database.py      conexión a PostgreSQL (local o Supabase)

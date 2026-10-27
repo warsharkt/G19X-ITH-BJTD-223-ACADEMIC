@@ -60,7 +60,7 @@ export default function ConfigurarMfa({ alTerminar }) {
       <div className="formulario-columna">
         <Mensaje tipo="exito" titulo="Verificación en dos pasos activada" />
         <p>
-          Guarda estos <strong>códigos de respaldo</strong> en un lugar seguro. Si no tienes tu teléfono, cada uno sirve
+          <strong>Paso 3 de 3.</strong> Guarda estos <strong>códigos de respaldo</strong> en un lugar seguro. Si no tienes tu teléfono, cada uno sirve
           para entrar <strong>una sola vez</strong>. No se vuelven a mostrar.
         </p>
         <ul className="codigos-respaldo" aria-label="Códigos de respaldo">
@@ -95,13 +95,16 @@ export default function ConfigurarMfa({ alTerminar }) {
       ) : (
         <div className={demo.activo ? 'configurar-con-telefono' : undefined}>
           <form className="formulario-columna" onSubmit={activar}>
-            <p>1. Escanea este código con tu app.</p>
+            <p>
+              <strong>Paso 1 de 3.</strong> Escanea este código con tu app.
+              {demo.activo && ' En esta demostración ya está escaneado: el teléfono simulado muestra el código.'}
+            </p>
             <img className="qr-mfa" src={qr.qr} alt="Código QR para tu app de autenticación" width="200" height="200" />
             <p className="nota">
               ¿No puedes escanearlo? Escribe esta clave en la app: <code className="clave-mfa">{qr.secreto}</code>
             </p>
             <label>
-              2. Escribe el código de 6 dígitos que muestra la app
+              Paso 2 de 3. Escribe el código de 6 dígitos que muestra la app
               <input
                 autoComplete="one-time-code"
                 inputMode="numeric"

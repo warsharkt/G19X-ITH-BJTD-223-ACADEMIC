@@ -597,43 +597,44 @@ describe('demostración', () => {
     expect(screen.queryByText(/demostración/i)).not.toBeInTheDocument()
   })
 
-  it('se ve como producto real: marca, empresa, medidas de seguridad y un rol por tarjeta', async () => {
+  it('se ve como producto real: marca, empresa y medidas de seguridad', async () => {
     instalarApiFalsa({ demo: true })
     montar()
     expect(await screen.findByText('Nordika Logística')).toBeInTheDocument()
     expect(screen.getByText('Verificación en dos pasos')).toBeInTheDocument()
-    expect(await screen.findByRole('heading', { name: 'Explora con un rol' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Entrar como Analista de RRHH, Ana López' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Entrar como Responsable de RRHH, Eva Ruiz' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Inicia sesión' })).toBeInTheDocument()
   })
 
-  it('entra con un clic, sin contraseña ni código, y cambia de rol desde el menú', async () => {
+  it('explica cómo entrar y lista cada cuenta con su cargo', async () => {
     instalarApiFalsa({ demo: true })
-    const persona = userEvent.setup()
     montar()
-    await persona.click(await screen.findByRole('button', { name: 'Entrar como Analista de RRHH, Ana López' }))
-    expect(await screen.findByRole('heading', { name: 'Indicadores de Corporativo' })).toBeInTheDocument()
-    expect(screen.getByText(/en producción se pide verificación en dos pasos/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Generar reporte con IA' })).toBeInTheDocument()
-
-    await persona.selectOptions(screen.getByLabelText('Cambiar de rol'), 'dir')
-    expect(await screen.findByRole('button', { name: 'Pedir este reporte a RRHH' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Generar reporte con IA' })).not.toBeInTheDocument()
-    expect(sessionStorage.getItem('rrhh.token')).toBe('demo-dir')
+    const cuentas = await screen.findByRole('region', { name: 'Cuentas de prueba' })
+    const pasos = within(cuentas).getByRole('list', { name: 'Cómo entrar' })
+    expect(within(pasos).getAllByRole('listitem')).toHaveLength(3)
+    expect(pasos).toHaveTextContent('Elige una cuenta y pulsa Usar')
+    expect(pasos).toHaveTextContent('teléfono simulado')
+    expect(cuentas).toHaveTextContent('Analista de RRHH')
+    expect(cuentas).toHaveTextContent('Responsable de RRHH')
+    expect(cuentas).toHaveTextContent(CONTRASENA_DEMO)
+    // no hay atajo: siempre se entra con contraseña y código
+    expect(screen.queryByLabelText('Cambiar de rol')).not.toBeInTheDocument()
   })
 
   it('pide el código y el teléfono simulado lo muestra', async () => {
     instalarApiFalsa({ demo: true })
     const persona = userEvent.setup()
     montar()
-    await persona.click(await screen.findByRole('button', { name: 'Entrar con usuario y contraseña' }))
-    expect(screen.getByText(CONTRASENA_DEMO)).toBeInTheDocument()
-    await persona.type(screen.getByLabelText('Usuario'), 'lia')
-    await persona.type(screen.getByLabelText('Contraseña'), CONTRASENA_DEMO)
+    const cuentas = await screen.findByRole('region', { name: 'Cuentas de prueba' })
+
+    await persona.click(within(cuentas).getByRole('button', { name: 'Usar lia' }))
+    expect(screen.getByLabelText('Usuario')).toHaveValue('lia')
+    expect(within(cuentas).getByRole('button', { name: 'Usar lia' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Entrar' })).toHaveFocus() // el siguiente paso
     await persona.click(screen.getByRole('button', { name: 'Entrar' }))
 
     // la verificacion en dos pasos se sigue pidiendo
     expect(await screen.findByRole('heading', { name: 'Verificación en dos pasos' })).toBeInTheDocument()
+    expect(screen.getByText(/En esta demostración, el código aparece en el/)).toBeInTheDocument()
     const telefono = await screen.findByRole('note', { name: 'App de autenticación simulada' })
     await waitFor(() => expect(telefono).toHaveTextContent('123 456'))
     expect(telefono).toHaveTextContent('lia')
@@ -647,12 +648,7 @@ describe('demostración', () => {
 
   it('al configurar el MFA el teléfono muestra el código del QR', async () => {
     const { contrasena } = instalarApiFalsa({ demo: true })
-    const persona = userEvent.setup()
-    montar()
-    await persona.click(await screen.findByRole('button', { name: 'Entrar con usuario y contraseña' }))
-    await persona.type(screen.getByLabelText('Usuario'), 'sinmfa')
-    await persona.type(screen.getByLabelText('Contraseña'), contrasena)
-    await persona.click(screen.getByRole('button', { name: 'Entrar' }))
+    const persona = await entrar('sinmfa', contrasena)
     await persona.click(await screen.findByRole('button', { name: 'Generar código QR' }))
     const telefono = await screen.findByRole('note', { name: 'App de autenticación simulada' })
     await waitFor(() => expect(telefono).toHaveTextContent('123 456'))

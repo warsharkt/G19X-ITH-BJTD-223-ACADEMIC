@@ -120,39 +120,20 @@ def test_volver_a_prepararlas_las_deja_como_nuevas(client):
     assert entrar(client, "demo_ti").json()["mfa_requerido"] is False  # MFA por configurar otra vez
 
 
-# ------------------------------------------------------ entrada de un clic
-def entrar_con_un_clic(client, usuario):
-    return client.post("/demo/entrar", json={"usuario": usuario})
-
-
-def test_un_clic_entra_sin_contrasena_ni_mfa_y_permite_cambiar_de_rol(client):
+# ------------------------------------------------- la entrada es la de siempre
+def test_no_hay_entrada_sin_contrasena_ni_codigo(client):
+    """La demostracion ensena como se entra de verdad: no existe un atajo."""
     demo.preparar_cuentas("pruebas")
-    r = entrar_con_un_clic(client, "demo_rrhh")
-    assert r.status_code == 200, r.text
-    h = {"Authorization": f"Bearer {r.json()['access_token']}"}
-    yo = client.get("/auth/yo", headers=h).json()
-    assert yo["pendiente"] is None and yo["sesion_demo"] is True  # el MFA no se pide en la demo
-    assert yo["firma_reportes"] is True  # Ana es la Responsable que firma
-    assert client.get("/kpis", headers=h).status_code == 200
-
-    otro = {"Authorization": f"Bearer {entrar_con_un_clic(client, 'demo_analista').json()['access_token']}"}
-    assert client.get("/auth/yo", headers=otro).json()["firma_reportes"] is False  # cambio de rol
-
-    # con usuario y contrasena la misma cuenta sigue pidiendo el MFA
-    normal = {"Authorization": f"Bearer {entrar(client, 'demo_rrhh').json()['access_token']}"}
-    assert client.get("/auth/yo", headers=normal).json()["pendiente"] == "configurar_mfa"
+    assert client.post("/demo/entrar", json={"usuario": "demo_rrhh"}).status_code == 404
+    h = {"Authorization": f"Bearer {entrar(client, 'demo_rrhh').json()['access_token']}"}
+    assert client.get("/auth/yo", headers=h).json()["pendiente"] == "configurar_mfa"
+    assert client.get("/kpis", headers=h).status_code == 403
 
 
-def test_un_clic_solo_sirve_para_cuentas_demo_y_con_el_modo_activo(client, monkeypatch):
+def test_la_pantalla_lista_cada_cuenta_con_su_cargo_en_el_orden_del_flujo(client):
     demo.preparar_cuentas("pruebas")
-    crear_usuario("zz_dem_real", "Cuenta real", "rrhh", "Clave-de-prueba-123")
-    assert entrar_con_un_clic(client, "zz_dem_real").status_code == 404
-    assert entrar_con_un_clic(client, "demo_no_existe").status_code == 404
-
-    h = {"Authorization": f"Bearer {entrar_con_un_clic(client, 'demo_direccion').json()['access_token']}"}
-    monkeypatch.setenv("MODO_DATOS", "reales")  # con datos reales la demo se apaga...
-    assert entrar_con_un_clic(client, "demo_direccion").status_code == 404
-    assert client.get("/auth/yo", headers=h).status_code == 401  # ...y su sesion de un clic deja de valer
+    cuentas = client.get("/demo").json()["cuentas"]
+    assert [c["cargo"] for c in cuentas[:3]] == ["Analista de RRHH", "Responsable de RRHH", "Dirección General"]
 
 
 def test_prepararlas_desactiva_las_cuentas_que_ya_no_se_usan(client):
@@ -160,4 +141,3 @@ def test_prepararlas_desactiva_las_cuentas_que_ya_no_se_usan(client):
     hecho = demo.preparar_cuentas("pruebas")
     assert "demo_rrhh2: desactivada (ya no se usa)" in hecho
     assert entrar(client, "demo_rrhh2").status_code == 401
-    assert entrar_con_un_clic(client, "demo_rrhh2").status_code == 404

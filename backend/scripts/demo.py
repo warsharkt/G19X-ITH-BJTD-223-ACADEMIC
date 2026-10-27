@@ -21,8 +21,8 @@ def main():
         raise SystemExit(f"No se pudo: {exc}")
     for linea in hecho:
         print(linea)
-    print("\nEn la pantalla de inicio, cada rol se abre con un clic (sin contraseña ni código).")
-    print(f"Para ver la verificación en dos pasos, entra con usuario y contraseña ({demo.contrasena()}):")
+    print(f"\nContraseña de todas las cuentas: {demo.contrasena()}")
+    print("Dirección, RRHH y TI configurarán la verificación en dos pasos al entrar;")
     print("un teléfono simulado en pantalla muestra el código que daría la app del celular.")
 
 

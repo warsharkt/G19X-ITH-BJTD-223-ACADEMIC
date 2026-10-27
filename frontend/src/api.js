@@ -106,9 +106,8 @@ export const api = {
   modificarCuenta: (id, cambios) => pedir(`/usuarios/${id}`, { metodo: 'PATCH', cuerpo: cambios }),
   restablecerContrasena: (id) => pedir(`/usuarios/${id}/contrasena`, { metodo: 'POST' }),
   reiniciarMfa: (id) => pedir(`/usuarios/${id}/mfa/reiniciar`, { metodo: 'POST' }),
-  // Modo demostracion: cuentas de prueba, entrada de un clic y el codigo que daria el telefono
+  // Modo demostracion: cuentas de prueba y el codigo que daria el telefono
   demo: () => pedir('/demo'),
-  entrarDemo: (usuario) => pedir('/demo/entrar', { metodo: 'POST', cuerpo: { usuario } }),
   marca: () => pedir('/marca'),
   // Carga de datos de los sistemas fuente (solo RRHH)
   fuentesDeDatos: () => pedir('/cargas/fuentes'),

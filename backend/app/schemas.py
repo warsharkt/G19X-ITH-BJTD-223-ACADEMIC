@@ -29,7 +29,6 @@ class UsuarioOut(BaseModel):
     mfa_obligatorio: bool = Field(False, description="Su rol debe usar verificacion en dos pasos")
     codigos_respaldo_restantes: int = 0
     firma_reportes: bool = Field(False, description="Responsable de RRHH: firma los reportes (si no, Analista)")
-    sesion_demo: bool = Field(False, description="Entro con un clic desde el modo demostracion")
 
 
 class MfaPaso(BaseModel):
@@ -408,10 +407,6 @@ class CuentaDemo(BaseModel):
     rol: str
     cargo: str = Field(description="Como se ve el rol en pantalla, p. ej. Analista de RRHH")
     descripcion: str
-
-
-class EntradaDemo(BaseModel):
-    usuario: str
 
 
 class Demo(BaseModel):

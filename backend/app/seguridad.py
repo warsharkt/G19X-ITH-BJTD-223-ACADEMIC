@@ -31,7 +31,7 @@ import json
 import os
 import re
 import secrets
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 import jwt
@@ -69,7 +69,6 @@ class Usuario:
     mfa_activo: bool = False
     version_sesion: int = 0
     firma_reportes: bool = False  # Responsable de RRHH: firma los reportes
-    sesion_demo: bool = False  # entro con un clic desde el modo demostracion
 
     @property
     def es_analista(self) -> bool:
@@ -499,25 +498,14 @@ def minutos_de_sesion() -> int:
     return int(os.getenv("JWT_MINUTOS", "60"))
 
 
-def crear_token(u: Usuario, proposito: str = "sesion", demo: bool = False) -> str:
+def crear_token(u: Usuario, proposito: str = "sesion") -> str:
     """proposito "sesion": el token de uso normal. "mfa": solo sirve para
-    escribir el codigo de MFA tras la contrasena, y dura pocos minutos.
-    demo=True: entrada de un clic del modo demostracion (app/demo.py)."""
+    escribir el codigo de MFA tras la contrasena, y dura pocos minutos."""
     ahora = datetime.now(timezone.utc)
     minutos = MINUTOS_PASO_MFA if proposito == "mfa" else minutos_de_sesion()
     datos = {"sub": str(u.id), "ver": u.version_sesion, "tipo": proposito, "iat": ahora,
              "exp": ahora + timedelta(minutes=minutos)}
-    if demo:
-        datos["demo"] = True
     return jwt.encode(datos, _secreto(), algorithm=_ALGORITMO)
-
-
-def _sesion_demo_valida(u: Usuario) -> bool:
-    """Una sesion de un clic solo vale mientras el modo demostracion siga
-    activo (nunca con datos reales) y para una cuenta demo_."""
-    from app import demo  # demo importa este modulo
-
-    return demo.activo() and u.usuario.startswith(demo.PREFIJO)
 
 
 def usuario_del_token(token: str, proposito: str = "sesion") -> Usuario | None:
@@ -536,13 +524,6 @@ def usuario_del_token(token: str, proposito: str = "sesion") -> Usuario | None:
     u = _leer_usuario(id_)
     if u is None or u.version_sesion != datos["ver"]:
         return None
-    if datos.get("demo"):
-        if not _sesion_demo_valida(u):
-            return None
-        # En la demostracion no se configura el MFA: la pantalla avisa que en
-        # produccion se pide. Una contrasena temporal si sigue pendiente.
-        pendiente = None if u.pendiente == "configurar_mfa" else u.pendiente
-        u = replace(u, pendiente=pendiente, sesion_demo=True)
     return u
 
 

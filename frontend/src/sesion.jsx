@@ -104,23 +104,12 @@ export function ProveedorSesion({ children }) {
     [abrirSesion],
   )
 
-  // Modo demostracion: entrar o cambiar de rol con un clic (solo cuentas demo_)
-  const entrarDemo = useCallback(
-    async (nombreUsuario) => {
-      const { access_token } = await api.entrarDemo(nombreUsuario)
-      await abrirSesion(access_token)
-    },
-    [abrirSesion],
-  )
-
   // Tras cambiar la contrasena o activar el MFA: datos y pendientes al dia
   const recargarUsuario = useCallback(async () => setUsuario(await api.yo()), [])
 
   return (
     <ContextoSesion.Provider
-      value={{
-        usuario, cargando, aviso, demo, marca, iniciarSesion, verificarMfa, entrarDemo, recargarUsuario, cerrarSesion,
-      }}
+      value={{ usuario, cargando, aviso, demo, marca, iniciarSesion, verificarMfa, recargarUsuario, cerrarSesion }}
     >
       {children}
     </ContextoSesion.Provider>

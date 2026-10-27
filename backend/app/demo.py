@@ -3,19 +3,15 @@
 Se activa con MODO_DEMO=si y SOLO funciona con MODO_DATOS=sinteticos: con
 datos reales queda apagado, igual que el candado de la IA en la nube.
 
-Sirve para que quien ve la demostracion entienda el producto sin configurar
-nada: la pantalla de inicio muestra una tarjeta por rol y se entra con un
-clic, sin contrasena ni verificacion en dos pasos, y desde el menu se cambia
-de rol para recorrer el flujo completo (la Analista prepara, la Responsable
-firma, Direccion recibe). La pantalla avisa que en produccion se pide la
-verificacion en dos pasos.
-
-Lo que NO cambia: las cuentas reales siempre entran con contrasena y MFA,
-los permisos por rol y las bitacoras funcionan igual, y la entrada de un clic
-solo sirve para cuentas con prefijo demo_ mientras el modo siga activo (el
-token deja de valer si se apaga). Quien quiera ver el MFA puede entrar con
-usuario y contrasena: el telefono simulado muestra el codigo vigente, tambien
-solo para cuentas demo_.
+Las medidas de seguridad funcionan igual que en produccion (contrasena,
+verificacion en dos pasos obligatoria, bloqueo por intentos, permisos por rol,
+bitacoras): la demostracion ensena como se entra de verdad. Lo unico que
+agrega es ayuda para recorrerlas sin telefono:
+  - La pantalla de inicio lista una cuenta de prueba por rol, con su cargo y
+    lo que hace, y su contrasena (scripts/demo.py las crea o restablece).
+  - Al configurar el MFA o al entrar, un telefono simulado muestra el codigo
+    vigente que en produccion solo se veria en la app del telefono. Solo para
+    cuentas con prefijo demo_: nunca revela el codigo de una cuenta real.
 """
 import os
 import time
@@ -118,25 +114,6 @@ def preparar_cuentas(por: str) -> list[str]:
             conn.execute(text("UPDATE usuarios SET mfa_secreto = NULL WHERE id = :i AND NOT mfa_activo"), {"i": id_})
         hecho.append(f"{usuario}: restablecida")
     return hecho
-
-
-def entrar(usuario: str) -> seguridad.Usuario:
-    """Cuenta de demostracion para entrar con un clic. LookupError si el modo
-    demo esta apagado o la cuenta no es de demostracion o no esta activa."""
-    if not activo():
-        raise LookupError("El modo demostración no está activo")
-    usuario = usuario.strip().lower()
-    if usuario not in {c[0] for c in CUENTAS}:
-        raise LookupError("Solo las cuentas de demostración entran con un clic")
-    seguridad.asegurar_tabla()
-    with engine.begin() as conn:
-        id_ = conn.execute(
-            text("SELECT id FROM usuarios WHERE usuario = :u AND activo"), {"u": usuario}
-        ).scalar()
-        if id_ is None:
-            raise LookupError("La cuenta de demostración no existe: corre python -m scripts.demo")
-        seguridad.registrar_entrada(conn, id_)
-    return seguridad._leer_usuario(id_)
 
 
 def codigo_vigente(usuario_id: int) -> dict:
