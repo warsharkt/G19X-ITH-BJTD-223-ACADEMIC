@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS avisos (
     id                 SERIAL PRIMARY KEY,
     usuario_id         INTEGER NOT NULL REFERENCES usuarios (id) ON DELETE CASCADE,
     tipo               TEXT NOT NULL
-                       CHECK (tipo IN ('alerta', 'revision', 'aprobado', 'rechazado', 'error')),
+                       CHECK (tipo IN ('alerta', 'revision', 'aprobado', 'rechazado', 'error', 'pedido')),
     area_id            INTEGER NOT NULL,          -- 0 = consolidado corporativo
     titulo             TEXT NOT NULL,
     enlace             TEXT NOT NULL,             -- ruta del tablero, sin dominio
@@ -28,3 +28,17 @@ CREATE TABLE IF NOT EXISTS avisos (
 );
 
 CREATE INDEX IF NOT EXISTS avisos_usuario ON avisos (usuario_id, leido_en);
+
+-- Pedidos de reporte a RRHH: tipo 'pedido' (en bases creadas antes).
+-- Solo se toca la restriccion si todavia no lo admite.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'avisos_tipo_check' AND pg_get_constraintdef(oid) LIKE '%pedido%'
+    ) THEN
+        ALTER TABLE avisos DROP CONSTRAINT IF EXISTS avisos_tipo_check;
+        ALTER TABLE avisos ADD CONSTRAINT avisos_tipo_check
+            CHECK (tipo IN ('alerta', 'revision', 'aprobado', 'rechazado', 'error', 'pedido'));
+    END IF;
+END $$;

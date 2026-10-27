@@ -20,6 +20,10 @@ Que ve cada rol (PRD, seccion 5 y regla 10.3.2):
     rrhh      -> consolidado y todas las areas
     gerente   -> solo su area
     admin_ti  -> catalogos, configuracion y cuentas; ningun dato de colaboradores
+
+Dentro de RRHH (regla 10.3.9), quien prepara no firma:
+    Analista de RRHH    -> carga los datos y genera los reportes
+    Responsable de RRHH -> (firma_reportes) aprueba o rechaza los reportes
 """
 import hashlib
 import hmac
@@ -27,7 +31,7 @@ import json
 import os
 import re
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 
 import jwt
@@ -64,6 +68,16 @@ class Usuario:
     pendiente: str | None = None
     mfa_activo: bool = False
     version_sesion: int = 0
+    firma_reportes: bool = False  # Responsable de RRHH: firma los reportes
+    sesion_demo: bool = False  # entro con un clic desde el modo demostracion
+
+    @property
+    def es_analista(self) -> bool:
+        return self.rol == "rrhh" and not self.firma_reportes
+
+    @property
+    def es_responsable(self) -> bool:
+        return self.rol == "rrhh" and self.firma_reportes
 
 
 class ErrorDeUsuario(ValueError):
@@ -152,7 +166,7 @@ def cambios(limite: int = 50, usuario: str | None = None) -> list[dict]:
 # ---------------------------------------------------------------- usuarios
 _PATRON_CORREO = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _COLUMNAS_CUENTA = (
-    "id, usuario, nombre, rol, area_id, correo, activo, debe_cambiar_contrasena, mfa_activo, "
+    "id, usuario, nombre, rol, area_id, correo, activo, debe_cambiar_contrasena, mfa_activo, firma_reportes, "
     "creado_en, ultimo_acceso, COALESCE(bloqueado_hasta > now(), false) AS bloqueado"
 )
 
@@ -167,7 +181,9 @@ def normalizar_correo(correo: str | None) -> str | None:
     return correo
 
 
-def _validar_rol_y_area(conn, rol: str, area_id: int | None):
+def _validar_rol_y_area(conn, rol: str, area_id: int | None, firma_reportes: bool = False):
+    if firma_reportes and rol != "rrhh":
+        raise ErrorDeUsuario("Solo una persona de RRHH puede ser Responsable de firmar los reportes")
     if rol not in ROLES:
         raise ErrorDeUsuario(f"Rol '{rol}' no valido. Opciones: {', '.join(ROLES)}")
     if rol == "gerente" and (area_id is None or area_id == CORPORATIVO):
@@ -187,11 +203,13 @@ def crear_usuario(
     correo: str | None = None,
     por: str = "consola",
     temporal: bool = False,
+    firma_reportes: bool = False,
 ) -> int:
     """Crea un usuario y devuelve su id. ErrorDeUsuario si los datos no son validos.
 
     temporal=True: la persona debe cambiar la contrasena al entrar (cuentas que
-    crea TI desde el panel). correo es opcional: sirve para el correo de avisos."""
+    crea TI desde el panel). correo es opcional: sirve para el correo de avisos.
+    firma_reportes=True: Responsable de RRHH (firma); si no, Analista."""
     asegurar_tabla()
     usuario = usuario.strip().lower()
     correo = normalizar_correo(correo)
@@ -199,19 +217,20 @@ def crear_usuario(
         raise ErrorDeUsuario("Usuario y nombre son obligatorios")
     validar_contrasena_nueva(contrasena, usuario)
     with engine.begin() as conn:
-        _validar_rol_y_area(conn, rol, area_id)
+        _validar_rol_y_area(conn, rol, area_id, firma_reportes)
         if conn.execute(text("SELECT 1 FROM usuarios WHERE usuario = :u"), {"u": usuario}).first():
             raise ErrorDeUsuario(f"El usuario '{usuario}' ya existe")
         id_ = conn.execute(
             text(
-                "INSERT INTO usuarios (usuario, nombre, rol, area_id, contrasena_hash, correo, debe_cambiar_contrasena) "
-                "VALUES (:u, :n, :r, :a, :h, :c, :t) RETURNING id"
+                "INSERT INTO usuarios (usuario, nombre, rol, area_id, contrasena_hash, correo, debe_cambiar_contrasena, "
+                "firma_reportes) VALUES (:u, :n, :r, :a, :h, :c, :t, :f) RETURNING id"
             ),
             {"u": usuario, "n": nombre.strip(), "r": rol, "a": area_id, "h": hash_contrasena(contrasena),
-             "c": correo, "t": temporal},
+             "c": correo, "t": temporal, "f": firma_reportes},
         ).scalar_one()
         registrar(conn, usuario, "crear", por,
-                  {"nombre": nombre.strip(), "rol": rol, "area_id": area_id, "correo": correo})
+                  {"nombre": nombre.strip(), "rol": rol, "area_id": area_id, "correo": correo,
+                   "firma_reportes": firma_reportes})
     return id_
 
 
@@ -232,7 +251,10 @@ def listar_cuentas() -> list[dict]:
 
 def _cuenta_para_cambiar(conn, usuario_id: int):
     fila = conn.execute(
-        text("SELECT id, usuario, nombre, rol, area_id, correo, activo FROM usuarios WHERE id = :i FOR UPDATE"),
+        text(
+            "SELECT id, usuario, nombre, rol, area_id, correo, activo, firma_reportes "
+            "FROM usuarios WHERE id = :i FOR UPDATE"
+        ),
         {"i": usuario_id},
     ).mappings().first()
     if fila is None:
@@ -241,13 +263,15 @@ def _cuenta_para_cambiar(conn, usuario_id: int):
 
 
 def modificar_usuario(usuario_id: int, cambios_pedidos: dict, por: str) -> dict:
-    """Cambia nombre, rol, area, correo o si esta activo, y lo registra.
+    """Cambia nombre, rol, area, correo, si firma los reportes o si esta
+    activo, y lo registra.
 
     cambios_pedidos trae solo los campos a cambiar. Al pasar a un rol sin area,
-    el area se quita sola. Nadie cambia su propio rol ni se desactiva.
+    el area se quita sola, y al salir de RRHH deja de firmar. Nadie cambia su
+    propio rol ni se desactiva.
     LookupError si no existe; ErrorDeUsuario si los datos no son validos."""
     asegurar_tabla()
-    permitidos = {"nombre", "rol", "area_id", "correo", "activo"}
+    permitidos = {"nombre", "rol", "area_id", "correo", "activo", "firma_reportes"}
     if set(cambios_pedidos) - permitidos:
         raise ErrorDeUsuario(f"Solo se puede cambiar: {', '.join(sorted(permitidos))}")
     with engine.begin() as conn:
@@ -255,21 +279,25 @@ def modificar_usuario(usuario_id: int, cambios_pedidos: dict, por: str) -> dict:
         nuevo = {**actual, **cambios_pedidos}
         if "rol" in cambios_pedidos and nuevo["rol"] != "gerente" and "area_id" not in cambios_pedidos:
             nuevo["area_id"] = None
+        if nuevo["rol"] != "rrhh" and "firma_reportes" not in cambios_pedidos:
+            nuevo["firma_reportes"] = False
         nuevo["nombre"] = (nuevo["nombre"] or "").strip()
         if not nuevo["nombre"]:
             raise ErrorDeUsuario("El nombre es obligatorio")
         if "correo" in cambios_pedidos:
             nuevo["correo"] = normalizar_correo(nuevo["correo"])
-        if actual["usuario"] == por and (nuevo["rol"] != actual["rol"] or not nuevo["activo"]):
+        if actual["usuario"] == por and (
+            nuevo["rol"] != actual["rol"] or not nuevo["activo"] or nuevo["firma_reportes"] != actual["firma_reportes"]
+        ):
             raise ErrorDeUsuario("No puedes cambiar tu propio rol ni desactivar tu cuenta: pídeselo a otra persona de TI")
-        _validar_rol_y_area(conn, nuevo["rol"], nuevo["area_id"])
+        _validar_rol_y_area(conn, nuevo["rol"], nuevo["area_id"], nuevo["firma_reportes"])
 
         diferencias = {c: [actual[c], nuevo[c]] for c in permitidos if actual[c] != nuevo[c]}
         if diferencias:
             conn.execute(
                 text(
                     "UPDATE usuarios SET nombre = :nombre, rol = :rol, area_id = :area_id, correo = :correo, "
-                    "activo = :activo WHERE id = :id"
+                    "activo = :activo, firma_reportes = :firma_reportes WHERE id = :id"
                 ),
                 nuevo,
             )
@@ -369,11 +397,13 @@ def _pendiente(fila) -> str | None:
 def _a_usuario(fila) -> Usuario:
     return Usuario(
         fila["id"], fila["usuario"], fila["nombre"], fila["rol"], fila["area_id"],
-        _pendiente(fila), fila["mfa_activo"], fila["version_sesion"],
+        _pendiente(fila), fila["mfa_activo"], fila["version_sesion"], fila["firma_reportes"],
     )
 
 
-_COLUMNAS_SESION = "id, usuario, nombre, rol, area_id, debe_cambiar_contrasena, mfa_activo, version_sesion"
+_COLUMNAS_SESION = (
+    "id, usuario, nombre, rol, area_id, debe_cambiar_contrasena, mfa_activo, version_sesion, firma_reportes"
+)
 
 
 def _leer_usuario(usuario_id: int) -> Usuario | None:
@@ -469,14 +499,25 @@ def minutos_de_sesion() -> int:
     return int(os.getenv("JWT_MINUTOS", "60"))
 
 
-def crear_token(u: Usuario, proposito: str = "sesion") -> str:
+def crear_token(u: Usuario, proposito: str = "sesion", demo: bool = False) -> str:
     """proposito "sesion": el token de uso normal. "mfa": solo sirve para
-    escribir el codigo de MFA tras la contrasena, y dura pocos minutos."""
+    escribir el codigo de MFA tras la contrasena, y dura pocos minutos.
+    demo=True: entrada de un clic del modo demostracion (app/demo.py)."""
     ahora = datetime.now(timezone.utc)
     minutos = MINUTOS_PASO_MFA if proposito == "mfa" else minutos_de_sesion()
     datos = {"sub": str(u.id), "ver": u.version_sesion, "tipo": proposito, "iat": ahora,
              "exp": ahora + timedelta(minutes=minutos)}
+    if demo:
+        datos["demo"] = True
     return jwt.encode(datos, _secreto(), algorithm=_ALGORITMO)
+
+
+def _sesion_demo_valida(u: Usuario) -> bool:
+    """Una sesion de un clic solo vale mientras el modo demostracion siga
+    activo (nunca con datos reales) y para una cuenta demo_."""
+    from app import demo  # demo importa este modulo
+
+    return demo.activo() and u.usuario.startswith(demo.PREFIJO)
 
 
 def usuario_del_token(token: str, proposito: str = "sesion") -> Usuario | None:
@@ -495,6 +536,13 @@ def usuario_del_token(token: str, proposito: str = "sesion") -> Usuario | None:
     u = _leer_usuario(id_)
     if u is None or u.version_sesion != datos["ver"]:
         return None
+    if datos.get("demo"):
+        if not _sesion_demo_valida(u):
+            return None
+        # En la demostracion no se configura el MFA: la pantalla avisa que en
+        # produccion se pide. Una contrasena temporal si sigue pendiente.
+        pendiente = None if u.pendiente == "configurar_mfa" else u.pendiente
+        u = replace(u, pendiente=pendiente, sesion_demo=True)
     return u
 
 
@@ -552,4 +600,20 @@ def con_acceso_a_datos(u: Usuario = Depends(usuario_actual)) -> Usuario:
     """Dependencia: usuario con un rol que puede ver datos de colaboradores."""
     if u.rol not in ROLES_CON_DATOS:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Tu rol no tiene acceso a datos de colaboradores")
+    return u
+
+
+def solo_analista(u: Usuario = Depends(usuario_actual)) -> Usuario:
+    """Dependencia: cargar datos y generar reportes es trabajo de la Analista
+    de RRHH. La Responsable los firma: quien prepara no firma (regla 10.3.9)."""
+    if u.rol != "rrhh":
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Los reportes y la carga de datos los prepara Recursos Humanos. Si necesitas un reporte, pídeselo a RRHH.",
+        )
+    if u.firma_reportes:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Tú firmas los reportes: los prepara una Analista de RRHH, así siempre los revisa alguien distinto.",
+        )
     return u

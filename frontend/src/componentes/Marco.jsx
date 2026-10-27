@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { api, AVISOS_CAMBIARON } from '../api'
-import { NOMBRES_ROL, puedeCargarDatos, puedeVerCuentas, puedeVerDatos, useSesion } from '../sesion'
+import { cargoDe, puedeCargarDatos, puedeVerCuentas, puedeVerDatos, useSesion } from '../sesion'
 import BotonTema from './BotonTema'
 import Icono from './Iconos'
 import Marca from './Marca'
@@ -55,6 +55,37 @@ const iniciales = (nombre) =>
     .map((p) => p[0].toUpperCase())
     .join('')
 
+// Modo demostracion: cambiar de rol con un clic para recorrer el flujo
+// completo (la Analista prepara, la Responsable firma, Direccion recibe).
+function CambiarRol() {
+  const { usuario, demo, entrarDemo } = useSesion()
+  const navegar = useNavigate()
+  const [cambiando, setCambiando] = useState(false)
+
+  async function cambiar(e) {
+    setCambiando(true)
+    try {
+      await entrarDemo(e.target.value)
+      navegar('/', { replace: true }) // cada rol empieza en su pagina de inicio
+    } finally {
+      setCambiando(false)
+    }
+  }
+
+  return (
+    <label className="cambiar-rol">
+      <span className="oculto-visual">Cambiar de rol</span>
+      <select value={usuario.usuario} onChange={cambiar} disabled={cambiando} title="Cambiar de rol">
+        {demo.cuentas.map((c) => (
+          <option key={c.usuario} value={c.usuario}>
+            {c.cargo} · {c.nombre}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
 // Estructura comun de las paginas con sesion: menu lateral, encabezado y contenido.
 export default function Marco() {
   const { usuario, marca, cerrarSesion } = useSesion()
@@ -73,7 +104,7 @@ export default function Marco() {
           {conDatos && (
             <NavLink to="/narrativas">
               <Icono nombre="narrativas" />
-              Narrativas
+              Reportes
             </NavLink>
           )}
           {/* TI no recibe avisos: todos hablan de datos de colaboradores */}
@@ -105,16 +136,24 @@ export default function Marco() {
       <div className="area-principal">
         <header className="encabezado">
           <div className="encabezado-interior">
-            <span className="encabezado-seguridad">
-              <Icono nombre="escudo" tamano={16} />
-              {usuario.mfa_activo ? 'Sesión verificada en dos pasos' : 'Sesión protegida'} · acceso por rol
-            </span>
+            {usuario.sesion_demo ? (
+              <span className="encabezado-seguridad encabezado-demo">
+                <Icono nombre="escudo" tamano={16} />
+                Demostración con datos ficticios · en producción se pide verificación en dos pasos
+              </span>
+            ) : (
+              <span className="encabezado-seguridad">
+                <Icono nombre="escudo" tamano={16} />
+                {usuario.mfa_activo ? 'Sesión verificada en dos pasos' : 'Sesión protegida'} · acceso por rol
+              </span>
+            )}
             <div className="cuenta">
+              {usuario.sesion_demo && <CambiarRol />}
               <BotonTema />
               <NavLink to="/cuenta" className="cuenta-enlace" title="Mi cuenta">
                 <span className="cuenta-nombre">
                   {usuario.nombre}
-                  <span className="cuenta-rol">{NOMBRES_ROL[usuario.rol] ?? usuario.rol}</span>
+                  <span className="cuenta-rol">{cargoDe(usuario)}</span>
                 </span>
                 <span className="avatar" aria-hidden="true">
                   {iniciales(usuario.nombre)}

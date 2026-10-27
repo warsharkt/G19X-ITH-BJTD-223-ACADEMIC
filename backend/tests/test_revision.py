@@ -4,6 +4,8 @@ Como en test_seguridad.py, se usan usuarios reales (prefijo zz_rev_, se
 borran al final) con su contrasena y su token. Las narrativas se insertan
 directo en la tabla: aqui solo importa el flujo de revision, no el modelo.
 """
+from datetime import date, timedelta
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
@@ -26,17 +28,20 @@ def sin_atajo_de_sesion(monkeypatch):
 
 @pytest.fixture(scope="module")
 def usuarios():
-    """Dos personas de RRHH (una solicita, otra revisa) y una de cada otro rol."""
+    """De RRHH: la Analista que solicita (rrhh), la Responsable que firma
+    (rrhh2) y otra Analista (rrhh3, la suplente). Y una de cada otro rol."""
     seguridad.asegurar_tabla()
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM usuarios WHERE usuario LIKE :p"), {"p": PREFIJO + "%"})
         ventas = conn.execute(text("SELECT id FROM areas WHERE nombre = 'Ventas'")).scalar_one()
-    datos = {"rrhh": None, "rrhh2": None, "direccion": None, "gerente": ventas, "admin_ti": None}
+    datos = {"rrhh": None, "rrhh2": None, "rrhh3": None, "direccion": None, "gerente": ventas, "admin_ti": None}
     for nombre, area_id in datos.items():
-        crear_usuario(PREFIJO + nombre, f"Prueba {nombre}", nombre.rstrip("2"), CLAVE, area_id)
+        crear_usuario(PREFIJO + nombre, f"Prueba {nombre}", nombre.rstrip("23"), CLAVE, area_id,
+                      firma_reportes=nombre == "rrhh2")
     yield {nombre: PREFIJO + nombre for nombre in datos}
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM usuarios WHERE usuario LIKE :p"), {"p": PREFIJO + "%"})
+        conn.execute(text("DELETE FROM suplencias WHERE suplente LIKE :p"), {"p": PREFIJO + "%"})
 
 
 @pytest.fixture()
@@ -76,26 +81,72 @@ def narrativa(client, usuarios):
     return _crear
 
 
-def revisar(client, id_, encabezados, decision="aprobada", comentario=None):
+def revisar(client, id_, encabezados, decision="aprobada", comentario=None, nota=None):
     return client.post(
-        f"/narrativas/{id_}/revision", json={"decision": decision, "comentario": comentario}, headers=encabezados
+        f"/narrativas/{id_}/revision", json={"decision": decision, "comentario": comentario, "nota": nota},
+        headers=encabezados,
     )
 
 
-def test_otra_persona_de_rrhh_aprueba_y_queda_en_la_bitacora(client, como, narrativa, usuarios):
+def test_la_responsable_firma_con_su_nota_y_queda_en_la_bitacora(client, como, narrativa, usuarios):
     id_ = narrativa()
     nueva = client.get(f"/narrativas/{id_}", headers=como("rrhh")).json()
     assert nueva["revision"] == "pendiente" and nueva["revisada_por"] is None
+    assert nueva["firma"]["cargo"] == "Responsable de RRHH"  # la Analista sabe a quien se lo manda
 
-    r = revisar(client, id_, como("rrhh2"), comentario="  Revisado contra el tablero  ")
+    r = revisar(client, id_, como("rrhh2"), comentario="  Revisado contra el tablero  ",
+                nota="  La rotación de Almacén sube por el cierre del turno nocturno, ya planeado.  ")
     assert r.status_code == 200, r.text
     datos = r.json()
     assert datos["revision"] == "aprobada"
     assert datos["revisada_por"] == usuarios["rrhh2"]  # bitacora RF-11: quien aprobo
     assert datos["revisada_en"] is not None
     assert datos["comentario_revision"] == "Revisado contra el tablero"
+    assert datos["nota_rrhh"] == "La rotación de Almacén sube por el cierre del turno nocturno, ya planeado."
+    assert datos["firma"] == {"usuario": usuarios["rrhh2"], "nombre": "Prueba rrhh2", "cargo": "Responsable de RRHH"}
     assert datos["solicitada_por"] == usuarios["rrhh"]
     assert client.get(f"/narrativas/{id_}", headers=como("rrhh")).json()["revision"] == "aprobada"
+
+
+def test_la_analista_no_firma(client, como, narrativa):
+    id_ = narrativa(solicitada_por="direccion")
+    r = revisar(client, id_, como("rrhh3"))
+    assert r.status_code == 403
+    assert "lo firma" in r.json()["detail"]
+
+
+def test_la_nota_solo_va_al_aprobar(client, como, narrativa):
+    r = revisar(client, narrativa(), como("rrhh2"), "rechazada", COMENTARIO, nota="Contexto")
+    assert r.status_code == 422
+
+
+def test_la_suplente_firma_mientras_la_responsable_no_esta(client, como, narrativa, usuarios):
+    responsable, suplente = como("rrhh2"), como("rrhh3")
+    hasta = (date.today() + timedelta(days=3)).isoformat()
+    datos = {"suplente": usuarios["rrhh3"], "hasta": hasta, "motivo": "Vacaciones"}
+    assert client.post("/firmas/suplencia", json=datos, headers=suplente).status_code == 403  # solo la Responsable
+    r = client.post("/firmas/suplencia", json=datos, headers=responsable)
+    assert r.status_code == 200, r.text
+    assert r.json()["suplencia"]["suplente"] == usuarios["rrhh3"]
+    assert client.post("/firmas/suplencia", json=datos, headers=responsable).status_code == 422  # una a la vez
+    try:
+        id_ = narrativa(solicitada_por="rrhh")
+        pendiente = client.get(f"/narrativas/{id_}", headers=suplente).json()
+        assert pendiente["firma"]["usuario"] == usuarios["rrhh3"]  # se le manda a la suplente
+        assert pendiente["firma"]["cargo"].startswith("Suplente de Prueba rrhh2 hasta el")
+
+        firmada = revisar(client, id_, suplente)
+        assert firmada.status_code == 200, firmada.text
+        assert firmada.json()["firma"]["cargo"] == "Suplente de Prueba rrhh2"
+
+        propia = narrativa(solicitada_por="rrhh3")  # lo que preparo la suplente lo firma la Responsable
+        assert client.get(f"/narrativas/{propia}", headers=suplente).json()["firma"]["cargo"] == "Responsable de RRHH"
+        assert revisar(client, propia, suplente).status_code == 403
+        assert revisar(client, propia, responsable).status_code == 200
+    finally:
+        assert client.post("/firmas/suplencia/terminar", headers=responsable).status_code == 200
+    despues = narrativa(solicitada_por="rrhh")
+    assert revisar(client, despues, suplente).status_code == 403  # termino la suplencia
 
 
 def test_nadie_aprueba_lo_que_el_mismo_solicito(client, como, narrativa):

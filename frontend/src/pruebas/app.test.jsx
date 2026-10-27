@@ -167,14 +167,19 @@ describe('narrativas', () => {
 
     await persona.click(screen.getByRole('button', { name: 'Generar reporte con IA' }))
     expect(api.estado.solicitudes).toEqual([{ periodo: '2026-08', area_id: 0 }])
-    expect(await screen.findByRole('heading', { name: /Redactando el reporte de Corporativo, agosto 2026/ })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Preparando el reporte de Corporativo, agosto 2026' })).toBeInTheDocument()
+    // etapas con nombre y a quien se le manda, sin cronometro ni detalles tecnicos
+    expect(screen.getByRole('progressbar', { name: 'Avance del reporte' })).toBeInTheDocument()
+    expect(screen.getByText('Redactando el resumen ejecutivo')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Al terminar se enviará a Eva Ruiz (Responsable de RRHH) para su firma')
+    expect(screen.queryByText(/CPU|transcurrido|intento/i)).not.toBeInTheDocument()
 
     await act(() => vi.advanceTimersByTimeAsync(SEGUNDOS_ENTRE_CONSULTAS * 1000))
     expect(await screen.findByRole('heading', { name: 'Reporte ejecutivo de Recursos Humanos' })).toBeInTheDocument()
-    expect(screen.getByText(/Borrador pendiente de revisión/)).toBeInTheDocument()
-    // ana lo solicito: no puede aprobarlo ella misma
-    expect(screen.getByText(/Tú lo solicitaste/)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Aprobar' })).not.toBeInTheDocument()
+    expect(screen.getByText(/Pendiente de firma de Eva Ruiz \(Responsable de RRHH\)/)).toBeInTheDocument()
+    // ana (Analista) lo preparo: no lo firma ella
+    expect(screen.getByText(/Tú lo preparaste: se envió a Eva Ruiz/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Aprobar y firmar' })).not.toBeInTheDocument()
     expect(screen.getByText('Rotación al alza')).toBeInTheDocument()
     expect(screen.getByText('Revisar las bajas del mes por área.')).toBeInTheDocument()
     expect(screen.getAllByText('Tasa de rotación mensual: 3.9 %').length).toBe(2)
@@ -197,23 +202,53 @@ describe('narrativas', () => {
     const tabla = await screen.findByRole('table')
     await waitFor(() => expect(within(tabla).getAllByRole('row')).toHaveLength(3))
     expect(tabla).toHaveTextContent('Pendiente de revisión')
+    expect(tabla).toHaveTextContent('Eva Ruiz (por firmar)')
     expect(tabla).toHaveTextContent('Error al generar')
     expect(tabla).toHaveTextContent('Ventas')
     expect(within(tabla).getByRole('link', { name: '#5' })).toHaveAttribute('href', '/narrativas/5')
   })
 })
 
-describe('revisión humana (RF-05)', () => {
-  it('otra persona de RRHH aprueba el reporte y queda registrado', async () => {
+describe('firma de reportes (RF-05)', () => {
+  it('la Responsable firma el reporte con su nota y queda registrado', async () => {
     const { contrasena } = instalarApiFalsa()
     const persona = await entrar('eva', contrasena, '/narrativas/5')
     await screen.findByRole('heading', { name: 'Reporte ejecutivo de Recursos Humanos' })
+    expect(screen.getByText('Este reporte espera tu firma.')).toBeInTheDocument()
     await persona.type(screen.getByLabelText(/Comentario/), 'Cifras revisadas contra el tablero')
-    await persona.click(screen.getByRole('button', { name: 'Aprobar' }))
-    expect(await screen.findByText(/Aprobado por eva/)).toBeInTheDocument()
+    await persona.type(screen.getByLabelText(/Nota de RRHH/), 'La rotación sube por el cierre del turno nocturno.')
+    await persona.click(screen.getByRole('button', { name: 'Aprobar y firmar' }))
+    expect(await screen.findByText(/Firmado por Eva Ruiz \(Responsable de RRHH\)/)).toBeInTheDocument()
     expect(screen.getByText(/Comentario: Cifras revisadas contra el tablero/)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Aprobar' })).not.toBeInTheDocument()
-    expect(screen.getByText(/aprobada por eva/)).toBeInTheDocument() // bitacora al pie
+    const nota = screen.getByRole('complementary', { name: 'Nota de RRHH' })
+    expect(nota).toHaveTextContent('Nota de RRHH · Eva Ruiz')
+    expect(nota).toHaveTextContent('La rotación sube por el cierre del turno nocturno.')
+    expect(screen.queryByRole('button', { name: 'Aprobar y firmar' })).not.toBeInTheDocument()
+    expect(screen.getByText(/aprobada por Eva Ruiz/)).toBeInTheDocument() // bitacora al pie
+  })
+
+  it('la Responsable designa a su suplente mientras no está', async () => {
+    const { contrasena, estado } = instalarApiFalsa()
+    const persona = await entrar('eva', contrasena, '/configuracion')
+    expect(await screen.findByText('Sin suplencia: los reportes llegan a la Responsable.')).toBeInTheDocument()
+    await persona.selectOptions(screen.getByLabelText('Suplente'), 'ana')
+    const hasta = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10) // el campo no acepta fechas pasadas
+    await persona.type(screen.getByLabelText('Hasta'), hasta)
+    await persona.type(screen.getByLabelText(/Motivo/), 'Vacaciones')
+    await persona.click(screen.getByRole('button', { name: 'Designar suplente' }))
+    expect(await screen.findByText(/Ana López firma en lugar de Eva Ruiz hasta el/)).toBeInTheDocument()
+    expect(estado.suplencia).toMatchObject({ suplente: 'ana', hasta, motivo: 'Vacaciones' })
+    await persona.click(screen.getByRole('button', { name: 'Terminar la suplencia (ya regresé)' }))
+    expect(await screen.findByText('Sin suplencia: los reportes llegan a la Responsable.')).toBeInTheDocument()
+  })
+
+  it('la Responsable firma pero no prepara: sin generar ni carga de datos', async () => {
+    const { contrasena } = instalarApiFalsa()
+    await entrar('eva', contrasena)
+    await screen.findByRole('heading', { name: 'Indicadores de Corporativo' })
+    expect(screen.queryByRole('button', { name: 'Generar reporte con IA' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Carga de datos' })).not.toBeInTheDocument()
+    expect(screen.getByText('Responsable de RRHH')).toBeInTheDocument()
   })
 
   it('para rechazar pide el motivo y muestra el error de la API', async () => {
@@ -224,16 +259,40 @@ describe('revisión humana (RF-05)', () => {
 
     await persona.type(screen.getByLabelText(/Comentario/), 'Falta el hallazgo de rotación de Ventas')
     await persona.click(screen.getByRole('button', { name: 'Rechazar' }))
-    expect(await screen.findByText(/Rechazado por eva/)).toBeInTheDocument()
+    expect(await screen.findByText(/Rechazado por Eva Ruiz/)).toBeInTheDocument()
     expect(screen.getByText(/Motivo: Falta el hallazgo de rotación de Ventas/)).toBeInTheDocument()
   })
 
-  it('Dirección ve el estado de la revisión pero no puede aprobar', async () => {
+  it('Dirección ve quién lo firma pero no puede aprobar', async () => {
     const { contrasena } = instalarApiFalsa()
     await entrar('dir', contrasena, '/narrativas/5')
-    expect(await screen.findByText(/Borrador pendiente de revisión/)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Aprobar' })).not.toBeInTheDocument()
-    expect(screen.queryByText(/Tú lo solicitaste/)).not.toBeInTheDocument()
+    expect(await screen.findByText(/Pendiente de firma de Eva Ruiz/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Aprobar y firmar' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/Tú lo preparaste/)).not.toBeInTheDocument()
+  })
+
+  it('Dirección no genera: pide el reporte a RRHH', async () => {
+    const { contrasena, estado } = instalarApiFalsa()
+    const persona = await entrar('dir', contrasena, '/narrativas')
+    expect(await screen.findByRole('heading', { name: 'Pedir un reporte a RRHH' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Generar con IA' })).not.toBeInTheDocument()
+    await persona.type(screen.getByLabelText(/Para qué lo necesitas/), 'Para el comité del jueves')
+    await persona.click(screen.getByRole('button', { name: 'Pedir a RRHH' }))
+    expect(await screen.findByText(/Recursos Humanos recibió tu pedido/)).toBeInTheDocument()
+    expect(estado.pedidos).toEqual([
+      { usuario: 'dir', periodo: '2026-08', area_id: 0, comentario: 'Para el comité del jueves' },
+    ])
+  })
+
+  it('la Analista abre el pedido con el área y el mes ya elegidos y sabe a quién se lo manda', async () => {
+    const { contrasena } = instalarApiFalsa()
+    await entrar('ana', contrasena, '/narrativas?nuevo=1&area=1&periodo=2026-07')
+    const formulario = (await screen.findByRole('heading', { name: 'Nuevo reporte' })).closest('form')
+    expect(within(formulario).getByLabelText('Área')).toHaveValue('1')
+    expect(within(formulario).getByLabelText('Mes')).toHaveValue('2026-07')
+    expect(await within(formulario).findByText(/se enviará a/)).toHaveTextContent(
+      'Al terminar se enviará a Eva Ruiz (Responsable de RRHH) para su firma.',
+    )
   })
 
   it('el historial filtra por revisión', async () => {
@@ -261,7 +320,7 @@ describe('exportación (RF-08)', () => {
     const { contrasena, estado } = instalarApiFalsa()
     const descargas = espiarDescargas()
     const persona = await entrar('eva', contrasena, '/narrativas/5')
-    await persona.click(await screen.findByRole('button', { name: 'Aprobar' }))
+    await persona.click(await screen.findByRole('button', { name: 'Aprobar y firmar' }))
 
     await persona.click(await screen.findByRole('button', { name: 'Descargar PDF' }))
     await waitFor(() => expect(descargas).toEqual(['reporte-rrhh-corporativo-2026-08.pdf']))
@@ -288,7 +347,7 @@ describe('exportación (RF-08)', () => {
     const persona = await entrar('eva', contrasena, '/narrativas/5')
     await persona.type(await screen.findByLabelText(/Comentario/), 'Falta el hallazgo de rotación de Ventas')
     await persona.click(screen.getByRole('button', { name: 'Rechazar' }))
-    expect(await screen.findByText(/Rechazado por eva/)).toBeInTheDocument()
+    expect(await screen.findByText(/Rechazado por Eva Ruiz/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Descargar PDF' })).not.toBeInTheDocument()
   })
 })
@@ -307,7 +366,7 @@ describe('avisos (RF-09)', () => {
     const lista = await screen.findByRole('list', { name: 'Avisos' })
     expect(within(lista).getAllByRole('listitem')).toHaveLength(3)
     expect(lista).toHaveTextContent('Alerta')
-    expect(lista).toHaveTextContent('Por revisar')
+    expect(lista).toHaveTextContent('Pedido')
     expect(within(lista).getAllByText(/Nuevo/)).toHaveLength(2)
 
     await persona.click(screen.getByRole('link', { name: /1 indicador en rojo/ }))
@@ -529,7 +588,7 @@ describe('cuentas (RF-11, RF-12)', () => {
   })
 })
 
-describe('demostración con teléfono simulado', () => {
+describe('demostración', () => {
   it('sin modo demostración no hay cuentas de prueba ni teléfono', async () => {
     instalarApiFalsa()
     montar()
@@ -538,23 +597,39 @@ describe('demostración con teléfono simulado', () => {
     expect(screen.queryByText(/demostración/i)).not.toBeInTheDocument()
   })
 
-  it('se ve como producto real: marca, empresa y medidas de seguridad', async () => {
+  it('se ve como producto real: marca, empresa, medidas de seguridad y un rol por tarjeta', async () => {
     instalarApiFalsa({ demo: true })
     montar()
     expect(await screen.findByText('Nordika Logística')).toBeInTheDocument()
     expect(screen.getByText('Verificación en dos pasos')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Inicia sesión' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Explora con un rol' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Entrar como Analista de RRHH, Ana López' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Entrar como Responsable de RRHH, Eva Ruiz' })).toBeInTheDocument()
+  })
+
+  it('entra con un clic, sin contraseña ni código, y cambia de rol desde el menú', async () => {
+    instalarApiFalsa({ demo: true })
+    const persona = userEvent.setup()
+    montar()
+    await persona.click(await screen.findByRole('button', { name: 'Entrar como Analista de RRHH, Ana López' }))
+    expect(await screen.findByRole('heading', { name: 'Indicadores de Corporativo' })).toBeInTheDocument()
+    expect(screen.getByText(/en producción se pide verificación en dos pasos/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Generar reporte con IA' })).toBeInTheDocument()
+
+    await persona.selectOptions(screen.getByLabelText('Cambiar de rol'), 'dir')
+    expect(await screen.findByRole('button', { name: 'Pedir este reporte a RRHH' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Generar reporte con IA' })).not.toBeInTheDocument()
+    expect(sessionStorage.getItem('rrhh.token')).toBe('demo-dir')
   })
 
   it('pide el código y el teléfono simulado lo muestra', async () => {
     instalarApiFalsa({ demo: true })
     const persona = userEvent.setup()
     montar()
-    const cuentas = await screen.findByRole('region', { name: 'Cuentas de prueba' })
-    expect(cuentas).toHaveTextContent(CONTRASENA_DEMO)
-
-    await persona.click(within(cuentas).getByRole('button', { name: 'Usar lia' }))
-    expect(screen.getByLabelText('Usuario')).toHaveValue('lia')
+    await persona.click(await screen.findByRole('button', { name: 'Entrar con usuario y contraseña' }))
+    expect(screen.getByText(CONTRASENA_DEMO)).toBeInTheDocument()
+    await persona.type(screen.getByLabelText('Usuario'), 'lia')
+    await persona.type(screen.getByLabelText('Contraseña'), CONTRASENA_DEMO)
     await persona.click(screen.getByRole('button', { name: 'Entrar' }))
 
     // la verificacion en dos pasos se sigue pidiendo
@@ -572,7 +647,12 @@ describe('demostración con teléfono simulado', () => {
 
   it('al configurar el MFA el teléfono muestra el código del QR', async () => {
     const { contrasena } = instalarApiFalsa({ demo: true })
-    const persona = await entrar('sinmfa', contrasena)
+    const persona = userEvent.setup()
+    montar()
+    await persona.click(await screen.findByRole('button', { name: 'Entrar con usuario y contraseña' }))
+    await persona.type(screen.getByLabelText('Usuario'), 'sinmfa')
+    await persona.type(screen.getByLabelText('Contraseña'), contrasena)
+    await persona.click(screen.getByRole('button', { name: 'Entrar' }))
     await persona.click(await screen.findByRole('button', { name: 'Generar código QR' }))
     const telefono = await screen.findByRole('note', { name: 'App de autenticación simulada' })
     await waitFor(() => expect(telefono).toHaveTextContent('123 456'))

@@ -134,7 +134,15 @@ def solicitante(t: dict) -> str:
 
 
 def linea_aprobacion(t: dict) -> str:
-    return f"Aprobado por {t['revisada_por']} el {fecha_hora(t['revisada_en'])}"
+    """Quien firmo, con su nombre y cargo de ese dia."""
+    firma = t.get("firma")
+    quien = f"{firma['nombre']}, {firma['cargo']}," if firma else t["revisada_por"]
+    return f"Firmado por {quien} el {fecha_hora(t['revisada_en'])}"
+
+
+def titulo_nota(t: dict) -> str:
+    firma = t.get("firma")
+    return f"Nota de RRHH · {firma['nombre']}" if firma else "Nota de RRHH"
 
 
 def linea_origen(n: dict) -> str:
@@ -316,6 +324,12 @@ def pdf(t: dict) -> bytes:
     aprobacion.append(_p(f"Solicitado por {solicitante(t)}. Revisado por una persona de RRHH "
                          "distinta de quien lo solicitó.", "nota"))
     historia.append(_recuadro(aprobacion, "#e6f4e6", APROBADO, ancho))
+    if t.get("nota_rrhh"):  # contexto de quien firmo, aparte del texto de la IA
+        historia += [Spacer(1, 6), _recuadro(
+            [_p(titulo_nota(t), "h3"), _p(t["nota_rrhh"], "texto"),
+             _p("Escrita por quien firmó el reporte; no la redactó la IA.", "nota")],
+            "#eaf0f8", ACENTO, ancho,
+        )]
 
     # Resumen ejecutivo
     historia += [_p("Resumen ejecutivo", "h2"), _p(n["resumen"], "resumen"), Spacer(1, 7)]
@@ -548,6 +562,15 @@ def presentacion(t: dict) -> bytes:
     _caja(d, Inches(1.1), Inches(5.6), Inches(11), Inches(0.9), [(linea_origen(n), 12, False, SECUNDARIO)])
     _caja(d, Inches(1.1), ALTO - Inches(0.5), Inches(6), Inches(0.3), [(pie_confidencial(), 10, False, SECUNDARIO)])
 
+    # 1b. Nota de RRHH (si quien firmo agrego contexto)
+    if t.get("nota_rrhh"):
+        d = _diapositiva(prs, titulo_nota(t), pie)
+        _rectangulo(d, MARGEN, Inches(1.45), Inches(0.08), Inches(2.6), ACENTO)
+        _caja(d, MARGEN + Inches(0.3), Inches(1.35), util - Inches(0.3), Inches(4.5), [
+            (t["nota_rrhh"], 22, False, TINTA),
+            ("Escrita por quien firmó el reporte; no la redactó la IA.", 13, False, SECUNDARIO),
+        ])
+
     # 2. Resumen ejecutivo
     d = _diapositiva(prs, "Resumen ejecutivo", pie)
     _caja(d, MARGEN, Inches(1.35), util, Inches(3.0), [(n["resumen"], 20, False, TINTA)])
@@ -665,7 +688,7 @@ def presentacion(t: dict) -> bytes:
          "indicadores de equipos de menos de 5 personas no se muestran.", 15, False, TINTA),
         (linea_origen(n), 13, False, SECUNDARIO),
         (f"Solicitado por {t.get('solicitada_por') or '—'} el {fecha_hora(t['solicitada_en'])}. "
-         f"{linea_aprobacion(t)}, una persona de RRHH distinta de quien lo solicitó. "
+         f"{linea_aprobacion(t)}: una persona de RRHH distinta de quien lo solicitó. "
          "Fórmulas, umbrales y fuentes de cada indicador: anexo del reporte en PDF.", 13, False, SECUNDARIO),
     ])
 

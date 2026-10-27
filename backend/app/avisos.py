@@ -5,7 +5,10 @@ Que se avisa y a quien:
     app/programacion.py cada hora): los del consolidado a
     Direccion y RRHH; los de un area a su gerente y a RRHH (regla 10.3.3).
     Un aviso por area con todos sus indicadores en rojo.
-  - Reporte listo para revisar: a RRHH, salvo a quien lo solicito (10.3.9).
+  - Reporte listo para firmar: a la Responsable de RRHH y a su suplente
+    vigente, salvo a quien lo solicito (10.3.9, app/firmas.py).
+  - Pedido de reporte de Direccion o de un gerente: a las Analistas de RRHH,
+    que son quienes los preparan.
   - Reporte programado que no se pudo generar: a RRHH.
   - Reporte aprobado: a su audiencia (Direccion si es el consolidado, el
     gerente si es de un area) y a quien lo solicito. Rechazado: a quien lo
@@ -31,7 +34,7 @@ from email.message import EmailMessage
 import pandas as pd
 from sqlalchemy import text
 
-from app import seguridad
+from app import firmas, seguridad
 from app.database import ejecutar_sql, engine
 from app.kpis import CORPORATIVO
 from app.marca import PRODUCTO, empresa
@@ -104,6 +107,14 @@ def _rrhh(conn) -> set[int]:
     return set(conn.execute(text("SELECT id FROM usuarios WHERE activo AND rol = 'rrhh'")).scalars())
 
 
+def _analistas(conn) -> set[int]:
+    return set(
+        conn.execute(
+            text("SELECT id FROM usuarios WHERE activo AND rol = 'rrhh' AND NOT firma_reportes")
+        ).scalars()
+    )
+
+
 def _ids(conn, *usuarios: str | None) -> set[int]:
     nombres = [u for u in usuarios if u]
     if not nombres:
@@ -167,7 +178,7 @@ def _narrativa(conn, id_: int):
 
 @_tolerante
 def avisar_narrativa_terminada(id_: int) -> int:
-    """Reporte listo: RRHH lo revisa (salvo quien lo pidio, que no puede).
+    """Reporte listo: se avisa a quien puede firmarlo (nunca a quien lo pidio).
     Reporte programado con error: RRHH se entera (nadie lo estaba esperando)."""
     asegurar_tabla()
     with engine.begin() as conn:
@@ -176,12 +187,14 @@ def avisar_narrativa_terminada(id_: int) -> int:
             return 0
         lugar = f"{_nombre_area(conn, t['area_id'])}, {_mes(t['periodo'])}"
         if t["estado"] == "lista":
-            tipo, titulo = "revision", f"Reporte de {lugar} listo para revisión"
+            tipo, titulo = "revision", f"Reporte de {lugar} listo para tu firma"
+            destinatarios = _ids(conn, *firmas.pueden_firmar(conn, t["solicitada_por"]))
         elif t["estado"] == "error" and t["programada"]:
             tipo, titulo = "error", f"No se pudo generar el reporte programado de {lugar}"
+            destinatarios = _rrhh(conn)
         else:
             return 0
-        destinatarios = _rrhh(conn) - _ids(conn, t["solicitada_por"])
+        destinatarios -= _ids(conn, t["solicitada_por"])
         creados = _crear(conn, destinatarios, tipo, t["area_id"], titulo, f"/narrativas/{id_}", f"{tipo}:{id_}")
     if creados:
         programar_envio()
@@ -205,6 +218,32 @@ def avisar_revision(id_: int) -> int:
             destinatarios = _ids(conn, t["solicitada_por"])
         destinatarios -= _ids(conn, t["revisada_por"])
         creados = _crear(conn, destinatarios, tipo, t["area_id"], titulo, f"/narrativas/{id_}", f"{tipo}:{id_}")
+    if creados:
+        programar_envio()
+    return creados
+
+
+@_tolerante
+def avisar_pedido(id_pedido: int) -> int:
+    """Direccion o un gerente pidio un reporte: les llega a las Analistas, con
+    una liga que abre el formulario con el area y el mes ya elegidos."""
+    asegurar_tabla()
+    with engine.begin() as conn:
+        p = conn.execute(
+            text(
+                "SELECT p.area_id, p.periodo, p.comentario, COALESCE(u.nombre, p.pedido_por) AS quien "
+                "FROM pedidos_reporte p LEFT JOIN usuarios u ON u.usuario = p.pedido_por WHERE p.id = :i"
+            ),
+            {"i": id_pedido},
+        ).mappings().first()
+        if p is None:
+            return 0
+        titulo = f"{p['quien']} pide el reporte de {_nombre_area(conn, p['area_id'])}, {_mes(p['periodo'])}"
+        if p["comentario"]:
+            comentario = p["comentario"] if len(p["comentario"]) <= 140 else p["comentario"][:139] + "…"
+            titulo += f": «{comentario}»"
+        enlace = f"/narrativas?nuevo=1&area={p['area_id']}&periodo={pd.Timestamp(p['periodo']):%Y-%m}"
+        creados = _crear(conn, _analistas(conn), "pedido", p["area_id"], titulo, enlace, f"pedido:{id_pedido}")
     if creados:
         programar_envio()
     return creados

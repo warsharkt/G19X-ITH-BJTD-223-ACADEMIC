@@ -164,13 +164,18 @@ def test_sin_ia_configurada_avisa_a_rrhh_una_vez(monkeypatch):
             conn.execute(text("DELETE FROM usuarios WHERE id = :i"), {"i": rrhh_id})
 
 
-def test_las_programadas_las_revisa_cualquier_persona_de_rrhh():
+def test_las_programadas_las_firma_la_responsable():
     configurar()
     id_ = programacion.revisar(dia=OCTUBRE)["narrativas"][0]
     with engine.begin() as conn:
         conn.execute(text("UPDATE narrativas SET estado = 'lista' WHERE id = :i"), {"i": id_})
-    assert trabajos.revisar(id_, "aprobada", "cualquiera_de_rrhh", None)["revision"] == "aprobada"
-    assert trabajos.obtener(id_)["programada"] is True
+    responsable = crear_usuario("zz_prog_firma", "Prueba", "rrhh", "Clave-de-prueba-123", firma_reportes=True)
+    try:
+        assert trabajos.revisar(id_, "aprobada", "zz_prog_firma", None)["revision"] == "aprobada"
+        assert trabajos.obtener(id_)["programada"] is True
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM usuarios WHERE id = :i"), {"i": responsable})
 
 
 # ---------------------------------------------------- API: programacion

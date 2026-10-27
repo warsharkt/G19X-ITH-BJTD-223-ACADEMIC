@@ -85,7 +85,8 @@ def test_ti_crea_una_cuenta_con_contrasena_temporal(client):
     assert cuenta["debe_cambiar_contrasena"] is True and cuenta["correo"] == "eva@empresa.com"
     assert len(temporal) == 14 and "contrasena" not in str(bitacora(PREFIJO + "nueva"))
     assert bitacora(PREFIJO + "nueva") == [
-        ("crear", PREFIJO + "ti", {"nombre": "Eva Nueva", "rol": "direccion", "area_id": None, "correo": "eva@empresa.com"})
+        ("crear", PREFIJO + "ti", {"nombre": "Eva Nueva", "rol": "direccion", "area_id": None, "correo": "eva@empresa.com",
+                                   "firma_reportes": False})
     ]
 
     # con la temporal solo puede cambiarla

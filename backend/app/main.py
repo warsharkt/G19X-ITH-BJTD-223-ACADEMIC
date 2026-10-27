@@ -16,7 +16,9 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from app import avisos, cargas, demo, exportar, marca, mfa, narrativa, programacion, schemas, seguridad, trabajos, umbrales
+from app import (
+    avisos, cargas, demo, exportar, firmas, marca, mfa, narrativa, programacion, schemas, seguridad, trabajos, umbrales,
+)
 from app.database import ejecutar_sql, engine
 from app.kpis import CORPORATIVO, calcular_kpis, inicializar_umbrales
 from app.llm import ConfiguracionIA, obtener_proveedor
@@ -28,6 +30,7 @@ from app.seguridad import (
     con_acceso_a_datos,
     exigir_acceso_a_datos,
     sesion_actual,
+    solo_analista,
     usuario_actual,
 )
 
@@ -315,10 +318,14 @@ def proveedor_configurado():
 )
 def crear_narrativa(
     solicitud: schemas.NarrativaSolicitud,
-    u: Usuario = Depends(con_acceso_a_datos),
+    u: Usuario = Depends(solo_analista),
     proveedor=Depends(proveedor_configurado),
 ):
     """Solicita la narrativa ejecutiva (resumen, hallazgos y recomendaciones).
+
+    Solo la Analista de RRHH la solicita: la Responsable la firma, y
+    Direccion y los gerentes la piden a RRHH con POST /pedidos. La respuesta
+    dice quien la va a firmar (`firma`).
 
     Responde de inmediato con un id y estado `en_proceso`; el modelo la redacta
     en segundo plano (en CPU tarda minutos). Consulta el resultado con
@@ -364,14 +371,19 @@ def revisar_narrativa(
 ):
     """Aprueba o rechaza una narrativa terminada (RF-05) y registra quien lo hizo (RF-11).
 
-    Solo RRHH puede revisar, y nunca una narrativa que la misma persona
-    solicito: siempre la revisa alguien distinto. La decision es definitiva;
-    si se rechaza, se explica el motivo y se solicita una nueva.
+    Firma la Responsable de RRHH o su suplente vigente, y nunca quien la
+    solicito: siempre la revisa alguien distinto. Al aprobar puede agregar una
+    Nota de RRHH, que va firmada y aparte del texto de la IA. La decision es
+    definitiva; si se rechaza, se explica el motivo y se solicita una nueva.
     """
     if u.rol != "rrhh":
-        raise HTTPException(status_code=403, detail="Solo Recursos Humanos puede aprobar o rechazar reportes")
+        raise HTTPException(
+            status_code=403, detail="Los reportes los firma la Responsable de Recursos Humanos o su suplente"
+        )
     try:
-        trabajo = trabajos.revisar(id_narrativa, solicitud.decision, u.usuario, solicitud.comentario)
+        trabajo = trabajos.revisar(
+            id_narrativa, solicitud.decision, u.usuario, solicitud.comentario, solicitud.nota
+        )
     except trabajos.RevisionNoPermitida as exc:
         raise HTTPException(status_code=409 if exc.conflicto else 403, detail=str(exc))
     except SQLAlchemyError:
@@ -510,6 +522,55 @@ def cambiar_programacion(cambio: schemas.ProgramacionCambio, u: Usuario = Depend
     return ver_programacion(u)
 
 
+# ------------------------------------------------- firma de reportes (10.3.9)
+def _firmas(funcion, *args):
+    try:
+        return funcion(*args)
+    except ErrorDeUsuario as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
+
+
+@app.get("/firmas", response_model=schemas.EstadoFirmas, tags=["Firma de reportes"])
+def ver_firmas(u: Usuario = Depends(usuario_actual)):
+    """Quien firma hoy los reportes: la Responsable de RRHH y, si la hay, su suplente."""
+    return _firmas(firmas.estado, u)
+
+
+@app.post("/firmas/suplencia", response_model=schemas.EstadoFirmas, tags=["Firma de reportes"])
+def designar_suplente(nueva: schemas.SuplenciaNueva, u: Usuario = Depends(usuario_actual)):
+    """La Responsable designa a una Analista que firma en su lugar desde hoy
+    hasta la fecha indicada (vacaciones, incapacidad). Queda en la bitacora."""
+    if not u.es_responsable:
+        raise HTTPException(status_code=403, detail="Solo la Responsable de RRHH designa a su suplente")
+    return _firmas(firmas.designar_suplente, u, nueva.suplente, nueva.hasta, nueva.motivo)
+
+
+@app.post("/firmas/suplencia/terminar", response_model=schemas.EstadoFirmas, tags=["Firma de reportes"])
+def terminar_suplencia(u: Usuario = Depends(usuario_actual)):
+    """La Responsable regresa antes: la suplencia termina hoy."""
+    if not u.es_responsable:
+        raise HTTPException(status_code=403, detail="Solo la Responsable de RRHH termina la suplencia")
+    return _firmas(firmas.terminar_suplencia, u)
+
+
+@app.post("/pedidos", status_code=201, response_model=schemas.PedidoCreado, tags=["Firma de reportes"])
+def pedir_reporte(pedido: schemas.PedidoReporte, u: Usuario = Depends(con_acceso_a_datos)):
+    """Direccion o un gerente pide un reporte a RRHH (fuera de la programacion
+    mensual). No genera nada: avisa a las Analistas de RRHH, que lo preparan."""
+    if u.rol not in ("direccion", "gerente"):
+        raise HTTPException(status_code=403, detail="RRHH genera los reportes directamente desde Reportes con IA")
+    area_id = area_por_defecto(u) if pedido.area_id is None else pedido.area_id
+    exigir_acceso_a_datos(u, area_id)
+    try:
+        periodo, _ = narrativa.validar_solicitud(kpis_df(), _mes(pedido.periodo), area_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    id_, avisadas = _firmas(trabajos.registrar_pedido, area_id, periodo, pedido.comentario, u.usuario)
+    return {"id": id_, "analistas_avisadas": avisadas}
+
+
 # ----------------------------------------------------------- avisos (RF-09)
 @app.get("/avisos", response_model=schemas.Avisos, tags=["Avisos"])
 def ver_avisos(
@@ -597,7 +658,8 @@ def crear_cuenta(nueva: schemas.CuentaNueva, u: Usuario = Depends(solo_ti)):
     temporal = seguridad.generar_contrasena_temporal()
     id_ = _cuentas(
         lambda: seguridad.crear_usuario(
-            nueva.usuario, nueva.nombre, nueva.rol, temporal, nueva.area_id, nueva.correo, por=u.usuario, temporal=True
+            nueva.usuario, nueva.nombre, nueva.rol, temporal, nueva.area_id, nueva.correo, por=u.usuario, temporal=True,
+            firma_reportes=nueva.firma_reportes,
         )
     )
     return {"cuenta": seguridad.obtener_cuenta(id_), "contrasena_temporal": temporal}
@@ -646,6 +708,25 @@ def _codigo_demo(usuario_id: int) -> dict:
         raise HTTPException(status_code=503, detail="Base de datos no disponible")
 
 
+@app.post("/demo/entrar", response_model=schemas.Token, tags=["Demostración"])
+def entrar_en_demo(entrada: schemas.EntradaDemo):
+    """Entra con un clic con una cuenta de demostracion, sin contrasena ni
+    verificacion en dos pasos, para recorrer el sistema o cambiar de rol.
+    Solo en modo demo (nunca con datos reales) y solo cuentas demo_; las
+    cuentas reales siempre entran con contrasena y MFA."""
+    try:
+        u = demo.entrar(entrada.usuario)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc.args[0]))
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
+    return {
+        "access_token": seguridad.crear_token(u, demo=True),
+        "token_type": "bearer",
+        "expira_en_minutos": seguridad.minutos_de_sesion(),
+    }
+
+
 @app.post("/demo/codigo", response_model=schemas.CodigoDemo, tags=["Demostración"])
 def codigo_demo_al_entrar(solicitud: schemas.CodigoDemoSolicitud):
     """Codigo vigente de una cuenta de demostracion durante el segundo paso del
@@ -683,27 +764,27 @@ def _carga(funcion, *args):
 
 
 @app.get("/cargas/fuentes", tags=["Carga de datos"])
-def fuentes_de_datos(_u: Usuario = Depends(solo_rrhh)) -> dict:
+def fuentes_de_datos(_u: Usuario = Depends(solo_analista)) -> dict:
     """Fuentes que se pueden cargar, sus columnas y el mes de los archivos de ejemplo."""
     return {"fuentes": cargas.catalogo(), "ejemplos": _carga(cargas.info_ejemplos)}
 
 
 @app.get("/cargas", response_model=list[schemas.Carga], tags=["Carga de datos"])
-def historial_de_cargas(limite: int = Query(50, ge=1, le=200), _u: Usuario = Depends(solo_rrhh)):
+def historial_de_cargas(limite: int = Query(50, ge=1, le=200), _u: Usuario = Depends(solo_analista)):
     """Bitacora de cargas: quien subio que archivo, cuando, y como termino."""
     return _carga(cargas.listar, limite)
 
 
 @app.post("/cargas/{fuente}", status_code=201, response_model=schemas.Carga, tags=["Carga de datos"])
-async def subir_archivo(fuente: str, archivo: UploadFile = File(...), u: Usuario = Depends(solo_rrhh)):
+async def subir_archivo(fuente: str, archivo: UploadFile = File(...), u: Usuario = Depends(solo_analista)):
     """Sube y VALIDA un archivo (CSV o Excel) de una fuente. No cambia nada:
-    queda 'validada' (lista para aplicar) o 'con_errores'. Solo RRHH."""
+    queda 'validada' (lista para aplicar) o 'con_errores'. Solo la Analista de RRHH."""
     contenido = await archivo.read(cargas.BYTES_MAXIMOS + 1)
     return _carga(cargas.validar, fuente, archivo.filename or "archivo", contenido, u.usuario)
 
 
 @app.post("/cargas/{id_carga}/aplicar", response_model=schemas.Carga, tags=["Carga de datos"])
-def aplicar_carga(id_carga: int, u: Usuario = Depends(solo_rrhh)):
+def aplicar_carga(id_carga: int, u: Usuario = Depends(solo_analista)):
     """Aplica una carga validada (todo o nada) y concilia archivo contra base.
     Los indicadores se recalculan y se revisan las alertas del mes."""
     resultado = _carga(cargas.aplicar, id_carga, u.usuario)
@@ -713,13 +794,13 @@ def aplicar_carga(id_carga: int, u: Usuario = Depends(solo_rrhh)):
 
 
 @app.post("/cargas/{id_carga}/descartar", response_model=schemas.Carga, tags=["Carga de datos"])
-def descartar_carga(id_carga: int, u: Usuario = Depends(solo_rrhh)):
+def descartar_carga(id_carga: int, u: Usuario = Depends(solo_analista)):
     return _carga(cargas.descartar, id_carga, u.usuario)
 
 
 @app.get("/cargas/plantillas/{fuente}", tags=["Carga de datos"], response_class=Response)
 def plantilla_de_carga(
-    fuente: str, formato: Literal["csv", "xlsx"] = "xlsx", _u: Usuario = Depends(solo_rrhh)
+    fuente: str, formato: Literal["csv", "xlsx"] = "xlsx", _u: Usuario = Depends(solo_analista)
 ):
     """Archivo vacio con las columnas que espera la fuente."""
     return _archivo(_carga(cargas.plantilla, fuente, formato), f"plantilla-{fuente}.{formato}", _TIPOS[formato])
@@ -727,7 +808,7 @@ def plantilla_de_carga(
 
 @app.get("/cargas/ejemplos/{fuente}", tags=["Carga de datos"], response_class=Response)
 def ejemplo_de_carga(
-    fuente: str, formato: Literal["csv", "xlsx"] = "xlsx", _u: Usuario = Depends(solo_rrhh)
+    fuente: str, formato: Literal["csv", "xlsx"] = "xlsx", _u: Usuario = Depends(solo_analista)
 ):
     """Archivo de ejemplo de la empresa de demostracion para el mes siguiente
     al ultimo cargado, como lo exportaria su sistema (con columnas de mas)."""

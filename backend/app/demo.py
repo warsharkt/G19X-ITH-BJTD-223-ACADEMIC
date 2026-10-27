@@ -3,14 +3,19 @@
 Se activa con MODO_DEMO=si y SOLO funciona con MODO_DATOS=sinteticos: con
 datos reales queda apagado, igual que el candado de la IA en la nube.
 
-Las medidas de seguridad funcionan igual que en produccion (contrasena,
-verificacion en dos pasos obligatoria, bloqueo por intentos, permisos por rol,
-bitacoras). Lo unico que agrega es ayuda para recorrerlas sin telefono:
-  - La pantalla de inicio lista cuentas de demostracion de cada rol y su
-    contrasena (scripts/demo.py las crea o restablece).
-  - Al configurar el MFA o al entrar, muestra el codigo vigente que en
-    produccion solo se veria en la app del telefono. Solo para cuentas con
-    prefijo demo_: nunca revela el codigo de una cuenta real.
+Sirve para que quien ve la demostracion entienda el producto sin configurar
+nada: la pantalla de inicio muestra una tarjeta por rol y se entra con un
+clic, sin contrasena ni verificacion en dos pasos, y desde el menu se cambia
+de rol para recorrer el flujo completo (la Analista prepara, la Responsable
+firma, Direccion recibe). La pantalla avisa que en produccion se pide la
+verificacion en dos pasos.
+
+Lo que NO cambia: las cuentas reales siempre entran con contrasena y MFA,
+los permisos por rol y las bitacoras funcionan igual, y la entrada de un clic
+solo sirve para cuentas con prefijo demo_ mientras el modo siga activo (el
+token deja de valer si se apaga). Quien quiera ver el MFA puede entrar con
+usuario y contrasena: el telefono simulado muestra el codigo vigente, tambien
+solo para cuentas demo_.
 """
 import os
 import time
@@ -25,18 +30,19 @@ from app.seguridad import ErrorDeUsuario
 
 PREFIJO = "demo_"
 
-# usuario, nombre, rol, area (solo gerente), para que sirve en la revision
+# usuario, nombre, rol, area (solo gerente), firma reportes, cargo, que hace.
+# En el orden del flujo: quien prepara, quien firma, quienes reciben.
 CUENTAS = [
-    ("demo_direccion", "Andrea Salinas", "direccion", None,
-     "Dirección General: solo el consolidado de la empresa."),
-    ("demo_rrhh", "Ana Ríos", "rrhh", None,
-     "Gerente de RRHH: todas las áreas; carga datos y solicita reportes."),
-    ("demo_rrhh2", "Eva Muñoz", "rrhh", None,
-     "Analista de RRHH: aprueba los reportes que solicitó Ana."),
-    ("demo_gerente", "Luis Ortega", "gerente", "Ventas",
-     "Gerente de Ventas: solo su área; la verificación en dos pasos es opcional."),
-    ("demo_ti", "Carlos Peña", "admin_ti", None,
-     "Soporte TI: administra cuentas; no ve datos de colaboradores."),
+    ("demo_analista", "Eva Muñoz", "rrhh", None, False, "Analista de RRHH",
+     "Carga los datos del mes y genera los reportes con IA."),
+    ("demo_rrhh", "Ana Ríos", "rrhh", None, True, "Responsable de RRHH",
+     "Revisa y firma los reportes antes de que lleguen a Dirección."),
+    ("demo_direccion", "Andrea Salinas", "direccion", None, False, "Dirección General",
+     "Recibe el consolidado firmado; puede pedir reportes a RRHH."),
+    ("demo_gerente", "Luis Ortega", "gerente", "Ventas", False, "Gerente de Ventas",
+     "Ve solo su área y recibe su reporte firmado."),
+    ("demo_ti", "Carlos Peña", "admin_ti", None, False, "Soporte TI",
+     "Administra las cuentas sin ver datos de colaboradores."),
 ]
 
 
@@ -62,15 +68,17 @@ def contrasena() -> str:
 
 def cuentas_publicas() -> list[dict]:
     return [
-        {"usuario": u, "nombre": n, "rol": r, "descripcion": d}
-        for u, n, r, _area, d in CUENTAS
+        {"usuario": u, "nombre": n, "rol": r, "cargo": c, "descripcion": d}
+        for u, n, r, _area, _firma, c, d in CUENTAS
     ]
 
 
 def preparar_cuentas(por: str) -> list[str]:
     """Crea las cuentas de demostracion o las deja como nuevas: contrasena de
     demostracion, activas, desbloqueadas y SIN MFA (asi quien revisa ve como se
-    configura). Todo queda en la bitacora de cuentas. Devuelve que hizo."""
+    configura). Las cuentas demo_ que ya no estan en la lista se desactivan.
+    Tambien termina cualquier suplencia abierta. Todo queda en la bitacora de
+    cuentas. Devuelve que hizo."""
     if (motivo := motivo_inactivo()) is not None:
         raise ErrorDeUsuario(motivo)
     seguridad.asegurar_tabla()
@@ -80,14 +88,29 @@ def preparar_cuentas(por: str) -> list[str]:
         existentes = dict(
             conn.execute(text("SELECT usuario, id FROM usuarios WHERE usuario LIKE 'demo\\_%'")).all()
         )
-    for usuario, nombre, rol, area, _ in CUENTAS:
+    vigentes = {c[0] for c in CUENTAS}
+    for usuario, id_ in existentes.items():
+        if usuario not in vigentes:
+            seguridad.modificar_usuario(id_, {"activo": False, "firma_reportes": False}, por)
+            hecho.append(f"{usuario}: desactivada (ya no se usa)")
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE suplencias SET cancelada_por = :p, cancelada_en = now() "
+                "WHERE cancelada_en IS NULL AND suplente LIKE 'demo\\_%'"
+            ),
+            {"p": por},
+        )
+    for usuario, nombre, rol, area, firma, _cargo, _ in CUENTAS:
         area_id = areas[area] if area else None
         if usuario not in existentes:
-            seguridad.crear_usuario(usuario, nombre, rol, contrasena(), area_id, por=por)
+            seguridad.crear_usuario(usuario, nombre, rol, contrasena(), area_id, por=por, firma_reportes=firma)
             hecho.append(f"{usuario}: creada")
             continue
         id_ = existentes[usuario]
-        seguridad.modificar_usuario(id_, {"nombre": nombre, "rol": rol, "area_id": area_id, "activo": True}, por)
+        seguridad.modificar_usuario(
+            id_, {"nombre": nombre, "rol": rol, "area_id": area_id, "activo": True, "firma_reportes": firma}, por
+        )
         seguridad.cambiar_contrasena(usuario, contrasena(), por=por)
         if seguridad.obtener_cuenta(id_)["mfa_activo"]:
             mfa.reiniciar(id_, por)
@@ -95,6 +118,25 @@ def preparar_cuentas(por: str) -> list[str]:
             conn.execute(text("UPDATE usuarios SET mfa_secreto = NULL WHERE id = :i AND NOT mfa_activo"), {"i": id_})
         hecho.append(f"{usuario}: restablecida")
     return hecho
+
+
+def entrar(usuario: str) -> seguridad.Usuario:
+    """Cuenta de demostracion para entrar con un clic. LookupError si el modo
+    demo esta apagado o la cuenta no es de demostracion o no esta activa."""
+    if not activo():
+        raise LookupError("El modo demostración no está activo")
+    usuario = usuario.strip().lower()
+    if usuario not in {c[0] for c in CUENTAS}:
+        raise LookupError("Solo las cuentas de demostración entran con un clic")
+    seguridad.asegurar_tabla()
+    with engine.begin() as conn:
+        id_ = conn.execute(
+            text("SELECT id FROM usuarios WHERE usuario = :u AND activo"), {"u": usuario}
+        ).scalar()
+        if id_ is None:
+            raise LookupError("La cuenta de demostración no existe: corre python -m scripts.demo")
+        seguridad.registrar_entrada(conn, id_)
+    return seguridad._leer_usuario(id_)
 
 
 def codigo_vigente(usuario_id: int) -> dict:

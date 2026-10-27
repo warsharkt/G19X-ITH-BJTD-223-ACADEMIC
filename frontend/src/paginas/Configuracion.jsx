@@ -8,6 +8,129 @@ import { useConsulta } from '../useConsulta'
 const SENTIDO = { mayor_es_peor: 'Peor si sube', menor_es_peor: 'Peor si baja' }
 const ORIGEN = { api: 'Servidor', script: 'Programador de tareas' }
 const DIAS = Array.from({ length: 28 }, (_, i) => i + 1)
+const DIAS_MAXIMOS_SUPLENCIA = 90
+
+// "2026-11-03" -> "3 nov 2026"
+function fechaCorta(iso) {
+  return new Date(`${iso}T12:00:00Z`).toLocaleDateString('es-MX', {
+    day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
+  })
+}
+
+function fechaIso(fecha) {
+  const local = new Date(fecha.getTime() - fecha.getTimezoneOffset() * 60000)
+  return local.toISOString().slice(0, 10)
+}
+
+// Quien firma los reportes (regla 10.3.9) y la suplencia: mientras la
+// Responsable no esta, designa a una Analista que firma en su lugar.
+function FirmaReportes() {
+  const [version, setVersion] = useState(0)
+  const firmas = useConsulta(() => api.firmas(), [version])
+  const [suplente, setSuplente] = useState('')
+  const [hasta, setHasta] = useState('')
+  const [motivo, setMotivo] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState(null)
+
+  async function ejecutar(accion) {
+    setError(null)
+    setGuardando(true)
+    try {
+      await accion()
+      setSuplente('')
+      setHasta('')
+      setMotivo('')
+      setVersion((v) => v + 1)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  const f = firmas.datos
+  const hoy = new Date()
+  const maximo = new Date(hoy.getTime() + DIAS_MAXIMOS_SUPLENCIA * 86400000)
+
+  return (
+    <section className="panel">
+      <h2>Firma de reportes</h2>
+      <p className="texto-secundario">
+        Una Analista de RRHH prepara cada reporte y la Responsable de RRHH lo firma antes de distribuirlo. Nadie
+        firma lo que preparó.
+      </p>
+      {firmas.error && <Mensaje>{firmas.error.message}</Mensaje>}
+      {f && (
+        <dl className="datos-firma">
+          <dt>Responsable de RRHH</dt>
+          <dd>
+            {f.responsables.length
+              ? f.responsables.map((r) => r.nombre).join(', ')
+              : 'Sin asignar: TI la asigna desde Usuarios.'}
+          </dd>
+          <dt>Suplencia</dt>
+          <dd>
+            {f.suplencia
+              ? `${f.suplencia.nombre_suplente} firma en lugar de ${f.suplencia.nombre_titular} hasta el ` +
+                `${fechaCorta(f.suplencia.hasta)}${f.suplencia.motivo ? ` (${f.suplencia.motivo})` : ''}.`
+              : 'Sin suplencia: los reportes llegan a la Responsable.'}
+          </dd>
+        </dl>
+      )}
+      {f?.puede_designar && f.suplencia && (
+        <button
+          type="button"
+          className="boton-secundario"
+          disabled={guardando}
+          onClick={() => ejecutar(() => api.terminarSuplencia())}
+        >
+          {guardando ? 'Guardando…' : 'Terminar la suplencia (ya regresé)'}
+        </button>
+      )}
+      {f?.puede_designar && !f.suplencia && (
+        <form
+          className="filtros"
+          onSubmit={(e) => {
+            e.preventDefault()
+            ejecutar(() => api.designarSuplente(suplente, hasta, motivo))
+          }}
+        >
+          <label>
+            Suplente
+            <select value={suplente} onChange={(e) => setSuplente(e.target.value)} required>
+              <option value="">Elige a una Analista</option>
+              {f.candidatas.map((c) => (
+                <option key={c.usuario} value={c.usuario}>
+                  {c.nombre}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Hasta
+            <input
+              type="date"
+              value={hasta}
+              min={fechaIso(hoy)}
+              max={fechaIso(maximo)}
+              onChange={(e) => setHasta(e.target.value)}
+              required
+            />
+          </label>
+          <label>
+            Motivo (opcional)
+            <input value={motivo} onChange={(e) => setMotivo(e.target.value)} maxLength={200} placeholder="Vacaciones" />
+          </label>
+          <button type="submit" className="boton-primario" disabled={guardando}>
+            {guardando ? 'Guardando…' : 'Designar suplente'}
+          </button>
+        </form>
+      )}
+      {error && <Mensaje>{error}</Mensaje>}
+    </section>
+  )
+}
 
 // Umbrales del semaforo (seccion 10.2 del PRD). RRHH los edita fila por
 // fila; la API valida que tengan sentido y registra cada cambio.
@@ -305,6 +428,7 @@ export default function Configuracion() {
           Tu rol administra catálogos y configuración; no tiene acceso a datos de colaboradores.
         </Mensaje>
       )}
+      {puedeVerDatos(usuario) && <FirmaReportes />}
       <Umbrales editable={editable} alGuardar={() => setCambios((v) => v + 1)} />
       <CambiosUmbrales version={cambios} />
       <Programacion editable={editable} />

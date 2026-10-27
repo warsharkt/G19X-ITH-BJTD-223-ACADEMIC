@@ -1181,3 +1181,15 @@ def test_al_reiniciar_las_narrativas_en_proceso_quedan_en_error(client):
 )
 def test_api_narrativa_errores(client, cuerpo, codigo):
     assert client.post("/narrativas", json=cuerpo).status_code == codigo
+
+def test_api_los_rechazos_de_rondas_anteriores_no_se_pierden(client):
+    """Si la segunda ronda sale bien, los rechazos de la primera quedan en la
+    bitacora y cuentan como intentos (metrica de correctos al primer intento)."""
+    hechos = construir_hechos(kpis_df(), kpis_df()["periodo"].max(), 0)
+    prov = ProveedorFalso(*["no soy json"] * INTENTOS, respuesta_buena(hechos))
+    app.dependency_overrides[proveedor_configurado] = lambda: prov
+    trabajo = client.post("/narrativas", json={}).json()
+    assert trabajo["estado"] == "lista" and trabajo["rondas"] == 2
+    n = trabajo["narrativa"]
+    assert n["intentos"] == INTENTOS + 1 == len(prov.llamadas)
+    assert len(n["advertencias"]) == INTENTOS and all(a.startswith("Ronda 1:") for a in n["advertencias"])

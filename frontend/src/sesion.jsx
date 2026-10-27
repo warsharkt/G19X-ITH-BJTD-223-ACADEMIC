@@ -12,14 +12,29 @@ export const NOMBRES_ROL = {
   admin_ti: 'Administración de TI',
 }
 
+// Dentro de RRHH, quien prepara no firma: la Analista carga los datos y
+// genera los reportes; la Responsable (firma_reportes) los firma.
+export const esAnalista = (usuario) => usuario?.rol === 'rrhh' && !usuario.firma_reportes
+export const esResponsable = (usuario) => usuario?.rol === 'rrhh' && Boolean(usuario.firma_reportes)
+
+// Como se ve el rol en pantalla
+export function cargoDe(usuario) {
+  if (usuario?.rol === 'rrhh') return usuario.firma_reportes ? 'Responsable de RRHH' : 'Analista de RRHH'
+  return NOMBRES_ROL[usuario?.rol] ?? usuario?.rol
+}
+
 // admin_ti administra catalogos, configuracion y cuentas, sin datos de colaboradores
 export const puedeVerDatos = (usuario) => usuario?.rol !== 'admin_ti'
 
 // Cuentas: TI las administra y RRHH las consulta (para auditar)
 export const puedeVerCuentas = (usuario) => ['admin_ti', 'rrhh'].includes(usuario?.rol)
 
-// Carga de datos de los sistemas fuente: solo RRHH (TI no ve datos de colaboradores)
-export const puedeCargarDatos = (usuario) => usuario?.rol === 'rrhh'
+// Carga de datos y reportes con IA: los prepara la Analista de RRHH
+export const puedeCargarDatos = esAnalista
+export const puedeGenerar = esAnalista
+
+// Direccion y los gerentes reciben los reportes y los piden a RRHH
+export const puedePedir = (usuario) => ['direccion', 'gerente'].includes(usuario?.rol)
 
 export function ProveedorSesion({ children }) {
   const [usuario, setUsuario] = useState(null)
@@ -89,12 +104,23 @@ export function ProveedorSesion({ children }) {
     [abrirSesion],
   )
 
+  // Modo demostracion: entrar o cambiar de rol con un clic (solo cuentas demo_)
+  const entrarDemo = useCallback(
+    async (nombreUsuario) => {
+      const { access_token } = await api.entrarDemo(nombreUsuario)
+      await abrirSesion(access_token)
+    },
+    [abrirSesion],
+  )
+
   // Tras cambiar la contrasena o activar el MFA: datos y pendientes al dia
   const recargarUsuario = useCallback(async () => setUsuario(await api.yo()), [])
 
   return (
     <ContextoSesion.Provider
-      value={{ usuario, cargando, aviso, demo, marca, iniciarSesion, verificarMfa, recargarUsuario, cerrarSesion }}
+      value={{
+        usuario, cargando, aviso, demo, marca, iniciarSesion, verificarMfa, entrarDemo, recargarUsuario, cerrarSesion,
+      }}
     >
       {children}
     </ContextoSesion.Provider>

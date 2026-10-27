@@ -28,6 +28,8 @@ class UsuarioOut(BaseModel):
     mfa_activo: bool = False
     mfa_obligatorio: bool = Field(False, description="Su rol debe usar verificacion en dos pasos")
     codigos_respaldo_restantes: int = 0
+    firma_reportes: bool = Field(False, description="Responsable de RRHH: firma los reportes (si no, Analista)")
+    sesion_demo: bool = Field(False, description="Entro con un clic desde el modo demostracion")
 
 
 class MfaPaso(BaseModel):
@@ -67,6 +69,7 @@ class Cuenta(BaseModel):
     bloqueado: bool
     debe_cambiar_contrasena: bool
     mfa_activo: bool
+    firma_reportes: bool = False
     creado_en: datetime
     ultimo_acceso: datetime | None
 
@@ -77,6 +80,7 @@ class CuentaNueva(BaseModel):
     rol: str
     area_id: int | None = None
     correo: str | None = None
+    firma_reportes: bool = Field(False, description="Solo RRHH: Responsable que firma los reportes")
 
 
 class CuentaCambio(BaseModel):
@@ -86,6 +90,7 @@ class CuentaCambio(BaseModel):
     area_id: int | None = None
     correo: str | None = None
     activo: bool | None = None
+    firma_reportes: bool | None = None
 
 
 class CuentaCreada(BaseModel):
@@ -259,6 +264,13 @@ class Narrativa(BaseModel):
     advertencias: list[str] = Field(description="Errores de validacion de los intentos previos")
 
 
+class Firma(BaseModel):
+    """Quien firma un reporte: quien ya lo reviso, o a quien se le va a mandar."""
+    usuario: str
+    nombre: str
+    cargo: str = Field(description="Responsable de RRHH, o suplente y hasta cuando")
+
+
 class TrabajoNarrativa(BaseModel):
     """Solicitud de narrativa: se genera en segundo plano y se consulta por id."""
     id: int
@@ -281,6 +293,10 @@ class TrabajoNarrativa(BaseModel):
     revisada_en: datetime | None = None
     comentario_revision: str | None = None
     programada: bool = Field(False, description="La solicito la programacion mensual, no una persona")
+    firma: Firma | None = Field(
+        None, description="Quien la firma (o la firmo). None si termino en error o no hay quien firme"
+    )
+    nota_rrhh: str | None = Field(None, description="Nota de quien la firmo, aparte del texto de la IA")
     narrativa: Narrativa | None = Field(None, description="Presente cuando estado = lista")
 
 
@@ -290,10 +306,17 @@ class RevisionSolicitud(BaseModel):
     comentario: str | None = Field(
         None, max_length=1000, description="Obligatorio al rechazar: que hay que corregir"
     )
+    nota: str | None = Field(
+        None, max_length=600,
+        description="Solo al aprobar: Nota de RRHH con contexto para la audiencia; va firmada y aparte de la IA",
+    )
 
     @model_validator(mode="after")
     def _rechazo_con_motivo(self):
         self.comentario = (self.comentario or "").strip() or None
+        self.nota = (self.nota or "").strip() or None
+        if self.nota and self.decision != "aprobada":
+            raise ValueError("La Nota de RRHH solo se agrega al aprobar")
         if self.decision == "rechazada" and (self.comentario is None or len(self.comentario) < 10):
             raise ValueError("Al rechazar, explica el motivo en el comentario (mínimo 10 caracteres)")
         return self
@@ -301,7 +324,7 @@ class RevisionSolicitud(BaseModel):
 # ------------------------------------------------------------ paso 10
 class Aviso(BaseModel):
     id: int
-    tipo: str = Field(description="alerta, revision, aprobado, rechazado o error")
+    tipo: str = Field(description="alerta, revision, aprobado, rechazado, error o pedido")
     area_id: int
     titulo: str
     enlace: str = Field(description="Ruta del tablero a la que lleva el aviso")
@@ -336,12 +359,59 @@ class ProgramacionCambio(BaseModel):
     dia_del_mes: int = Field(ge=1, le=28, description="1 a 28: todos los meses tienen ese dia")
 
 
+# ----------------------------------------------------- firma y pedidos
+class Persona(BaseModel):
+    usuario: str
+    nombre: str
+
+
+class Suplencia(BaseModel):
+    suplente: str
+    nombre_suplente: str
+    titular: str
+    nombre_titular: str
+    desde: date
+    hasta: date
+    motivo: str | None
+
+
+class EstadoFirmas(BaseModel):
+    """Quien firma hoy los reportes."""
+    responsables: list[Persona]
+    suplencia: Suplencia | None
+    candidatas: list[Persona] = Field(description="Analistas que la Responsable puede designar como suplente")
+    puede_designar: bool
+
+
+class SuplenciaNueva(BaseModel):
+    suplente: str = Field(description="Usuario de la Analista que firma en su lugar")
+    hasta: date = Field(description="Ultimo dia de la suplencia (empieza hoy)")
+    motivo: str | None = Field(None, max_length=200)
+
+
+class PedidoReporte(BaseModel):
+    """Direccion o un gerente pide un reporte a RRHH."""
+    area_id: int | None = Field(None, description="Por defecto: el consolidado (Direccion) o su area (gerente)")
+    periodo: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$", description="AAAA-MM")
+    comentario: str | None = Field(None, max_length=500)
+
+
+class PedidoCreado(BaseModel):
+    id: int
+    analistas_avisadas: int
+
+
 # -------------------------------------------------------- modo demostracion
 class CuentaDemo(BaseModel):
     usuario: str
     nombre: str
     rol: str
+    cargo: str = Field(description="Como se ve el rol en pantalla, p. ej. Analista de RRHH")
     descripcion: str
+
+
+class EntradaDemo(BaseModel):
+    usuario: str
 
 
 class Demo(BaseModel):

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import ConfigurarMfa from '../componentes/ConfigurarMfa'
 import FormularioContrasena from '../componentes/FormularioContrasena'
 import Mensaje from '../componentes/Mensaje'
-import { NOMBRES_ROL, useSesion } from '../sesion'
+import { cargoDe, useSesion } from '../sesion'
 
 // Mi cuenta: datos, cambio de contrasena y verificacion en dos pasos.
 export default function Cuenta() {
@@ -16,7 +16,7 @@ export default function Cuenta() {
         <div>
           <h1>Mi cuenta</h1>
           <p className="texto-secundario">
-            {usuario.nombre} · {usuario.usuario} · {NOMBRES_ROL[usuario.rol] ?? usuario.rol}
+            {usuario.nombre} · {usuario.usuario} · {cargoDe(usuario)}
           </p>
         </div>
       </div>

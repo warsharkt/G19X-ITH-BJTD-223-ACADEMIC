@@ -106,8 +106,9 @@ export const api = {
   modificarCuenta: (id, cambios) => pedir(`/usuarios/${id}`, { metodo: 'PATCH', cuerpo: cambios }),
   restablecerContrasena: (id) => pedir(`/usuarios/${id}/contrasena`, { metodo: 'POST' }),
   reiniciarMfa: (id) => pedir(`/usuarios/${id}/mfa/reiniciar`, { metodo: 'POST' }),
-  // Modo demostracion: cuentas de prueba y el codigo que daria el telefono
+  // Modo demostracion: cuentas de prueba, entrada de un clic y el codigo que daria el telefono
   demo: () => pedir('/demo'),
+  entrarDemo: (usuario) => pedir('/demo/entrar', { metodo: 'POST', cuerpo: { usuario } }),
   marca: () => pedir('/marca'),
   // Carga de datos de los sistemas fuente (solo RRHH)
   fuentesDeDatos: () => pedir('/cargas/fuentes'),
@@ -133,8 +134,17 @@ export const api = {
   narrativa: (id) => pedir(`/narrativas/${id}`),
   historial: ({ areaId, periodo, revision, limite = 50 } = {}) =>
     pedir('/narrativas' + consulta({ area_id: areaId, periodo, revision, limite })),
-  revisar: (id, decision, comentario) =>
-    pedir(`/narrativas/${id}/revision`, { metodo: 'POST', cuerpo: { decision, comentario } }),
+  // Firma la Responsable de RRHH o su suplente; nota: la Nota de RRHH (solo al aprobar)
+  revisar: (id, decision, comentario, nota) =>
+    pedir(`/narrativas/${id}/revision`, { metodo: 'POST', cuerpo: { decision, comentario, nota } }),
+  // Quien firma hoy y la suplencia
+  firmas: () => pedir('/firmas'),
+  designarSuplente: (suplente, hasta, motivo) =>
+    pedir('/firmas/suplencia', { metodo: 'POST', cuerpo: { suplente, hasta, motivo } }),
+  terminarSuplencia: () => pedir('/firmas/suplencia/terminar', { metodo: 'POST' }),
+  // Direccion o un gerente pide un reporte a RRHH
+  pedirReporte: (periodo, areaId, comentario) =>
+    pedir('/pedidos', { metodo: 'POST', cuerpo: { periodo, area_id: areaId, comentario } }),
   // Solo reportes aprobados; formato: 'pdf' o 'pptx'
   exportar: (id, formato) => pedir(`/narrativas/${id}/exportar` + consulta({ formato }), { archivo: true }),
   // Avisos (RF-09): { no_leidos, avisos }

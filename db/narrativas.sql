@@ -56,3 +56,11 @@ CREATE INDEX IF NOT EXISTS exportaciones_narrativa ON exportaciones (narrativa_i
 -- tienen solicitada_por, asi que las puede revisar cualquier persona
 -- de RRHH (seccion 10.3.9).
 ALTER TABLE narrativas ADD COLUMN IF NOT EXISTS programada BOOLEAN NOT NULL DEFAULT false;
+
+-- Nota de RRHH: contexto que agrega quien firma al aprobar (p. ej. "la
+-- rotacion de Almacen sube por el cierre del turno nocturno, ya planeado").
+-- Va aparte y firmada: el texto de la IA nunca se edita.
+ALTER TABLE narrativas ADD COLUMN IF NOT EXISTS nota_rrhh TEXT;
+-- Con que cargo firmo quien la reviso ("Responsable de RRHH" o "Suplente
+-- de ... hasta ..."): el cargo de ese dia, aunque despues cambie.
+ALTER TABLE narrativas ADD COLUMN IF NOT EXISTS firmada_como TEXT;

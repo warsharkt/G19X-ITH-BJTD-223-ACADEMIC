@@ -1,9 +1,10 @@
 // API simulada para las pruebas: reemplaza fetch y responde como FastAPI.
 import { vi } from 'vitest'
 
+// ana es Analista de RRHH (prepara); eva, la Responsable que firma
 export const USUARIOS = {
   ana: { id: 1, usuario: 'ana', nombre: 'Ana López', rol: 'rrhh', area_id: null, areas_permitidas: [0, 1, 2] },
-  eva: { id: 4, usuario: 'eva', nombre: 'Eva Ruiz', rol: 'rrhh', area_id: null, areas_permitidas: [0, 1, 2] },
+  eva: { id: 4, usuario: 'eva', nombre: 'Eva Ruiz', rol: 'rrhh', area_id: null, areas_permitidas: [0, 1, 2], firma_reportes: true },
   dir: { id: 2, usuario: 'dir', nombre: 'Dirección General', rol: 'direccion', area_id: null, areas_permitidas: [0] },
   ti: { id: 3, usuario: 'ti', nombre: 'Soporte TI', rol: 'admin_ti', area_id: null, areas_permitidas: [0, 1, 2] },
   // con contrasena temporal: debe cambiarla antes de usar el sistema
@@ -73,28 +74,48 @@ export const NARRATIVA = {
 // Revisiones hechas durante la prueba: id -> campos de revision
 let revisiones = {}
 
+const RESPONSABLE = { usuario: 'eva', nombre: 'Eva Ruiz', cargo: 'Responsable de RRHH' }
+
 function trabajo(id, estado, extra = {}) {
-  return {
+  const t = {
     id, area_id: 0, periodo: '2026-08', estado, solicitada_en: '2026-10-03T17:55:00Z',
     terminada_en: estado === 'en_proceso' ? null : '2026-10-03T18:00:00Z', proveedor: 'ollama',
     modelo: 'qwen3:8b', version_prompt: 'v5', rondas: 1, error: null, detalle_error: null,
     solicitada_por: 'ana', revision: 'pendiente', revisada_por: null, revisada_en: null,
-    comentario_revision: null, narrativa: estado === 'lista' ? NARRATIVA : null, ...extra, ...revisiones[id],
+    comentario_revision: null, nota_rrhh: null, narrativa: estado === 'lista' ? NARRATIVA : null,
+    firma: estado === 'error' ? null : RESPONSABLE, ...extra, ...revisiones[id],
   }
+  return t
 }
 
 // Mismas reglas que POST /narrativas/{id}/revision de la API real
-function revisar(usuario, id, { decision, comentario }) {
+function revisar(usuario, id, { decision, comentario, nota }) {
   const actual = trabajo(id, 'lista')
-  if (usuario.rol !== 'rrhh') return respuesta(403, { detail: 'Solo Recursos Humanos puede aprobar o rechazar reportes' })
+  if (usuario.rol !== 'rrhh')
+    return respuesta(403, { detail: 'Los reportes los firma la Responsable de Recursos Humanos o su suplente' })
   const motivo = (comentario ?? '').trim()
   if (decision === 'rechazada' && motivo.length < 10)
     return respuesta(422, { detail: [{ msg: 'Value error, Al rechazar, explica el motivo en el comentario (mínimo 10 caracteres)' }] })
   if (actual.revision !== 'pendiente') return respuesta(409, { detail: `Esta narrativa ya fue ${actual.revision}` })
   if (actual.solicitada_por === usuario.usuario)
     return respuesta(403, { detail: 'No puedes revisar una narrativa que tú solicitaste: debe hacerlo otra persona de RRHH' })
-  revisiones[id] = { revision: decision, revisada_por: usuario.usuario, revisada_en: '2026-10-04T10:00:00Z', comentario_revision: motivo || null }
+  if (!usuario.firma_reportes) return respuesta(403, { detail: 'Este reporte lo firma Eva Ruiz (Responsable de RRHH)' })
+  revisiones[id] = {
+    revision: decision, revisada_por: usuario.usuario, revisada_en: '2026-10-04T10:00:00Z',
+    comentario_revision: motivo || null, nota_rrhh: decision === 'aprobada' ? (nota ?? '').trim() || null : null,
+    firma: { usuario: usuario.usuario, nombre: usuario.nombre, cargo: 'Responsable de RRHH' },
+  }
   return respuesta(200, trabajo(id, 'lista'))
+}
+
+// GET /firmas: quien firma hoy (la Responsable o su suplente)
+function firmas(usuario, estado) {
+  return {
+    responsables: [{ usuario: 'eva', nombre: 'Eva Ruiz' }],
+    suplencia: estado.suplencia,
+    candidatas: usuario.firma_reportes ? [{ usuario: 'ana', nombre: 'Ana López' }] : [],
+    puede_designar: Boolean(usuario.firma_reportes),
+  }
 }
 
 // Exportacion: igual que la API real, solo reportes aprobados
@@ -116,7 +137,7 @@ function exportar(id, formato, estado) {
 function avisosIniciales() {
   return {
     ana: [
-      { id: 12, tipo: 'revision', area_id: 0, titulo: 'Reporte de Corporativo, agosto 2026 listo para revisión', enlace: '/narrativas/5', creado_en: '2026-10-03T18:00:00Z', leido_en: null },
+      { id: 12, tipo: 'pedido', area_id: 0, titulo: 'Dirección General pide el reporte de Corporativo, agosto 2026', enlace: '/narrativas?nuevo=1&area=0&periodo=2026-08', creado_en: '2026-10-03T18:00:00Z', leido_en: null },
       { id: 11, tipo: 'alerta', area_id: 0, titulo: 'Corporativo, agosto 2026: 1 indicador en rojo (Tasa de rotación mensual)', enlace: '/tablero?area=0&periodo=2026-08', creado_en: '2026-10-03T07:00:00Z', leido_en: null },
       { id: 10, tipo: 'aprobado', area_id: 1, titulo: 'Reporte de Ventas, julio 2026 aprobado: ya se puede descargar', enlace: '/narrativas/4', creado_en: '2026-09-05T10:00:00Z', leido_en: '2026-09-05T11:00:00Z' },
     ],
@@ -149,6 +170,7 @@ function actualizarUmbral(usuario, indicador, { umbral_atencion, umbral_critico 
 function cuentasIniciales() {
   return Object.values(USUARIOS).map((u) => ({
     id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol, area_id: u.area_id, correo: null, activo: true,
+    firma_reportes: Boolean(u.firma_reportes),
     bloqueado: false, debe_cambiar_contrasena: u.pendiente === 'cambiar_contrasena', mfa_activo: Boolean(u.mfa_activo),
     creado_en: '2026-09-01T10:00:00Z', ultimo_acceso: null,
   }))
@@ -198,7 +220,8 @@ const FUENTES_DATOS = [
 ]
 
 function cargasFalsas(usuario, pathname, metodo, cuerpo, estado) {
-  if (usuario.rol !== 'rrhh') return respuesta(403, { detail: 'Solo Recursos Humanos puede cambiar esta configuración' })
+  if (usuario.rol !== 'rrhh' || usuario.firma_reportes)
+    return respuesta(403, { detail: 'Los reportes y la carga de datos los prepara la Analista de RRHH' })
   if (pathname === '/cargas/fuentes')
     return respuesta(200, { fuentes: FUENTES_DATOS, ejemplos: { mes: '2026-09', nombre_mes: 'septiembre 2026' } })
   if (pathname === '/cargas' && metodo === 'GET') return respuesta(200, estado.cargas)
@@ -241,8 +264,9 @@ const DEMO = {
   activo: true,
   contrasena: CONTRASENA_DEMO,
   cuentas: [
-    { usuario: 'lia', nombre: 'Lía, RRHH (demostración)', rol: 'rrhh', descripcion: 'Todas las áreas.' },
-    { usuario: 'dir', nombre: 'Dirección (demostración)', rol: 'direccion', descripcion: 'Solo el consolidado.' },
+    { usuario: 'ana', nombre: 'Ana López', rol: 'rrhh', cargo: 'Analista de RRHH', descripcion: 'Carga los datos y genera los reportes.' },
+    { usuario: 'eva', nombre: 'Eva Ruiz', rol: 'rrhh', cargo: 'Responsable de RRHH', descripcion: 'Firma los reportes.' },
+    { usuario: 'dir', nombre: 'Dirección General', rol: 'direccion', cargo: 'Dirección General', descripcion: 'Recibe el consolidado.' },
   ],
 }
 
@@ -251,7 +275,7 @@ const DEMO = {
 // `opciones.demo`: modo demostracion activo (las cuentas aceptan CONTRASENA_DEMO).
 export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = false, demo = false } = {}) {
   const estado = {
-    tokenValido: null, consultas: 0, solicitudes: [], exportaciones: [],
+    tokenValido: null, consultas: 0, solicitudes: [], exportaciones: [], pedidos: [], suplencia: null,
     pendientes: Object.fromEntries(Object.values(USUARIOS).map((u) => [u.usuario, u.pendiente ?? null])),
     contrasenasCambiadas: [],
     subidas: [],
@@ -268,6 +292,8 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
   }
   revisiones = {}
   const tokens = Object.fromEntries(Object.keys(USUARIOS).map((u) => [`token-${u}`, USUARIOS[u]]))
+  // entrada de un clic del modo demostracion: sin contrasena ni MFA
+  Object.keys(USUARIOS).forEach((u) => (tokens[`demo-${u}`] = USUARIOS[u]))
 
   const fetchFalso = vi.fn(async (url, opciones = {}) => {
     const { pathname, searchParams } = new URL(url)
@@ -278,6 +304,12 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
     if (pathname === '/demo/codigo') {
       if (!demo) return respuesta(404, { detail: 'El modo demostración no está activo' })
       return respuesta(200, { codigo: CODIGO_MFA, segundos: 17 })
+    }
+    if (pathname === '/demo/entrar') {
+      const { usuario: quien } = JSON.parse(opciones.body)
+      if (!demo || !DEMO.cuentas.some((c) => c.usuario === quien))
+        return respuesta(404, { detail: 'Solo las cuentas de demostración entran con un clic' })
+      return respuesta(200, { access_token: `demo-${quien}`, token_type: 'bearer', expira_en_minutos: 60 })
     }
     if (pathname === '/auth/login') {
       const f = new URLSearchParams(opciones.body)
@@ -297,14 +329,17 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
       return respuesta(200, { access_token: `token-${quien.usuario}`, mfa_requerido: false, token_type: 'bearer', expira_en_minutos: 60 })
     }
 
-    const usuario = tokens[(opciones.headers?.Authorization ?? '').replace('Bearer ', '')]
+    const token = (opciones.headers?.Authorization ?? '').replace('Bearer ', '')
+    const usuario = tokens[token]
+    const sesionDemo = token.startsWith('demo-')
     if (!usuario || estado.tokenValido === false)
       return respuesta(401, { detail: 'Sesión no válida o vencida; vuelve a iniciar sesión' })
     const conDatos = usuario.rol !== 'admin_ti'
     const sinPermiso = () => respuesta(403, { detail: 'Tu rol no tiene acceso a datos de colaboradores' })
 
-    const pendiente = estado.pendientes[usuario.usuario]
-    if (pathname === '/auth/yo') return respuesta(200, { mfa_activo: false, mfa_obligatorio: false, codigos_respaldo_restantes: 0, ...usuario, pendiente })
+    const pendiente = sesionDemo && estado.pendientes[usuario.usuario] === 'configurar_mfa' ? null : estado.pendientes[usuario.usuario]
+    if (pathname === '/auth/yo')
+      return respuesta(200, { mfa_activo: false, mfa_obligatorio: false, codigos_respaldo_restantes: 0, firma_reportes: false, ...usuario, pendiente, sesion_demo: sesionDemo })
     if (pathname === '/auth/contrasena') {
       const { actual, nueva } = JSON.parse(opciones.body)
       if (actual !== CONTRASENA) return respuesta(422, { detail: 'La contraseña actual no es correcta' })
@@ -339,6 +374,20 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
       return respuesta(200, estado.programacion)
     }
     if (pathname === '/programacion') return respuesta(200, estado.programacion)
+    if (pathname === '/firmas') return respuesta(200, firmas(usuario, estado))
+    if (pathname === '/firmas/suplencia' && metodo === 'POST') {
+      if (!usuario.firma_reportes) return respuesta(403, { detail: 'Solo la Responsable de RRHH designa a su suplente' })
+      const { suplente, hasta, motivo } = JSON.parse(opciones.body)
+      estado.suplencia = {
+        suplente, nombre_suplente: USUARIOS[suplente].nombre, titular: usuario.usuario, nombre_titular: usuario.nombre,
+        desde: '2026-10-06', hasta, motivo: motivo || null,
+      }
+      return respuesta(200, firmas(usuario, estado))
+    }
+    if (pathname === '/firmas/suplencia/terminar' && metodo === 'POST') {
+      estado.suplencia = null
+      return respuesta(200, firmas(usuario, estado))
+    }
 
     const propios = estado.avisos[usuario.usuario]
     if (pathname === '/avisos') {
@@ -370,8 +419,16 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
       })))
     }
     if (pathname === '/narrativas' && metodo === 'POST') {
+      if (usuario.rol !== 'rrhh' || usuario.firma_reportes)
+        return respuesta(403, { detail: 'Los reportes los prepara Recursos Humanos. Si necesitas un reporte, pídeselo a RRHH.' })
       estado.solicitudes.push(JSON.parse(opciones.body))
       return respuesta(202, trabajo(7, 'en_proceso'))
+    }
+    if (pathname === '/pedidos' && metodo === 'POST') {
+      if (!['direccion', 'gerente'].includes(usuario.rol))
+        return respuesta(403, { detail: 'RRHH genera los reportes directamente desde Reportes con IA' })
+      estado.pedidos.push({ usuario: usuario.usuario, ...JSON.parse(opciones.body) })
+      return respuesta(201, { id: estado.pedidos.length, analistas_avisadas: 1 })
     }
     const enRevision = pathname.match(/^\/narrativas\/(\d+)\/revision$/)
     if (enRevision && metodo === 'POST') return revisar(usuario, Number(enRevision[1]), JSON.parse(opciones.body))

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { api } from '../api'
 import Mensaje from '../componentes/Mensaje'
 import { fechaHora } from '../formato'
-import { NOMBRES_ROL, useSesion } from '../sesion'
+import { cargoDe, NOMBRES_ROL, useSesion } from '../sesion'
 import { useConsulta } from '../useConsulta'
 
 const ACCIONES = {
@@ -15,9 +15,24 @@ const ACCIONES = {
   activar_mfa: 'Activó la verificación en dos pasos',
   reiniciar_mfa: 'Reinició la verificación en dos pasos',
   usar_codigo_respaldo: 'Entró con un código de respaldo',
+  designar_suplente: 'La designó suplente para firmar reportes',
+  terminar_suplencia: 'Terminó su suplencia',
 }
-const CAMPOS = { nombre: 'nombre', rol: 'rol', area_id: 'área', correo: 'correo', activo: 'activa' }
+const CAMPOS = {
+  nombre: 'nombre', rol: 'rol', area_id: 'área', correo: 'correo', activo: 'activa', firma_reportes: 'firma reportes',
+  desde: 'desde', hasta: 'hasta', motivo: 'motivo',
+}
 const VACIA = { usuario: '', nombre: '', rol: 'gerente', area_id: '', correo: '' }
+
+// En el formulario, RRHH se divide en Analista (prepara) y Responsable (firma)
+const OPCIONES_ROL = [
+  ['rrhh', 'Analista de RRHH (prepara los reportes)'],
+  ['rrhh_firma', 'Responsable de RRHH (firma los reportes)'],
+  ['direccion', NOMBRES_ROL.direccion],
+  ['gerente', NOMBRES_ROL.gerente],
+  ['admin_ti', NOMBRES_ROL.admin_ti],
+]
+const rolDelFormulario = (c) => (c.rol === 'rrhh' && c.firma_reportes ? 'rrhh_firma' : c.rol)
 
 // Detalle de la bitacora en palabras: "rol: Gerencia de área → Recursos Humanos"
 function detalle(c, nombreArea) {
@@ -25,7 +40,7 @@ function detalle(c, nombreArea) {
     if (v === null || v === undefined || v === '') return '—'
     if (campo === 'rol') return NOMBRES_ROL[v] ?? v
     if (campo === 'area_id') return nombreArea(v)
-    if (campo === 'activo') return v ? 'sí' : 'no'
+    if (campo === 'activo' || campo === 'firma_reportes') return v ? 'sí' : 'no'
     return String(v)
   }
   return Object.entries(c.detalle)
@@ -52,7 +67,8 @@ function FormularioCuenta({ inicial, areas, alGuardar, alCancelar, nueva }) {
       await alGuardar({
         ...(nueva ? { usuario: datos.usuario.trim() } : {}),
         nombre: datos.nombre.trim(),
-        rol: datos.rol,
+        rol: datos.rol === 'rrhh_firma' ? 'rrhh' : datos.rol,
+        firma_reportes: datos.rol === 'rrhh_firma',
         area_id: datos.rol === 'gerente' && datos.area_id !== '' ? Number(datos.area_id) : null,
         correo: datos.correo.trim() || null,
       })
@@ -80,7 +96,7 @@ function FormularioCuenta({ inicial, areas, alGuardar, alCancelar, nueva }) {
         <label>
           Rol
           <select value={datos.rol} onChange={cambio('rol')}>
-            {Object.entries(NOMBRES_ROL).map(([rol, nombre]) => (
+            {OPCIONES_ROL.map(([rol, nombre]) => (
               <option key={rol} value={rol}>
                 {nombre}
               </option>
@@ -204,7 +220,11 @@ export default function Usuarios() {
           <FormularioCuenta
             key={formulario === 'nueva' ? 'nueva' : formulario.id}
             nueva={formulario === 'nueva'}
-            inicial={formulario === 'nueva' ? VACIA : { ...formulario, area_id: formulario.area_id ?? '' }}
+            inicial={
+              formulario === 'nueva'
+                ? VACIA
+                : { ...formulario, rol: rolDelFormulario(formulario), area_id: formulario.area_id ?? '' }
+            }
             areas={areas}
             alGuardar={(datos) => (formulario === 'nueva' ? crear(datos) : guardar(formulario, datos))}
             alCancelar={() => setFormulario(null)}
@@ -235,7 +255,7 @@ export default function Usuarios() {
                     <td>{c.usuario}</td>
                     <td>{c.nombre}</td>
                     <td>
-                      {NOMBRES_ROL[c.rol] ?? c.rol}
+                      {cargoDe(c)}
                       {c.area_id !== null && ` · ${nombreArea(c.area_id)}`}
                     </td>
                     <td>

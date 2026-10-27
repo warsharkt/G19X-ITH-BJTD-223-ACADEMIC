@@ -8,7 +8,8 @@ import { useConsulta } from '../useConsulta'
 // Cada tipo con icono y texto, nunca solo color (como el semaforo)
 const TIPOS = {
   alerta: { texto: 'Alerta', clase: 'rojo', icono: '▲' },
-  revision: { texto: 'Por revisar', clase: 'amarillo', icono: '●' },
+  revision: { texto: 'Por firmar', clase: 'amarillo', icono: '●' },
+  pedido: { texto: 'Pedido', clase: 'neutro', icono: '✉' },
   aprobado: { texto: 'Aprobado', clase: 'verde', icono: '✓' },
   rechazado: { texto: 'Rechazado', clase: 'neutro', icono: '✕' },
   error: { texto: 'Error', clase: 'rojo', icono: '✕' },

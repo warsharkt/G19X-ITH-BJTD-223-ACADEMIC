@@ -5,6 +5,7 @@ import GraficaSerie from '../componentes/GraficaSerie'
 import Mensaje from '../componentes/Mensaje'
 import TarjetaKpi from '../componentes/TarjetaKpi'
 import { nombreMes, ordenIndicador } from '../formato'
+import { puedeGenerar, puedePedir, useSesion } from '../sesion'
 import { useConsulta } from '../useConsulta'
 
 const PRIORIDAD = { rojo: 0, amarillo: 1 }
@@ -41,10 +42,12 @@ function Resumen({ kpis }) {
 }
 
 export default function Tablero() {
+  const { usuario } = useSesion()
   const navegar = useNavigate()
   const [parametros, setParametros] = useSearchParams()
   const [solicitando, setSolicitando] = useState(false)
   const [errorSolicitud, setErrorSolicitud] = useState(null)
+  const [pedido, setPedido] = useState(null) // mensaje tras pedir el reporte a RRHH
 
   const areas = useConsulta(() => api.areas(), [])
   const periodos = useConsulta(() => api.periodos(), [])
@@ -79,6 +82,21 @@ export default function Tablero() {
     }
   }
 
+  // Direccion y los gerentes piden el reporte a RRHH en lugar de generarlo
+  async function pedirReporte() {
+    setErrorSolicitud(null)
+    setPedido(null)
+    setSolicitando(true)
+    try {
+      await api.pedirReporte(periodo, areaId)
+      setPedido('Recursos Humanos recibió tu pedido. Te avisaremos cuando el reporte esté firmado.')
+    } catch (err) {
+      setErrorSolicitud(err.message)
+    } finally {
+      setSolicitando(false)
+    }
+  }
+
   const errorCatalogo = areas.error || periodos.error
   if (errorCatalogo) return <Mensaje titulo="No se pudo cargar el tablero">{errorCatalogo.message}</Mensaje>
   if (!listo) return <p className="cargando">Cargando…</p>
@@ -94,11 +112,19 @@ export default function Tablero() {
           <h1>Indicadores de {nombreArea}</h1>
           <p className="texto-secundario">{nombreMes(periodo)}</p>
         </div>
-        <button type="button" className="boton-primario" onClick={generarNarrativa} disabled={solicitando}>
-          {solicitando ? 'Solicitando…' : 'Generar reporte con IA'}
-        </button>
+        {puedeGenerar(usuario) && (
+          <button type="button" className="boton-primario" onClick={generarNarrativa} disabled={solicitando}>
+            {solicitando ? 'Solicitando…' : 'Generar reporte con IA'}
+          </button>
+        )}
+        {puedePedir(usuario) && (
+          <button type="button" className="boton-secundario" onClick={pedirReporte} disabled={solicitando}>
+            {solicitando ? 'Enviando…' : 'Pedir este reporte a RRHH'}
+          </button>
+        )}
       </div>
       {errorSolicitud && <Mensaje titulo="No se pudo solicitar el reporte">{errorSolicitud}</Mensaje>}
+      {pedido && <Mensaje tipo="exito">{pedido}</Mensaje>}
 
       <div className="filtros" role="group" aria-label="Filtros">
         <label>

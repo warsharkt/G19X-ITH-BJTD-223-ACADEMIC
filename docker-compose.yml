@@ -6,8 +6,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+    # Solo desde este mismo equipo (127.0.0.1): otra computadora de la red no
+    # puede conectarse a la base. La API corre en el mismo equipo, asi que no
+    # le afecta. Si un dia la API vive en otro servidor, DB_ESCUCHA lo cambia.
     ports:
-      - "5433:5432"
+      - "${DB_ESCUCHA:-127.0.0.1}:5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

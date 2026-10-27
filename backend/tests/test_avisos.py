@@ -29,7 +29,8 @@ def ventas():
 
 @pytest.fixture(scope="module")
 def gente(ventas):
-    """Dos de RRHH, Direccion, el gerente de Ventas y TI. Devuelve nombre -> Usuario."""
+    """De RRHH, la Analista (rrhh) y la Responsable que firma (rrhh2); Direccion,
+    el gerente de Ventas y TI. Devuelve nombre -> Usuario."""
     seguridad.asegurar_tabla()
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM usuarios WHERE usuario LIKE :p"), {"p": PREFIJO + "%"})
@@ -42,8 +43,9 @@ def gente(ventas):
     }
     personas = {}
     for nombre, (rol, area_id, correo) in datos.items():
-        id_ = crear_usuario(PREFIJO + nombre, f"Prueba {nombre}", rol, CLAVE, area_id, correo)
-        personas[nombre] = Usuario(id_, PREFIJO + nombre, f"Prueba {nombre}", rol, area_id)
+        firma = nombre == "rrhh2"
+        id_ = crear_usuario(PREFIJO + nombre, f"Prueba {nombre}", rol, CLAVE, area_id, correo, firma_reportes=firma)
+        personas[nombre] = Usuario(id_, PREFIJO + nombre, f"Prueba {nombre}", rol, area_id, firma_reportes=firma)
     yield personas
     with engine.begin() as conn:  # sus avisos se van en cascada
         conn.execute(text("DELETE FROM usuarios WHERE usuario LIKE :p"), {"p": PREFIJO + "%"})
@@ -129,11 +131,11 @@ def test_al_leer_se_vuelven_a_aplicar_los_permisos(gente, ventas):
 
 
 # --------------------------------------------------------- narrativas
-def test_reporte_listo_avisa_a_rrhh_menos_a_quien_lo_pidio(gente, narrativa):
+def test_reporte_listo_avisa_solo_a_quien_lo_firma(gente, narrativa):
     id_ = narrativa(solicitada_por="rrhh")
     avisos.avisar_narrativa_terminada(id_)
-    assert titulos(gente["rrhh2"]) == ["Reporte de Corporativo, agosto 2026 listo para revisión"]
-    assert titulos(gente["rrhh"]) == []  # no puede revisar lo que pidio
+    assert titulos(gente["rrhh2"]) == ["Reporte de Corporativo, agosto 2026 listo para tu firma"]
+    assert titulos(gente["rrhh"]) == []  # la Analista lo preparo: no lo firma
     assert titulos(gente["dir"]) == []   # aun no esta aprobado
     assert avisos.listar(gente["rrhh2"])["avisos"][0]["enlace"] == f"/narrativas/{id_}"
 
@@ -155,14 +157,28 @@ def test_aprobado_avisa_a_la_audiencia_y_a_quien_lo_pidio(gente, narrativa, vent
     assert titulos(gente["dir"]) == []    # no es del consolidado
 
     corporativo = narrativa(programada=True)
-    trabajos.revisar(corporativo, "aprobada", gente["rrhh"].usuario, None)
+    trabajos.revisar(corporativo, "aprobada", gente["rrhh2"].usuario, None)
     assert titulos(gente["dir"]) == ["Reporte de Corporativo, agosto 2026 aprobado: ya se puede descargar"]
 
 
 def test_rechazado_avisa_a_quien_lo_pidio(gente, narrativa):
     id_ = narrativa(solicitada_por="dir")
-    trabajos.revisar(id_, "rechazada", gente["rrhh"].usuario, "Falta el hallazgo de rotación")
+    trabajos.revisar(id_, "rechazada", gente["rrhh2"].usuario, "Falta el hallazgo de rotación")
     assert titulos(gente["dir"]) == ["Reporte de Corporativo, agosto 2026 rechazado: revisa el motivo"]
+
+
+def test_el_pedido_de_direccion_llega_a_la_analista(gente):
+    id_, avisadas = trabajos.registrar_pedido(0, pd.Timestamp("2026-08-01"), "Para el comité del jueves", "zz_av_dir")
+    try:
+        assert avisadas >= 1
+        assert titulos(gente["rrhh"]) == [
+            "Prueba dir pide el reporte de Corporativo, agosto 2026: «Para el comité del jueves»"
+        ]
+        assert avisos.listar(gente["rrhh"])["avisos"][0]["enlace"] == "/narrativas?nuevo=1&area=0&periodo=2026-08"
+        assert titulos(gente["rrhh2"]) == []  # la Responsable firma, no prepara
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM pedidos_reporte WHERE id = :i"), {"i": id_})
 
 
 def test_si_el_aviso_falla_la_revision_sigue(gente, narrativa, monkeypatch):

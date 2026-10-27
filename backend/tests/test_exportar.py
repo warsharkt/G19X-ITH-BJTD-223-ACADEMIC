@@ -108,7 +108,7 @@ def test_pdf_tiene_las_secciones_del_reporte_y_la_aprobacion():
                     "Anexo: metodología"):
         assert seccion in t
     assert "VENTAS · AGOSTO 2026" in t
-    assert "Aprobado por eva el 4 oct 2026, 10:30" in t  # hora de la Ciudad de Mexico (UTC-6)
+    assert "Firmado por eva el 4 oct 2026, 10:30" in t  # hora de la Ciudad de Mexico (UTC-6)
     assert "Solicitado por ana" in t
     assert "Página 1 de" in t and "Confidencial" in t
     assert "61 de 100 empleados activos" in t  # conteo de personas en capacitacion
@@ -123,10 +123,22 @@ def test_pdf_escapa_el_texto_de_la_ia_y_del_revisor():
     assert "<ok> & listas" in t
 
 
+def test_la_nota_de_rrhh_va_firmada_y_aparte_en_ambos_formatos():
+    t = reporte()
+    t["firma"] = {"usuario": "eva", "nombre": "Eva Muñoz", "cargo": "Responsable de RRHH"}
+    t["nota_rrhh"] = "La rotación de Almacén sube por el cierre del turno nocturno, ya planeado."
+    pdf = texto_pdf(exportar.generar(t, "pdf"))
+    assert "Firmado por Eva Muñoz, Responsable de RRHH, el 4 oct 2026, 10:30" in pdf
+    assert "Nota de RRHH · Eva Muñoz" in pdf and "cierre del turno nocturno" in pdf
+    diapositivas = textos_pptx(exportar.generar(t, "pptx"))
+    assert "Nota de RRHH · Eva Muñoz" in diapositivas[1] and "cierre del turno nocturno" in diapositivas[1]
+    assert "Nota de RRHH" not in "".join(textos_pptx(exportar.generar(reporte(), "pptx")))
+
+
 def test_pdf_metadatos():
     info = PdfReader(io.BytesIO(exportar.generar(reporte(), "pdf"))).metadata
     assert info.title == "Reporte ejecutivo de RRHH: Ventas, agosto 2026"
-    assert "Aprobado por eva" in info.subject
+    assert "Firmado por eva" in info.subject
 
 
 def test_pdf_sin_alertas_ni_recomendaciones():
@@ -145,7 +157,7 @@ def test_presentacion_tiene_las_diapositivas_del_reporte():
     diapositivas = textos_pptx(contenido)
     todo = "\n".join(diapositivas)
     assert "Reporte ejecutivo de Recursos Humanos" in diapositivas[0]
-    assert "Aprobado por eva el 4 oct 2026, 10:30" in diapositivas[0]
+    assert "Firmado por eva el 4 oct 2026, 10:30" in diapositivas[0]
     for titulo in ("Resumen ejecutivo", "Indicadores clave", "Hallazgos", "Alertas y riesgos", "Recomendaciones",
                    "Metodología y aprobación"):
         assert titulo in todo
@@ -199,7 +211,8 @@ def usuarios():
         ventas = conn.execute(text("SELECT id FROM areas WHERE nombre = 'Ventas'")).scalar_one()
     datos = {"rrhh": None, "rrhh2": None, "direccion": None, "gerente": ventas, "admin_ti": None}
     for nombre, area_id in datos.items():
-        crear_usuario(PREFIJO + nombre, f"Prueba {nombre}", nombre.rstrip("2"), CLAVE, area_id)
+        crear_usuario(PREFIJO + nombre, f"Prueba {nombre}", nombre.rstrip("2"), CLAVE, area_id,
+                      firma_reportes=nombre == "rrhh2")
     yield {nombre: PREFIJO + nombre for nombre in datos}
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM usuarios WHERE usuario LIKE :p"), {"p": PREFIJO + "%"})
@@ -267,7 +280,7 @@ def test_el_pdf_de_la_api_dice_quien_aprobo(client, como, narrativa, usuarios):
     r = client.get(f"/narrativas/{id_}/exportar", headers=como("rrhh"))  # pdf por defecto
     assert r.status_code == 200
     t = texto_pdf(r.content)
-    assert f"Aprobado por {usuarios['rrhh2']}" in t and f"Reporte #{id_}" in t
+    assert "Firmado por Prueba rrhh2, Responsable de RRHH" in t and f"Reporte #{id_}" in t
 
 
 @pytest.mark.parametrize("revision", ["pendiente", "rechazada"])

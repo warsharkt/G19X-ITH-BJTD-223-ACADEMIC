@@ -45,7 +45,8 @@ def areas():
 
 @pytest.fixture(scope="module")
 def usuarios(areas):
-    """Un usuario de cada rol; se borran al terminar el modulo."""
+    """Un usuario de cada rol (rrhh es la Analista) y la Responsable de RRHH
+    que firma (rrhh_firma); se borran al terminar el modulo."""
     seguridad.asegurar_tabla()
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM usuarios WHERE usuario LIKE :p"), {"p": PREFIJO + "%"})
@@ -57,7 +58,8 @@ def usuarios(areas):
     }
     for rol, (area_id,) in datos.items():
         crear_usuario(PREFIJO + rol, f"Prueba {rol}", rol, CLAVE, area_id)
-    yield {rol: PREFIJO + rol for rol in datos}
+    crear_usuario(PREFIJO + "rrhh_firma", "Prueba responsable", "rrhh", CLAVE, firma_reportes=True)
+    yield {**{rol: PREFIJO + rol for rol in datos}, "rrhh_firma": PREFIJO + "rrhh_firma"}
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM usuarios WHERE usuario LIKE :p"), {"p": PREFIJO + "%"})
 
@@ -239,26 +241,54 @@ class _SinEjecutar:
         pass  # la narrativa queda en_proceso: aqui solo importan los permisos
 
 
-def test_narrativas_respetan_el_area_y_registran_quien_las_pidio(client, como, areas, monkeypatch):
+def test_solo_la_analista_genera_y_cada_quien_ve_su_area(client, como, areas, monkeypatch):
     monkeypatch.setattr(trabajos, "ejecutor", _SinEjecutar())
     app.dependency_overrides[proveedor_configurado] = lambda: _ProveedorQuieto()
     try:
         gerente, rrhh, direccion = como("gerente"), como("rrhh"), como("direccion")
 
-        propia = client.post("/narrativas", json={}, headers=gerente)  # por defecto, su area
-        assert propia.status_code == 202
-        assert propia.json()["area_id"] == areas["Ventas"]
-        assert propia.json()["solicitada_por"] == PREFIJO + "gerente"  # bitacora RF-11
-        assert client.post("/narrativas", json={"area_id": areas["Transporte"]}, headers=gerente).status_code == 403
+        de_ventas = client.post("/narrativas", json={"area_id": areas["Ventas"]}, headers=rrhh)
+        assert de_ventas.status_code == 202
+        assert de_ventas.json()["solicitada_por"] == PREFIJO + "rrhh"  # bitacora RF-11
+        assert de_ventas.json()["firma"]["cargo"] == "Responsable de RRHH"  # a quien se le manda
+        de_transporte = client.post("/narrativas", json={"area_id": areas["Transporte"]}, headers=rrhh).json()
 
-        de_ti = client.post("/narrativas", json={"area_id": areas["Transporte"]}, headers=rrhh).json()
-        assert client.get(f"/narrativas/{de_ti['id']}", headers=gerente).status_code == 403
-        assert client.get(f"/narrativas/{de_ti['id']}", headers=direccion).status_code == 403
-        assert client.get(f"/narrativas/{propia.json()['id']}", headers=gerente).status_code == 200
+        # Direccion y los gerentes reciben los reportes; la Responsable los firma
+        for quien in (gerente, direccion, como("rrhh_firma")):
+            r = client.post("/narrativas", json={}, headers=quien)
+            assert r.status_code == 403
+        assert "pídeselo a RRHH" in client.post("/narrativas", json={}, headers=gerente).json()["detail"]
+
+        assert client.get(f"/narrativas/{de_transporte['id']}", headers=gerente).status_code == 403
+        assert client.get(f"/narrativas/{de_transporte['id']}", headers=direccion).status_code == 403
+        assert client.get(f"/narrativas/{de_ventas.json()['id']}", headers=gerente).status_code == 200
 
         historial = client.get("/narrativas", params={"limite": 100}, headers=gerente).json()
         assert historial and {n["area_id"] for n in historial} == {areas["Ventas"]}
         ids_rrhh = {n["id"] for n in client.get("/narrativas", params={"limite": 100}, headers=rrhh).json()}
-        assert {de_ti["id"], propia.json()["id"]} <= ids_rrhh
+        assert {de_transporte["id"], de_ventas.json()["id"]} <= ids_rrhh
     finally:
         app.dependency_overrides.pop(proveedor_configurado, None)
+
+
+def test_direccion_y_gerentes_piden_reportes_a_rrhh(client, como, areas):
+    with engine.connect() as conn:
+        ultimo = conn.execute(text("SELECT COALESCE(MAX(id), 0) FROM pedidos_reporte")).scalar()
+    try:
+        gerente = como("gerente")
+        r = client.post("/pedidos", json={"periodo": "2026-08", "comentario": "Para la junta"}, headers=gerente)
+        assert r.status_code == 201, r.text
+        with engine.connect() as conn:
+            pedido = conn.execute(
+                text("SELECT area_id, pedido_por, comentario FROM pedidos_reporte WHERE id = :i"), {"i": r.json()["id"]}
+            ).one()
+        assert tuple(pedido) == (areas["Ventas"], PREFIJO + "gerente", "Para la junta")  # por defecto, su area
+
+        otra = {"periodo": "2026-08", "area_id": areas["Transporte"]}
+        assert client.post("/pedidos", json=otra, headers=gerente).status_code == 403
+        assert client.post("/pedidos", json={"periodo": "2026-08"}, headers=como("direccion")).status_code == 201
+        assert client.post("/pedidos", json={"periodo": "2026-08"}, headers=como("rrhh")).status_code == 403
+        assert client.post("/pedidos", json={"periodo": "1999-01"}, headers=gerente).status_code == 404
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM pedidos_reporte WHERE id > :u"), {"u": ultimo})

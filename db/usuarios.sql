@@ -71,3 +71,42 @@ CREATE TABLE IF NOT EXISTS usuarios_cambios (
 );
 
 CREATE INDEX IF NOT EXISTS usuarios_cambios_usuario ON usuarios_cambios (usuario);
+
+-- Firma de reportes (regla 10.3.9): dentro de RRHH, la Analista prepara
+-- (carga los datos y genera los reportes) y la Responsable los firma
+-- (aprueba o rechaza). firma_reportes = true marca a la Responsable.
+-- Solo una cuenta de RRHH puede tenerlo.
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS firma_reportes BOOLEAN NOT NULL DEFAULT false;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'usuarios_firma_solo_rrhh') THEN
+        ALTER TABLE usuarios ADD CONSTRAINT usuarios_firma_solo_rrhh CHECK (NOT firma_reportes OR rol = 'rrhh');
+    END IF;
+END $$;
+
+-- Suplencias: mientras la Responsable no esta, designa a una Analista que
+-- firma en su lugar hasta una fecha. Nunca se borran: cancelar deja quien
+-- y cuando (bitacora RF-11).
+CREATE TABLE IF NOT EXISTS suplencias (
+    id            SERIAL PRIMARY KEY,
+    suplente      TEXT NOT NULL,              -- usuario que firma en su lugar
+    titular       TEXT NOT NULL,              -- Responsable que la designa
+    desde         DATE NOT NULL,
+    hasta         DATE NOT NULL,
+    motivo        TEXT,
+    creada_en     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    cancelada_por TEXT,
+    cancelada_en  TIMESTAMPTZ,
+    CHECK (hasta >= desde)
+);
+
+-- Pedidos de reporte: Direccion o un gerente pide a RRHH un reporte fuera
+-- del calendario. No genera nada: avisa a las Analistas de RRHH.
+CREATE TABLE IF NOT EXISTS pedidos_reporte (
+    id          SERIAL PRIMARY KEY,
+    area_id     INTEGER NOT NULL,             -- 0 = consolidado corporativo
+    periodo     DATE NOT NULL,
+    comentario  TEXT,
+    pedido_por  TEXT NOT NULL,
+    pedido_en   TIMESTAMPTZ NOT NULL DEFAULT now()
+);

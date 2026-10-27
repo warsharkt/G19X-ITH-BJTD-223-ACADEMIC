@@ -8,7 +8,12 @@ paralelo, solo se vuelven todas mas lentas).
 
 Si el modelo responde pero no pasa los guardarrailes, se pide de nuevo desde
 cero (hasta NARRATIVA_RONDAS veces en total). Si no esta disponible, no se
-insiste: queda en "error" con el motivo para que RRHH lo vea.
+insiste: queda en "error" con el motivo para que RRHH lo vea. Los motivos de
+cada rechazo se guardan aunque una ronda posterior salga bien (bitacora y
+metrica de "correctos al primer intento").
+
+Cada reporte dice quien lo va a firmar (app/firmas.py) y, ya revisado,
+quien lo firmo y con que cargo.
 
 Al terminar, y al revisarla, se avisa a quien corresponde (app/avisos.py).
 """
@@ -19,9 +24,9 @@ from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 from sqlalchemy import text
 
-from app import avisos, schemas
+from app import avisos, firmas, schemas
 from app.database import engine, ejecutar_sql
-from app.narrativa import NarrativaNoGenerada, generar_narrativa
+from app.narrativa import INTENTOS, NarrativaNoGenerada, generar_narrativa
 
 RONDAS = int(os.getenv("NARRATIVA_RONDAS", "2"))
 
@@ -32,7 +37,7 @@ _tabla_lista = False
 _COLUMNAS = (
     "id, area_id, to_char(periodo, 'YYYY-MM') AS periodo, estado, solicitada_en, terminada_en, "
     "proveedor, modelo, version_prompt, rondas, error, detalle_error, solicitada_por, "
-    "revision, revisada_por, revisada_en, comentario_revision, programada"
+    "revision, revisada_por, revisada_en, comentario_revision, programada, nota_rrhh, firmada_como"
 )
 
 
@@ -97,6 +102,10 @@ def _ejecutar(id_: int, periodo, area_id, proveedor, df):
         except Exception as exc:  # que un fallo inesperado no deje la fila "en_proceso" para siempre
             motivo, detalle = f"Error inesperado: {exc}", detalle + [repr(exc)]
             break
+        # Los rechazos de rondas anteriores tambien cuentan: cada ronda fallida
+        # agoto sus INTENTOS llamadas al modelo.
+        n["advertencias"] = detalle + n["advertencias"]
+        n["intentos"] += (ronda - 1) * INTENTOS
         resultado = schemas.Narrativa(**n).model_dump(mode="json")
         _actualizar(
             id_, estado="lista", resultado=json.dumps(resultado, ensure_ascii=False),
@@ -121,15 +130,28 @@ def _actualizar(id_: int, terminada=False, **campos):
         conn.execute(text(f"UPDATE narrativas SET {', '.join(asignaciones)} WHERE id = :id"), {"id": id_, **campos})
 
 
+def _firma(conn, fila, designados: dict) -> dict | None:
+    """Quien firma: el que ya la reviso, o a quien se le va a mandar."""
+    if fila["revisada_por"]:
+        return {"usuario": fila["revisada_por"], "nombre": firmas.nombre_de(conn, fila["revisada_por"]),
+                "cargo": fila["firmada_como"] or firmas.CARGO_RESPONSABLE}
+    if fila["estado"] == "error":
+        return None
+    solicitante = fila["solicitada_por"]
+    if solicitante not in designados:
+        designados[solicitante] = firmas.designado(conn, solicitante)
+    return designados[solicitante]
+
+
 def obtener(id_: int) -> dict | None:
     asegurar_tabla()
     with engine.connect() as conn:
         fila = conn.execute(
             text(f"SELECT {_COLUMNAS}, resultado FROM narrativas WHERE id = :id"), {"id": id_}
         ).mappings().first()
-    if fila is None:
-        return None
-    return {**fila, "narrativa": fila["resultado"]}
+        if fila is None:
+            return None
+        return {**fila, "narrativa": fila["resultado"], "firma": _firma(conn, fila, {})}
 
 
 def listar(
@@ -158,7 +180,8 @@ def listar(
         filas = conn.execute(
             text(f"SELECT {_COLUMNAS} FROM narrativas {donde} ORDER BY id DESC LIMIT :limite"), params
         ).mappings().all()
-    return [{**f, "narrativa": None} for f in filas]
+        designados = {}
+        return [{**f, "narrativa": None, "firma": _firma(conn, f, designados)} for f in filas]
 
 
 # ------------------------------------------------------------------ revision
@@ -170,23 +193,36 @@ class RevisionNoPermitida(Exception):
         self.conflicto = conflicto
 
 
-def revisar(id_: int, decision: str, revisor: str, comentario: str | None) -> dict | None:
+def revisar(
+    id_: int, decision: str, revisor: str, comentario: str | None, nota: str | None = None
+) -> dict | None:
     """Aprueba o rechaza una narrativa lista (RF-05) y registra quien (RF-11).
+
+    Solo firma la Responsable de RRHH o su suplente vigente, y nunca quien
+    la pidio. nota: la "Nota de RRHH" que se agrega al aprobar, aparte del
+    texto de la IA (que nunca se edita).
 
     Devuelve la narrativa actualizada, None si no existe, o lanza
     RevisionNoPermitida. La decision es definitiva. El UPDATE lleva todas las
     condiciones: si dos personas revisan a la vez, solo una gana.
     """
     asegurar_tabla()
+    nota = ((nota or "").strip() or None) if decision == "aprobada" else None
     with engine.begin() as conn:
+        solicitante = conn.execute(
+            text("SELECT solicitada_por FROM narrativas WHERE id = :id"), {"id": id_}
+        ).scalar()
+        pueden = firmas.pueden_firmar(conn, solicitante)
+        cargo = firmas.cargo_al_firmar(conn, revisor)
         actualizada = conn.execute(
             text(
                 "UPDATE narrativas SET revision = :d, revisada_por = :u, revisada_en = now(), "
-                "comentario_revision = :c "
+                "comentario_revision = :c, nota_rrhh = :n, firmada_como = :cargo "
                 "WHERE id = :id AND estado = 'lista' AND revision = 'pendiente' "
-                "AND solicitada_por IS DISTINCT FROM :u RETURNING id"
+                "AND solicitada_por IS DISTINCT FROM :u AND :u = ANY(:pueden) RETURNING id"
             ),
-            {"id": id_, "d": decision, "u": revisor, "c": comentario},
+            {"id": id_, "d": decision, "u": revisor, "c": comentario, "n": nota, "cargo": cargo,
+             "pueden": list(pueden)},
         ).first()
     if actualizada:
         avisos.avisar_revision(id_)
@@ -201,10 +237,31 @@ def revisar(id_: int, decision: str, revisor: str, comentario: str | None) -> di
             f"Esta narrativa ya fue {trabajo['revision']} por {trabajo['revisada_por']}; "
             "si hace falta otra versión, solicita una nueva"
         )
-    raise RevisionNoPermitida(
-        "No puedes revisar una narrativa que tú solicitaste: debe hacerlo otra persona de RRHH",
-        conflicto=False,
-    )
+    if trabajo["solicitada_por"] == revisor:
+        raise RevisionNoPermitida(
+            "No puedes revisar una narrativa que tú solicitaste: debe hacerlo otra persona de RRHH",
+            conflicto=False,
+        )
+    firma = trabajo["firma"]
+    quien = f"{firma['nombre']} ({firma['cargo']})" if firma else "la Responsable de RRHH"
+    raise RevisionNoPermitida(f"Este reporte lo firma {quien}", conflicto=False)
+
+
+# ------------------------------------------------------------------ pedidos
+def registrar_pedido(area_id: int, periodo, comentario: str | None, pedido_por: str) -> tuple[int, int]:
+    """Direccion o un gerente pide a RRHH un reporte fuera de calendario: se
+    guarda y se avisa a las Analistas, que son quienes lo preparan.
+    Devuelve (id del pedido, cuantas Analistas recibieron el aviso)."""
+    asegurar_tabla()
+    with engine.begin() as conn:
+        id_ = conn.execute(
+            text(
+                "INSERT INTO pedidos_reporte (area_id, periodo, comentario, pedido_por) "
+                "VALUES (:a, :p, :c, :u) RETURNING id"
+            ),
+            {"a": area_id, "p": periodo.date(), "c": (comentario or "").strip() or None, "u": pedido_por},
+        ).scalar_one()
+    return id_, avisos.avisar_pedido(id_)
 
 
 # --------------------------------------------------------------- exportacion

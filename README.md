@@ -8,14 +8,14 @@ La demostración corre con **Nordika Logística**, una empresa ficticia: operado
 - **Motor analítico (sin IA):** calcula los indicadores con SQL y pandas, de forma reproducible y verificada con pruebas.
 - **Motor de narrativa (con IA):** el modelo redacta **solo** a partir de los indicadores ya calculados. Unos guardarrailes rechazan cifras inventadas, causas no demostradas y alertas omitidas.
 - **Seguridad:** verificación en dos pasos obligatoria para Dirección, TI y RRHH; acceso por rol y área; contraseñas temporales; bloqueo por intentos; bitácoras de cuentas, umbrales, reportes y cargas; IA local que no saca los datos del servidor.
-- **Revisión humana y distribución:** nadie aprueba lo que pidió; los aprobados se descargan en PDF y presentación.
+- **Quien prepara no firma:** la Analista de RRHH carga los datos y genera los reportes; la Responsable de RRHH los firma (con suplente si no está y una Nota de RRHH opcional). Dirección y los gerentes los piden a RRHH. Cada reporte dice quién lo firmará, y los firmados se descargan en PDF y presentación.
 - **Avisos y programación mensual:** alertas de indicadores en rojo y de reportes por revisar; los reportes del mes se pueden generar solos.
 
 > Todos los datos son **ficticios** (generados por `scripts/seed.py`). No contienen información de personas reales.
 
 ## Demostración
 
-La demostración recorre el sistema completo como en producción. Ninguna medida de seguridad se apaga: se pide la verificación en dos pasos, cuentan los intentos fallidos y todo queda en las bitácoras. Para que se pueda probar sin celular, un **teléfono simulado en pantalla** muestra la app de autenticación con el código vigente, con la leyenda de que en producción solo aparece en el celular de cada persona.
+La demostración recorre el flujo completo sin que quien la ve tenga que configurar nada: cada rol se abre **con un clic**, sin contraseña ni código, y desde el menú se **cambia de rol** para ver cómo la Analista prepara, la Responsable firma y Dirección recibe. El encabezado avisa que en producción se pide la verificación en dos pasos. Las cuentas reales no cambian: siempre entran con contraseña y verificación en dos pasos, y permisos y bitácoras funcionan igual.
 
 1. Haz la instalación local (abajo) y, en tu `.env`, pon:
    ```
@@ -26,26 +26,28 @@ La demostración recorre el sistema completo como en producción. Ninguna medida
    ```powershell
    python -m scripts.demo
    ```
-3. Abre el tablero. La pantalla de inicio muestra las cuentas y su contraseña (`Demo-RRHH-2026`). Pulsa **Usar** junto a una cuenta y luego **Entrar**.
+3. Abre el tablero y elige un rol en la pantalla de inicio.
 
 | Cuenta | Persona | Para mostrar |
 |---|---|---|
-| `demo_rrhh` | Ana Ríos, Gerente de RRHH | Carga de datos, tablero de todas las áreas, solicitar reportes, umbrales y programación |
-| `demo_rrhh2` | Eva Muñoz, Analista de RRHH | Aprobar o rechazar los reportes que pidió Ana (nadie aprueba lo que pidió) |
-| `demo_direccion` | Andrea Salinas, Dirección General | Solo el consolidado de la empresa; recibe los reportes aprobados |
-| `demo_gerente` | Luis Ortega, Gerente de Ventas | Solo su área; la verificación en dos pasos es opcional |
-| `demo_ti` | Carlos Peña, Soporte TI | Administrar cuentas (contraseña temporal, desactivar, reiniciar MFA) sin ver datos de colaboradores |
+| `demo_analista` | Eva Muñoz, Analista de RRHH | Carga de datos y generar los reportes con IA; ve a quién se le enviarán para su firma |
+| `demo_rrhh` | Ana Ríos, Responsable de RRHH | Firmar (aprobar o rechazar) los reportes con una Nota de RRHH, designar suplente, umbrales y programación |
+| `demo_direccion` | Andrea Salinas, Dirección General | Solo el consolidado; recibe los reportes firmados y puede pedir uno a RRHH |
+| `demo_gerente` | Luis Ortega, Gerente de Ventas | Solo su área; recibe su reporte firmado y puede pedir uno a RRHH |
+| `demo_ti` | Carlos Peña, Soporte TI | Administrar cuentas y asignar quién firma, sin ver datos de colaboradores |
 
 **Un recorrido sugerido:**
-1. Entra como **Ana**: configura la verificación en dos pasos con el QR y el teléfono simulado, y guarda los códigos de respaldo.
-2. En **Carga de datos**, descarga los archivos de ejemplo de septiembre de 2026 y súbelos en orden. Vienen como los exporta cada sistema, con nombres de personas incluidos: el sistema los descarta, valida cada fila y, al aplicar, concilia archivo contra base.
-3. En el **Tablero** aparece septiembre. Revisa los **Avisos** de indicadores en rojo y **genera el reporte con IA**.
-4. Entra como **Eva** para aprobarlo, y como **Andrea** para verlo aprobado y descargarlo en PDF o presentación.
-5. Entra como **Carlos** (TI) para crear una cuenta con contraseña temporal y revisar la bitácora de cuentas.
+1. Entra como **Andrea** (Dirección) y, en **Reportes**, pide a RRHH el reporte del último mes.
+2. Cambia a **Eva** (Analista): el aviso del pedido abre el formulario con el área y el mes ya elegidos. En **Carga de datos** puedes subir antes los archivos de ejemplo de septiembre de 2026 (vienen con nombres de personas: el sistema los descarta, valida cada fila y concilia archivo contra base). Genera el reporte: la pantalla dice que se enviará a Ana para su firma.
+3. Cambia a **Ana** (Responsable): el aviso "listo para tu firma" lleva al reporte. Apruébalo con una Nota de RRHH, o recházalo con motivo.
+4. Cambia a **Andrea** para verlo firmado y descargarlo en PDF o presentación, con la Nota de RRHH.
+5. Cambia a **Carlos** (TI) para crear una cuenta con contraseña temporal y revisar la bitácora de cuentas.
+
+Para ver la verificación en dos pasos, en la pantalla de inicio elige **Entrar con usuario y contraseña** con una cuenta de prueba y la contraseña `Demo-RRHH-2026`: un **teléfono simulado** muestra el código que daría la app del celular.
 
 Para dejar las cuentas como nuevas después de una demostración, vuelve a correr `python -m scripts.demo`. Para volver a los datos originales de Nordika, corre `python -m scripts.seed`.
 
-El modo demostración **se niega a funcionar con `MODO_DATOS=reales`**, y nunca muestra el código de una cuenta que no sea `demo_`. Con `MODO_DATOS=sinteticos` también puedes usar Groq para que los reportes salgan en segundos (sección Inteligencia artificial).
+El modo demostración **se niega a funcionar con `MODO_DATOS=reales`**, y la entrada de un clic y el código visible solo existen para cuentas `demo_`. Con `MODO_DATOS=sinteticos` también puedes usar Groq para que los reportes salgan en segundos (sección Inteligencia artificial).
 
 ## Tecnologías
 
@@ -57,12 +59,12 @@ Si es la primera vez, haz antes la [instalación local](#instalación-local) y e
 
 | Terminal | Comando | Queda en |
 |---|---|---|
-| 1. Base de datos | Abre Docker Desktop y espera a que diga que está corriendo; luego `docker compose up -d` | `localhost:5433` |
+| 1. Base de datos | Abre Docker Desktop y espera a que diga que está corriendo; luego `docker compose up -d` | `localhost:5433` (solo desde este equipo) |
 | 2. API | `cd backend; .venv\Scripts\Activate.ps1; python -m uvicorn app.main:app --reload` | http://localhost:8000/docs |
 | 3. Tablero | `cd frontend; npm run dev` | http://localhost:5173 |
 
 - **Comprueba que todo responde:** http://localhost:8000/health debe decir `{"status":"ok","database":"ok"}`.
-- **Con Supabase** (`DATABASE_URL` en el `.env`) no necesitas la terminal 1.
+- **Base de datos:** PostgreSQL en Docker, como lo instalaría la empresa en su propio servidor. Solo acepta conexiones desde el mismo equipo (`127.0.0.1`); si la API corriera en otro servidor, cámbialo con `DB_ESCUCHA` en el `.env`. Supabase (`DATABASE_URL`) queda solo para publicar una demo en línea con datos sintéticos; nunca para datos reales.
 - **IA:** con Ollama (opción por defecto), la app de Ollama debe estar abierta y `ollama list` debe mostrar `qwen3:8b`. Con Groq no hace falta nada más.
 - **Para apagar:** Ctrl+C en las terminales 2 y 3, y `docker compose stop` para la base. Los datos se conservan en el volumen de Docker.
 

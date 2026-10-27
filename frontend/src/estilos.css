@@ -1462,8 +1462,8 @@ textarea {
 
 .en-proceso {
   display: flex;
-  gap: 1.25rem;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: 1rem;
   background: var(--superficie);
   border: 1px solid var(--borde);
   border-radius: 12px;
@@ -1473,6 +1473,118 @@ textarea {
 
 .en-proceso h1 {
   font-size: 1.2rem;
+}
+
+.en-proceso p {
+  margin: 0;
+}
+
+/* barra que avanza rapido al principio y se frena cerca del final */
+.barra-avance {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--superficie-2);
+  overflow: hidden;
+}
+
+.barra-avance span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--gradiente);
+  transition: width 1s linear;
+}
+
+.etapas {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.etapas li {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.95rem;
+}
+
+.etapas li.pendiente {
+  color: var(--texto-tenue);
+}
+
+.etapas li.actual {
+  font-weight: 600;
+}
+
+.etapa-icono {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 2px solid var(--borde);
+  font-size: 0.75rem;
+}
+
+.etapas li.hecha .etapa-icono {
+  background: var(--fondo-bueno);
+  border-color: var(--estado-bueno);
+  color: var(--estado-bueno);
+}
+
+.etapas li.actual .etapa-icono {
+  border: none;
+}
+
+.etapas li.actual .girando {
+  width: 22px;
+  height: 22px;
+  border-width: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .barra-avance span {
+    transition: none;
+  }
+}
+
+/* Nota de RRHH: escrita por quien firmo, aparte del texto de la IA */
+.nota-rrhh {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.75rem;
+  padding: 0.9rem 1rem;
+  border-left: 4px solid var(--acento);
+  border-radius: 0 12px 12px 0;
+  background: var(--fondo-info);
+}
+
+.nota-rrhh p {
+  margin: 0;
+}
+
+.datos-firma {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.4rem 1rem;
+  margin: 0 0 1rem;
+}
+
+.datos-firma dt {
+  font-weight: 600;
+}
+
+.datos-firma dd {
+  margin: 0;
+}
+
+.filtros .campo-ancho {
+  flex: 2 1 260px;
 }
 
 .girando {
@@ -1708,45 +1820,104 @@ a.cuenta-enlace.active {
   background: var(--superficie-2);
 }
 
-.cuentas-demo {
-  border-top: 1px solid var(--borde);
-  padding-top: 1rem;
+/* Modo demostracion: una tarjeta por rol que entra con un clic */
+.entrada-demo {
+  max-width: 460px;
 }
 
-.cuentas-demo h2 {
-  font-size: 0.95rem;
-  margin: 0 0 0.15rem;
-}
-
-.cuentas-demo ul {
+.roles-demo {
   list-style: none;
-  margin: 0.6rem 0 0;
+  margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
+  gap: 0.55rem;
 }
 
-.cuentas-demo li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
+.rol-demo {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    'cargo accion'
+    'nombre accion'
+    'texto texto';
+  gap: 0.1rem 0.75rem;
+  text-align: left;
+  font: inherit;
+  color: var(--texto);
   background: var(--superficie);
   border: 1px solid var(--borde);
   border-radius: 12px;
-  padding: 0.55rem 0.7rem;
+  padding: 0.7rem 0.85rem;
+  cursor: pointer;
+  box-shadow: var(--sombra);
+  transition: border-color 0.15s, transform 0.15s;
 }
 
-.cuentas-demo li div {
-  display: flex;
-  flex-direction: column;
-  font-size: 0.88rem;
+.rol-demo:hover:not(:disabled),
+.rol-demo:focus-visible {
+  border-color: var(--acento);
+  transform: translateY(-1px);
 }
 
-.cuentas-demo li .nota {
-  text-align: left;
-  font-size: 0.78rem;
+.rol-demo:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.rol-demo-cargo {
+  grid-area: cargo;
+  font-weight: 700;
+}
+
+.rol-demo-nombre {
+  grid-area: nombre;
+  font-size: 0.85rem;
+  color: var(--texto-secundario);
+}
+
+.rol-demo-texto {
+  grid-area: texto;
+  font-size: 0.82rem;
+  color: var(--texto-tenue);
+  margin-top: 0.2rem;
+}
+
+.rol-demo-accion {
+  grid-area: accion;
+  align-self: center;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--acento);
+  white-space: nowrap;
+}
+
+.encabezado-demo svg {
+  color: var(--acento);
+}
+
+.cambiar-rol select {
+  font: inherit;
+  font-size: 0.82rem;
+  max-width: 260px;
+  padding: 0.35rem 0.5rem;
+  border-radius: 10px;
+  border: 1px solid var(--borde);
+  background: var(--superficie);
+  color: var(--texto);
+}
+
+@media (max-width: 640px) {
+  .cambiar-rol select {
+    max-width: 150px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rol-demo {
+    transition: none;
+  }
 }
 
 /* ------------------------------------------------------------ pantallas chicas */
