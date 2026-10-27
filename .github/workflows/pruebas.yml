@@ -1,0 +1,98 @@
+# Integracion continua (pendiente P9 del MVP): en cada push a Main y en cada
+# pull request corren las pruebas del backend y del frontend. Si alguna falla,
+# GitHub marca el commit en rojo.
+#
+# Todo con datos sinteticos y sin red hacia la IA: el modelo se simula en las
+# pruebas. La base es un PostgreSQL vacio que se llena con scripts/seed.py
+# (semilla fija: mismas cifras que en local). Ningun secreto real: el
+# JWT_SECRETO de aqui solo sirve para estas pruebas.
+name: Pruebas
+
+on:
+  push:
+    branches: [Main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# Un push nuevo cancela la corrida anterior de la misma rama
+concurrency:
+  group: pruebas-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (pytest)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: rrhh_ci
+          POSTGRES_PASSWORD: rrhh_ci_clave
+          POSTGRES_DB: rrhh_motor
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rrhh_ci -d rrhh_motor"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      POSTGRES_USER: rrhh_ci
+      POSTGRES_PASSWORD: rrhh_ci_clave
+      POSTGRES_DB: rrhh_motor
+      DB_HOST: localhost
+      DB_PORT: "5432"
+      MODO_DATOS: reales  # el valor por defecto: el candado de la IA en la nube queda puesto
+      JWT_SECRETO: solo-para-las-pruebas-de-ci-no-es-un-secreto-real
+      ZONA_HORARIA: America/Mexico_City
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Cargar los datos sinteticos de Nordika
+        run: python -m scripts.seed
+
+      - name: Correr las pruebas
+        run: python -m pytest -q
+
+  frontend:
+    name: Frontend (Vitest y build)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      TZ: America/Mexico_City  # las fechas se muestran en la hora de la empresa
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Correr las pruebas
+        run: npm test
+
+      - name: Compilar el tablero
+        run: npm run build

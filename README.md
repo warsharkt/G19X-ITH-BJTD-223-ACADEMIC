@@ -1,5 +1,7 @@
 # Talentia Insights
 
+[![Pruebas](https://github.com/warsharkt/G19X-ITH-BJTD-223-ACADEMIC/actions/workflows/pruebas.yml/badge.svg)](https://github.com/warsharkt/G19X-ITH-BJTD-223-ACADEMIC/actions/workflows/pruebas.yml)
+
 **Título asignado del proyecto:** Motor Inteligente de Reportes Ejecutivos de RRHH. *Talentia Insights* es el nombre del producto.
 
 **Analítica de Recursos Humanos con IA responsable.** Talentia Insights consolida lo que exportan los sistemas de RRHH (reclutamiento, nómina, desempeño, capacitación, clima laboral y productividad), calcula los indicadores con su semáforo y redacta con IA el reporte ejecutivo de cada área y mes, que una persona de RRHH aprueba antes de distribuirse.
@@ -256,6 +258,8 @@ npm test
 ```
 
 Las del frontend simulan la API: no necesitan el backend ni la base de datos.
+
+**En GitHub** corren solas en cada push a `Main` y en cada pull request (`.github/workflows/pruebas.yml`): el backend contra un PostgreSQL vacío que se llena con `scripts/seed.py`, y el frontend con sus pruebas y la compilación del tablero. El resultado aparece en la pestaña **Actions** y junto a cada commit (✓ o ✗).
 
 ## Estructura
 
