@@ -1,5 +1,7 @@
 # Talentia Insights
 
+**Título asignado del proyecto:** Motor Inteligente de Reportes Ejecutivos de RRHH. *Talentia Insights* es el nombre del producto.
+
 **Analítica de Recursos Humanos con IA responsable.** Talentia Insights consolida lo que exportan los sistemas de RRHH (reclutamiento, nómina, desempeño, capacitación, clima laboral y productividad), calcula los indicadores con su semáforo y redacta con IA el reporte ejecutivo de cada área y mes, que una persona de RRHH aprueba antes de distribuirse.
 
 La demostración corre con **Nordika Logística**, una empresa ficticia: operador logístico en Guadalajara con unas 350 personas en Operaciones, Ventas, Transporte, Finanzas, Almacén y Jurídico, y 24 meses de historia.
@@ -84,8 +86,8 @@ Si es la primera vez, haz antes la [instalación local](#instalación-local) y e
 Necesitas [Python 3.14](https://www.python.org/downloads/), [Docker Desktop](https://www.docker.com/products/docker-desktop/) y Git. Los comandos son para PowerShell en Windows.
 
 ```powershell
-git clone https://github.com/warsharkt/Motor-Inteligente.git
-cd Motor-Inteligente
+git clone https://github.com/warsharkt/G19X-ITH-BJTD-223-ACADEMIC.git
+cd G19X-ITH-BJTD-223-ACADEMIC
 
 # 1. Configuración: copia el ejemplo y edítalo
 copy .env.example .env
