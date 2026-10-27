@@ -6,6 +6,7 @@ import { SESION_VENCIDA } from '../api'
 import App from '../App'
 import { SEGUNDOS_ENTRE_CONSULTAS } from '../paginas/DetalleNarrativa'
 import { ProveedorSesion } from '../sesion'
+import { aplicarTema, temaInicial } from '../tema'
 import { CODIGO_MFA, CONTRASENA_DEMO, instalarApiFalsa } from './apiFalsa'
 
 function montar(ruta = '/') {
@@ -66,6 +67,24 @@ describe('inicio de sesión', () => {
     api.estado.tokenValido = false
     await persona.selectOptions(screen.getByLabelText('Mes'), '2026-07')
     expect(await screen.findByRole('button', { name: 'Entrar' })).toBeInTheDocument()
+  })
+})
+
+describe('diseño claro y oscuro', () => {
+  it('el botón cambia de diseño, se recuerda y no guarda nada de la sesión', async () => {
+    const api = instalarApiFalsa()
+    aplicarTema('claro')
+    const persona = await entrar('ana', api.contrasena)
+    await screen.findByRole('heading', { name: 'Indicadores de Corporativo' })
+
+    await persona.click(screen.getByRole('button', { name: 'Cambiar a diseño oscuro' }))
+    expect(document.documentElement.dataset.theme).toBe('dark')
+    expect(localStorage.getItem('talentia.tema')).toBe('oscuro')
+    expect(temaInicial()).toBe('oscuro')
+
+    await persona.click(screen.getByRole('button', { name: 'Cambiar a diseño claro' }))
+    expect(document.documentElement.dataset.theme).toBe('light')
+    expect(localStorage.length).toBe(1) // solo la preferencia visual, nunca el token
   })
 })
 

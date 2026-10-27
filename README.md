@@ -51,6 +51,32 @@ El modo demostración **se niega a funcionar con `MODO_DATOS=reales`**, y nunca 
 
 Python 3.14 · FastAPI · PyOTP (verificación en dos pasos) · openpyxl (Excel) · PostgreSQL 16 (Docker local o Supabase) · pandas · Ollama + Qwen3 8B (IA local) o Groq (IA en la nube, solo con datos sintéticos) · ReportLab (PDF) y python-pptx (presentación) · React + Vite + Recharts · pytest y Vitest
 
+## Cómo levantarlo
+
+Si es la primera vez, haz antes la [instalación local](#instalación-local) y el [tablero web](#tablero-web-frontend). Después, cada vez que quieras usar el sistema, abre tres terminales de PowerShell en la raíz del proyecto:
+
+| Terminal | Comando | Queda en |
+|---|---|---|
+| 1. Base de datos | Abre Docker Desktop y espera a que diga que está corriendo; luego `docker compose up -d` | `localhost:5433` |
+| 2. API | `cd backend; .venv\Scripts\Activate.ps1; python -m uvicorn app.main:app --reload` | http://localhost:8000/docs |
+| 3. Tablero | `cd frontend; npm run dev` | http://localhost:5173 |
+
+- **Comprueba que todo responde:** http://localhost:8000/health debe decir `{"status":"ok","database":"ok"}`.
+- **Con Supabase** (`DATABASE_URL` en el `.env`) no necesitas la terminal 1.
+- **IA:** con Ollama (opción por defecto), la app de Ollama debe estar abierta y `ollama list` debe mostrar `qwen3:8b`. Con Groq no hace falta nada más.
+- **Para apagar:** Ctrl+C en las terminales 2 y 3, y `docker compose stop` para la base. Los datos se conservan en el volumen de Docker.
+
+### Problemas comunes
+
+| Síntoma | Qué hacer |
+|---|---|
+| `/health` o `pytest` dicen que no se pudo conectar a PostgreSQL | Abre Docker Desktop, corre `docker compose up -d` y revisa con `docker compose ps` que el estado sea `healthy`. |
+| `pytest` dice que las pruebas apuntan a una base **remota** | Comenta `DATABASE_URL` en el `.env`: las pruebas solo corren contra el PostgreSQL local. |
+| Con Supabase, la API tarda y falla al conectar | El proyecto gratuito se pausa tras 7 días sin uso: reactívalo desde el panel de Supabase. |
+| El tablero dice "No se pudo conectar con la API" | Enciende la API (terminal 2). Si corre en otra dirección, ajusta `VITE_API_URL` en `frontend/.env`. |
+| El reporte queda en **error** porque el modelo no está disponible | Abre Ollama y corre `ollama pull qwen3:8b`, o usa Groq con `MODO_DATOS=sinteticos`. Luego vuelve a solicitar el reporte. |
+| No aparecen las cuentas de prueba en la pantalla de inicio | Pon `MODO_DATOS=sinteticos` y `MODO_DEMO=si` en el `.env`, corre `python -m scripts.demo` y reinicia la API. |
+
 ## Instalación local
 
 Necesitas [Python 3.14](https://www.python.org/downloads/), [Docker Desktop](https://www.docker.com/products/docker-desktop/) y Git. Los comandos son para PowerShell en Windows.
@@ -112,6 +138,8 @@ Abre http://localhost:5173 e inicia sesión con tu usuario. Si la API no está e
 | **Mi cuenta** (tu nombre, arriba a la derecha) | Cambiar tu contraseña y activar la verificación en dos pasos |
 
 Cada rol ve solo lo suyo: Dirección no puede cambiar de área, y TI solo ve la configuración, sin poder cambiarla. La API aplica los mismos permisos, así que no dependen de la interfaz. La sesión se guarda solo en la pestaña (`sessionStorage`) y se cierra sola cuando el token vence.
+
+**Diseño claro u oscuro.** El botón de sol o luna, arriba a la derecha y en la pantalla de inicio, cambia entre el diseño claro (blanco) y el oscuro. La primera vez sigue al sistema operativo; después se recuerda lo que elegiste en ese navegador. Lo único que se guarda en `localStorage` es esa preferencia visual, nunca datos ni el token de sesión.
 
 ## Inteligencia artificial
 
@@ -254,8 +282,9 @@ frontend/
     api.js           cliente de la API (token de sesión y errores)
     sesion.jsx       inicio y cierre de sesión, permisos por rol
     formato.js       cifras, fechas, semáforo y variaciones
+    tema.js          diseño claro u oscuro (preferencia del navegador)
     paginas/         Login, Tablero, Narrativas, DetalleNarrativa, Avisos, CargaDatos, Configuracion, Usuarios, Cuenta, Pendiente
-    componentes/     tarjetas de KPI, gráfica de tendencia, vista del reporte
+    componentes/     tarjetas de KPI, gráfica de tendencia, vista del reporte, botón de diseño
     pruebas/         pruebas automáticas (Vitest) con una API simulada
 db/                  esquema y tablas (SQL)
 ```

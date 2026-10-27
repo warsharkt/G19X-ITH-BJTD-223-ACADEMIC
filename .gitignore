@@ -6,3 +6,4 @@ dist/
 
 # Documento interno de requerimientos: se queda solo en el equipo, nunca en GitHub
 docs/PRD.md
+docs/MVP.md

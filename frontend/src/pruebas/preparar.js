@@ -5,6 +5,8 @@ import { afterEach, vi } from 'vitest'
 afterEach(() => {
   cleanup()
   sessionStorage.clear()
+  localStorage.clear()
+  delete document.documentElement.dataset.theme
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   vi.useRealTimers()

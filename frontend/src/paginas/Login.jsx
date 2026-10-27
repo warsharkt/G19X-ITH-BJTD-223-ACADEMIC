@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import BotonTema from '../componentes/BotonTema'
 import Icono from '../componentes/Iconos'
 import Marca from '../componentes/Marca'
 import Mensaje from '../componentes/Mensaje'
@@ -87,6 +88,9 @@ export default function Login() {
       </section>
 
       <section className="login-formulario">
+        <div className="login-tema">
+          <BotonTema />
+        </div>
         <form className="tarjeta-login" onSubmit={enviar}>
           <h1>{mfaToken ? 'Verificación en dos pasos' : 'Inicia sesión'}</h1>
           <p className="texto-secundario">

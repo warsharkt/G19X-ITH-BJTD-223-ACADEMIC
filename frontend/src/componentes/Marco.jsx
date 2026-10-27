@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { api, AVISOS_CAMBIARON } from '../api'
 import { NOMBRES_ROL, puedeCargarDatos, puedeVerCuentas, puedeVerDatos, useSesion } from '../sesion'
+import BotonTema from './BotonTema'
 import Icono from './Iconos'
 import Marca from './Marca'
 
@@ -109,6 +110,7 @@ export default function Marco() {
               {usuario.mfa_activo ? 'Sesión verificada en dos pasos' : 'Sesión protegida'} · acceso por rol
             </span>
             <div className="cuenta">
+              <BotonTema />
               <NavLink to="/cuenta" className="cuenta-enlace" title="Mi cuenta">
                 <span className="cuenta-nombre">
                   {usuario.nombre}
