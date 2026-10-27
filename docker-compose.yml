@@ -1,14 +1,21 @@
+# Talentia Insights completo en Docker: base de datos, API y tablero.
+#
+#   docker compose up -d --build   -> todo; el tablero queda en http://localhost:8080
+#   docker compose up -d db        -> solo la base (para programar con la API y
+#                                     el tablero en modo desarrollo)
+#
+# Todo se publica solo en este mismo equipo (127.0.0.1): otra computadora de la
+# red no puede entrar. *_ESCUCHA en el .env lo cambia si de verdad hace falta.
+# La IA local (Ollama) corre fuera de Docker, en el mismo equipo.
 services:
   db:
     image: postgres:16
     container_name: rrhh_db
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
-    # Solo desde este mismo equipo (127.0.0.1): otra computadora de la red no
-    # puede conectarse a la base. La API corre en el mismo equipo, asi que no
-    # le afecta. Si un dia la API vive en otro servidor, DB_ESCUCHA lo cambia.
     ports:
       - "${DB_ESCUCHA:-127.0.0.1}:5433:5432"
     volumes:
@@ -18,6 +25,39 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: rrhh_api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Siempre la base de este compose, aunque el .env traiga otra DATABASE_URL
+      DATABASE_URL: ""
+      DB_HOST: db
+      DB_PORT: "5432"
+      # Ollama corre en el equipo, fuera de Docker
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      db:
+        condition: service_healthy
+    # Para ver la documentacion interactiva en http://localhost:8000/docs
+    ports:
+      - "${API_ESCUCHA:-127.0.0.1}:8000:8000"
+
+  web:
+    build: ./frontend
+    container_name: rrhh_web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${WEB_ESCUCHA:-127.0.0.1}:8080:80"
 
 volumes:
   pgdata:

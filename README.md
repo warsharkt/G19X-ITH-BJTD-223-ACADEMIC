@@ -21,15 +21,8 @@ La demostración corre con **Nordika Logística**, una empresa ficticia: operado
 
 La demostración recorre el flujo completo sin que quien la ve tenga que configurar nada: cada rol se abre **con un clic**, sin contraseña ni código, y desde el menú se **cambia de rol** para ver cómo la Analista prepara, la Responsable firma y Dirección recibe. El encabezado avisa que en producción se pide la verificación en dos pasos. Las cuentas reales no cambian: siempre entran con contraseña y verificación en dos pasos, y permisos y bitácoras funcionan igual.
 
-1. Haz la instalación local (abajo) y, en tu `.env`, pon:
-   ```
-   MODO_DATOS=sinteticos
-   MODO_DEMO=si
-   ```
-2. Crea las cuentas de prueba (con la API apagada o encendida):
-   ```powershell
-   python -m scripts.demo
-   ```
+1. Levántalo con Docker ([Cómo levantarlo](#cómo-levantarlo)), con `MODO_DATOS=sinteticos` y `MODO_DEMO=si` en el `.env`.
+2. Las cuentas de prueba se crean solas al arrancar. En modo desarrollo, créalas con `python -m scripts.demo`.
 3. Abre el tablero y elige un rol en la pantalla de inicio.
 
 | Cuenta | Persona | Para mostrar |
@@ -59,33 +52,71 @@ Python 3.14 · FastAPI · PyOTP (verificación en dos pasos) · openpyxl (Excel)
 
 ## Cómo levantarlo
 
-Si es la primera vez, haz antes la [instalación local](#instalación-local) y el [tablero web](#tablero-web-frontend). Después, cada vez que quieras usar el sistema, abre tres terminales de PowerShell en la raíz del proyecto:
+Solo necesitas [Docker Desktop](https://www.docker.com/products/docker-desktop/) y Git. No hace falta instalar Python ni Node. Los comandos son para PowerShell en Windows.
+
+**1. Descarga el proyecto y crea tu configuración:**
+
+```powershell
+git clone https://github.com/warsharkt/G19X-ITH-BJTD-223-ACADEMIC.git
+cd G19X-ITH-BJTD-223-ACADEMIC
+copy .env.example .env
+```
+
+**2. Abre el `.env` y cambia estas tres líneas:**
+
+```
+POSTGRES_PASSWORD=una-contraseña-tuya
+MODO_DATOS=sinteticos
+MODO_DEMO=si
+```
+
+**3. Abre Docker Desktop, espera a que diga que está corriendo y levanta todo:**
+
+```powershell
+docker compose up -d --build
+```
+
+La primera vez tarda unos minutos: descarga lo necesario, arma la API y el tablero y carga los datos ficticios de Nordika. Después abre **http://localhost:8080** y elige un rol.
+
+- **IA para redactar los reportes:** instala [Ollama](https://ollama.com), corre `ollama pull qwen3:8b` y deja la app abierta. Sin Ollama todo funciona menos generar reportes, que quedan en error con el motivo. Con datos sintéticos también puedes usar Groq (sección [Inteligencia artificial](#inteligencia-artificial)).
+- **Apagar y volver a encender:** `docker compose stop` y `docker compose up -d`. Los datos se conservan.
+- **Empezar de cero:** `docker compose down -v` borra la base; al volver a levantarlo se cargan otra vez los datos de Nordika.
+- **Solo desde este equipo:** el tablero (8080), la API (8000) y la base (5433) solo aceptan conexiones de la misma computadora. Si de verdad hace falta abrirlos a la red, cambia `WEB_ESCUCHA`, `API_ESCUCHA` o `DB_ESCUCHA` en el `.env`.
+- **Documentación de la API:** http://localhost:8000/docs.
+- **Si cambias el código:** vuelve a correr `docker compose up -d --build`.
+
+### Modo desarrollo (para programar)
+
+Para ver los cambios al instante, primero haz la [instalación local](#instalación-local) y el [tablero web](#tablero-web-frontend). Luego deja en Docker solo la base y abre tres terminales de PowerShell en la raíz del proyecto:
 
 | Terminal | Comando | Queda en |
 |---|---|---|
-| 1. Base de datos | Abre Docker Desktop y espera a que diga que está corriendo; luego `docker compose up -d` | `localhost:5433` (solo desde este equipo) |
+| 1. Base de datos | `docker compose stop api web` (si estaban encendidos) y `docker compose up -d db` | `localhost:5433` (solo desde este equipo) |
 | 2. API | `cd backend; .venv\Scripts\Activate.ps1; python -m uvicorn app.main:app --reload` | http://localhost:8000/docs |
 | 3. Tablero | `cd frontend; npm run dev` | http://localhost:5173 |
 
 - **Comprueba que todo responde:** http://localhost:8000/health debe decir `{"status":"ok","database":"ok"}`.
-- **Base de datos:** PostgreSQL en Docker, como lo instalaría la empresa en su propio servidor. Solo acepta conexiones desde el mismo equipo (`127.0.0.1`); si la API corriera en otro servidor, cámbialo con `DB_ESCUCHA` en el `.env`. Supabase (`DATABASE_URL`) queda solo para publicar una demo en línea con datos sintéticos; nunca para datos reales.
-- **IA:** con Ollama (opción por defecto), la app de Ollama debe estar abierta y `ollama list` debe mostrar `qwen3:8b`. Con Groq no hace falta nada más.
-- **Para apagar:** Ctrl+C en las terminales 2 y 3, y `docker compose stop` para la base. Los datos se conservan en el volumen de Docker.
+- **Base de datos:** PostgreSQL en Docker, como lo instalaría la empresa en su propio servidor. Supabase (`DATABASE_URL`) queda solo para publicar una demo en línea con datos sintéticos; nunca para datos reales.
+- **Para apagar:** Ctrl+C en las terminales 2 y 3, y `docker compose stop` para la base.
 
 ### Problemas comunes
 
 | Síntoma | Qué hacer |
 |---|---|
-| `/health` o `pytest` dicen que no se pudo conectar a PostgreSQL | Abre Docker Desktop, corre `docker compose up -d` y revisa con `docker compose ps` que el estado sea `healthy`. |
+| `docker compose` dice que no encuentra Docker | Abre Docker Desktop y espera a que diga que está corriendo. |
+| `docker compose up` dice que el puerto 8000, 8080 o 5433 ya está ocupado | Apaga la API o el tablero del modo desarrollo (Ctrl+C) u otro programa que use ese puerto, y vuelve a intentarlo. |
+| La API no arranca y `docker compose logs api` dice `password authentication failed` | Cambiaste `POSTGRES_PASSWORD` después de la primera vez: la base guarda la contraseña original. Vuelve a la anterior, o empieza de cero con `docker compose down -v` (borra los datos). |
+| La página http://localhost:8080 no abre | Revisa con `docker compose ps` que los tres servicios digan `Up`; si no, mira el motivo con `docker compose logs api`. |
+| `/health` o `pytest` dicen que no se pudo conectar a PostgreSQL | Abre Docker Desktop, corre `docker compose up -d db` y revisa con `docker compose ps` que el estado sea `healthy`. |
 | `pytest` dice que las pruebas apuntan a una base **remota** | Comenta `DATABASE_URL` en el `.env`: las pruebas solo corren contra el PostgreSQL local. |
 | Con Supabase, la API tarda y falla al conectar | El proyecto gratuito se pausa tras 7 días sin uso: reactívalo desde el panel de Supabase. |
 | El tablero dice "No se pudo conectar con la API" | Enciende la API (terminal 2). Si corre en otra dirección, ajusta `VITE_API_URL` en `frontend/.env`. |
 | El reporte queda en **error** porque el modelo no está disponible | Abre Ollama y corre `ollama pull qwen3:8b`, o usa Groq con `MODO_DATOS=sinteticos`. Luego vuelve a solicitar el reporte. |
-| No aparecen las cuentas de prueba en la pantalla de inicio | Pon `MODO_DATOS=sinteticos` y `MODO_DEMO=si` en el `.env`, corre `python -m scripts.demo` y reinicia la API. |
+| No aparecen las cuentas de prueba en la pantalla de inicio | Pon `MODO_DATOS=sinteticos` y `MODO_DEMO=si` en el `.env` y corre `docker compose up -d` (con Docker se crean al arrancar). En modo desarrollo: `python -m scripts.demo` y reinicia la API. |
 
 ## Instalación local
 
-Necesitas [Python 3.14](https://www.python.org/downloads/), [Docker Desktop](https://www.docker.com/products/docker-desktop/) y Git. Los comandos son para PowerShell en Windows.
+Solo para el [modo desarrollo](#modo-desarrollo-para-programar); para usar el sistema basta con Docker ([Cómo levantarlo](#cómo-levantarlo)). Necesitas [Python 3.14](https://www.python.org/downloads/), [Docker Desktop](https://www.docker.com/products/docker-desktop/) y Git.
 
 ```powershell
 git clone https://github.com/warsharkt/G19X-ITH-BJTD-223-ACADEMIC.git
@@ -96,8 +127,8 @@ copy .env.example .env
 #    - cambia POSTGRES_PASSWORD
 #    - genera JWT_SECRETO con:  python -c "import secrets; print(secrets.token_urlsafe(48))"
 
-# 2. Base de datos (PostgreSQL en Docker)
-docker compose up -d
+# 2. Base de datos (solo PostgreSQL en Docker)
+docker compose up -d db
 
 # 3. Entorno de Python
 cd backend
@@ -278,11 +309,13 @@ backend/
     exportar.py      reporte aprobado en PDF y presentación
     seguridad.py     inicio de sesión, cuentas con bitácora, contraseñas, tokens y permisos por rol
     mfa.py           verificación en dos pasos (TOTP) y códigos de respaldo
-    demo.py          modo demostración: cuentas de prueba y teléfono simulado
+    demo.py          modo demostración: entrada de un clic por rol y teléfono simulado
     cargas.py        carga de archivos de los sistemas fuente: validación y conciliación
     marca.py         nombre del producto y de la empresa
     database.py      conexión a PostgreSQL (local o Supabase)
-  scripts/           seed, crear_usuario, demo, programar, generar_narrativa, evaluar_narrativa
+    firmas.py        quién firma cada reporte, suplencias
+  scripts/           seed, arranque (Docker), crear_usuario, demo, programar, generar_narrativa, evaluar_narrativa
+  Dockerfile         imagen de la API
   tests/             pruebas automáticas
   reportes/          resultados de las evaluaciones del modelo de IA
 frontend/
@@ -294,5 +327,9 @@ frontend/
     paginas/         Login, Tablero, Narrativas, DetalleNarrativa, Avisos, CargaDatos, Configuracion, Usuarios, Cuenta, Pendiente
     componentes/     tarjetas de KPI, gráfica de tendencia, vista del reporte, botón de diseño
     pruebas/         pruebas automáticas (Vitest) con una API simulada
+  Dockerfile         imagen del tablero (compilado y servido por nginx)
+  nginx.conf         sirve el tablero y reenvía /api a la API
 db/                  esquema y tablas (SQL)
+docker-compose.yml   base de datos, API y tablero
+.github/workflows/   pruebas automáticas en GitHub (integración continua)
 ```

@@ -34,7 +34,7 @@ def _base_de_datos_lista():
         pytest.exit(
             f"\nNo se pudo conectar a PostgreSQL en {destino} ({type(exc).__name__}).\n"
             "  1. Abre Docker Desktop y espera a que diga que esta corriendo.\n"
-            "  2. Desde la raiz del proyecto: docker compose up -d\n"
+            "  2. Desde la raiz del proyecto: docker compose up -d db\n"
             "  3. Comprueba que el estado sea 'healthy': docker compose ps\n"
             "Si usas PostgreSQL instalado en Windows, revisa DB_PORT en tu .env.\n",
             returncode=2,

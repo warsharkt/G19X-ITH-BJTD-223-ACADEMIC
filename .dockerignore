@@ -1,0 +1,14 @@
+# Lo que NO entra a la imagen de la API (se construye desde la raiz).
+# Nunca secretos: el .env se pasa al contenedor al arrancar, no va en la imagen.
+.env
+**/.env
+.git
+.github
+docs
+*.pdf
+frontend
+backend/.venv
+backend/tests
+backend/reportes
+**/__pycache__
+**/.pytest_cache

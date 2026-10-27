@@ -39,7 +39,9 @@ def _url_desde_entorno() -> URL:
 
 
 DB_URL = _url_desde_entorno()
-ES_REMOTA = DB_URL.host not in ("localhost", "127.0.0.1", None)
+# Remota = una DATABASE_URL hacia otro equipo (Supabase). El PostgreSQL de
+# docker-compose.yml es propio aunque la API lo vea como "db" dentro de Docker.
+ES_REMOTA = bool(os.getenv("DATABASE_URL", "").strip()) and DB_URL.host not in ("localhost", "127.0.0.1", None)
 
 # connect_timeout: si PostgreSQL no responde, fallar en segundos (por defecto 5)
 # en lugar de quedarse esperando minutos.
