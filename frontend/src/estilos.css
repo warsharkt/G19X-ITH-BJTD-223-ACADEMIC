@@ -1828,17 +1828,11 @@ a.cuenta-enlace.active {
 
 .cuentas-demo h2 {
   font-size: 0.95rem;
-  margin: 0 0 0.5rem;
+  margin: 0 0 0.15rem;
 }
 
-.pasos-demo {
-  margin: 0 0 0.75rem;
-  padding-left: 1.25rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  font-size: 0.85rem;
-  color: var(--texto-secundario);
+.cuentas-demo > .nota {
+  margin: 0 0 0.6rem;
 }
 
 .cuentas-demo ul {

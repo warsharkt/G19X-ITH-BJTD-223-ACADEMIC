@@ -605,14 +605,11 @@ describe('demostración', () => {
     expect(screen.getByRole('heading', { name: 'Inicia sesión' })).toBeInTheDocument()
   })
 
-  it('explica cómo entrar y lista cada cuenta con su cargo', async () => {
+  it('dice que se puede probar desde aquí y lista cada cuenta con su cargo', async () => {
     instalarApiFalsa({ demo: true })
     montar()
     const cuentas = await screen.findByRole('region', { name: 'Cuentas de prueba' })
-    const pasos = within(cuentas).getByRole('list', { name: 'Cómo entrar' })
-    expect(within(pasos).getAllByRole('listitem')).toHaveLength(3)
-    expect(pasos).toHaveTextContent('Elige una cuenta y pulsa Usar')
-    expect(pasos).toHaveTextContent('teléfono simulado')
+    expect(cuentas).toHaveTextContent('Puedes probar el sistema desde aquí')
     expect(cuentas).toHaveTextContent('Analista de RRHH')
     expect(cuentas).toHaveTextContent('Responsable de RRHH')
     expect(cuentas).toHaveTextContent(CONTRASENA_DEMO)
@@ -634,7 +631,7 @@ describe('demostración', () => {
 
     // la verificacion en dos pasos se sigue pidiendo
     expect(await screen.findByRole('heading', { name: 'Verificación en dos pasos' })).toBeInTheDocument()
-    expect(screen.getByText(/En esta demostración, el código aparece en el/)).toBeInTheDocument()
+    expect(screen.getByText(/Ese teléfono no es parte del sistema/)).toBeInTheDocument()
     const telefono = await screen.findByRole('note', { name: 'App de autenticación simulada' })
     await waitFor(() => expect(telefono).toHaveTextContent('123 456'))
     expect(telefono).toHaveTextContent('lia')

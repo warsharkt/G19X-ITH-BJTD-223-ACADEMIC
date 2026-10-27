@@ -60,7 +60,7 @@ export default function ConfigurarMfa({ alTerminar }) {
       <div className="formulario-columna">
         <Mensaje tipo="exito" titulo="Verificación en dos pasos activada" />
         <p>
-          <strong>Paso 3 de 3.</strong> Guarda estos <strong>códigos de respaldo</strong> en un lugar seguro. Si no tienes tu teléfono, cada uno sirve
+          Guarda estos <strong>códigos de respaldo</strong> en un lugar seguro. Si no tienes tu teléfono, cada uno sirve
           para entrar <strong>una sola vez</strong>. No se vuelven a mostrar.
         </p>
         <ul className="codigos-respaldo" aria-label="Códigos de respaldo">
@@ -95,16 +95,20 @@ export default function ConfigurarMfa({ alTerminar }) {
       ) : (
         <div className={demo.activo ? 'configurar-con-telefono' : undefined}>
           <form className="formulario-columna" onSubmit={activar}>
-            <p>
-              <strong>Paso 1 de 3.</strong> Escanea este código con tu app.
-              {demo.activo && ' En esta demostración ya está escaneado: el teléfono simulado muestra el código.'}
-            </p>
+            <p>1. Escanea este código con tu app.</p>
+            {demo.activo && (
+              <Mensaje tipo="info">
+                En esta demostración no hace falta escanearlo: el teléfono de al lado ya muestra el código. Ese teléfono
+                no es parte del sistema, es una simulación para mostrar cómo se usaría en realidad: cada persona escanea
+                el QR con la app de autenticación de su propio celular.
+              </Mensaje>
+            )}
             <img className="qr-mfa" src={qr.qr} alt="Código QR para tu app de autenticación" width="200" height="200" />
             <p className="nota">
               ¿No puedes escanearlo? Escribe esta clave en la app: <code className="clave-mfa">{qr.secreto}</code>
             </p>
             <label>
-              Paso 2 de 3. Escribe el código de 6 dígitos que muestra la app
+              2. Escribe el código de 6 dígitos que muestra la app
               <input
                 autoComplete="one-time-code"
                 inputMode="numeric"

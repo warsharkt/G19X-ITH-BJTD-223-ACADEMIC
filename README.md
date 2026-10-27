@@ -19,11 +19,7 @@ La demostración corre con **Nordika Logística**, una empresa ficticia: operado
 
 ## Demostración
 
-La demostración recorre el sistema completo como en producción y enseña **cómo se entra de verdad**: contraseña y código de verificación en dos pasos. Ninguna medida de seguridad se apaga. Para que se pueda probar sin celular, un **teléfono simulado** en pantalla muestra el código vigente, con la leyenda de que en producción solo aparece en el celular de cada persona. La pantalla de inicio explica los pasos:
-
-1. Elige una cuenta de prueba y pulsa **Usar**: se llenan el usuario y la contraseña.
-2. Pulsa **Entrar**.
-3. Escribe el código que muestra el teléfono simulado. La primera vez que entras con cada cuenta se configura la verificación: el teléfono ya muestra el código del QR y al final se guardan los códigos de respaldo.
+La demostración recorre el sistema completo como en producción y enseña **cómo se entra de verdad**: contraseña y código de verificación en dos pasos. Ninguna medida de seguridad se apaga. En la pantalla de inicio, una nota indica que se puede probar desde ahí: se pulsa **Usar** en una cuenta y luego **Entrar**. Al llegar al código, un **teléfono simulado** lo muestra, y la pantalla aclara que ese teléfono no es parte del sistema: solo enseña cómo se usaría en realidad, donde cada persona ve el código en la app de su propio celular. La primera vez que se entra con cada cuenta se configura la verificación (el teléfono ya muestra el código del QR) y se guardan los códigos de respaldo.
 
 1. Levántalo con Docker ([Cómo levantarlo](#cómo-levantarlo)), con `MODO_DATOS=sinteticos` y `MODO_DEMO=si` en el `.env`.
 2. Las cuentas de prueba se crean solas al arrancar. En modo desarrollo, créalas con `python -m scripts.demo`.

@@ -13,24 +13,15 @@ const SEGURIDAD = [
   ['ia', 'IA revisada por personas', 'RRHH prepara cada reporte y su Responsable lo firma antes de distribuirlo.'],
 ]
 
-// Modo demostracion: cuentas de prueba por rol y los pasos para entrar como
-// en produccion (contrasena y codigo del telefono simulado).
+// Modo demostracion: cuentas de prueba por rol. Se entra como en produccion
+// (contrasena y codigo); el telefono simulado aparece en el paso del codigo.
 function CuentasDemo({ demo, empresa, elegida, alUsar }) {
   return (
     <section className="cuentas-demo" aria-label="Cuentas de prueba">
       <h2>Cuentas de prueba{empresa && ` de ${empresa}`}</h2>
-      <ol className="pasos-demo" aria-label="Cómo entrar">
-        <li>
-          Elige una cuenta y pulsa <strong>Usar</strong>: se llenan el usuario y la contraseña.
-        </li>
-        <li>
-          Pulsa <strong>Entrar</strong>.
-        </li>
-        <li>
-          Escribe el código de 6 dígitos que muestra el <strong>teléfono simulado</strong>. La primera vez, configura
-          la verificación siguiendo los pasos en pantalla.
-        </li>
-      </ol>
+      <p className="nota">
+        Puedes probar el sistema desde aquí: pulsa <strong>Usar</strong> en una cuenta y luego <strong>Entrar</strong>.
+      </p>
       <ul>
         {demo.cuentas.map((c) => (
           <li key={c.usuario} className={elegida === c.usuario ? 'elegida' : undefined}>
@@ -161,8 +152,10 @@ export default function Login() {
             <>
               {demo.activo && (
                 <Mensaje tipo="info">
-                  En esta demostración, el código aparece en el <strong>teléfono simulado</strong> (a la izquierda; en
-                  pantallas chicas, arriba). Cambia cada 30 segundos.
+                  Escribe los 6 dígitos que muestra el teléfono (a la izquierda; en pantallas chicas, arriba). Ese
+                  teléfono no es parte del sistema: es una simulación para mostrar cómo se usaría en realidad, donde
+                  cada persona ve el código en la app de autenticación de su propio celular. El código cambia cada 30
+                  segundos.
                 </Mensaje>
               )}
               <label>
