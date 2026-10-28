@@ -1,0 +1,3 @@
+# Los scripts que corren dentro de los contenedores (Linux) siempre con LF:
+# con CRLF, /bin/sh no los puede ejecutar
+*.sh text eol=lf

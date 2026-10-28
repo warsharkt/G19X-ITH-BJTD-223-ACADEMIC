@@ -5,6 +5,8 @@ __pycache__/
 llaves/
 # Respaldos de la base (python -m scripts.respaldo): con datos reales llevan datos de colaboradores
 respaldos/
+# Certificado HTTPS del tablero (la llave privada nunca va en GitHub)
+certs/
 node_modules/
 dist/
 

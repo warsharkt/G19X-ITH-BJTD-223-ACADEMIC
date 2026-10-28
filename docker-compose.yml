@@ -60,8 +60,19 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    # HTTPS: automatico en cuanto el tablero se abre a la red (WEB_ESCUCHA
+    # distinto de 127.0.0.1). Certificado de la empresa en certs/; si no hay,
+    # se genera uno autofirmado (frontend/nginx/talentia-https.sh).
+    environment:
+      WEB_ESCUCHA: ${WEB_ESCUCHA:-127.0.0.1}
+      WEB_HTTPS: ${WEB_HTTPS:-auto}
+      WEB_NOMBRE: ${WEB_NOMBRE:-localhost}
+      WEB_PUERTO_HTTPS: ${WEB_PUERTO_HTTPS:-8443}
+    volumes:
+      - ./certs:/etc/nginx/certs
     ports:
       - "${WEB_ESCUCHA:-127.0.0.1}:8080:80"
+      - "${WEB_ESCUCHA:-127.0.0.1}:${WEB_PUERTO_HTTPS:-8443}:443"
 
 volumes:
   pgdata:

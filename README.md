@@ -90,9 +90,25 @@ La primera vez tarda unos minutos: descarga lo necesario, arma la API y el table
 - **IA para redactar los reportes:** instala [Ollama](https://ollama.com), corre `ollama pull qwen3:8b` y deja la app abierta. Sin Ollama todo funciona menos generar reportes, que quedan en error con el motivo. Con datos sintéticos también puedes usar Groq (sección [Inteligencia artificial](#inteligencia-artificial)).
 - **Apagar y volver a encender:** `docker compose stop` y `docker compose up -d`. Los datos se conservan.
 - **Empezar de cero:** `docker compose down -v` borra la base; al volver a levantarlo se cargan otra vez los datos de Nordika.
-- **Solo desde este equipo:** el tablero (8080), la API (8000) y la base (5433) solo aceptan conexiones de la misma computadora. Si de verdad hace falta abrirlos a la red, cambia `WEB_ESCUCHA`, `API_ESCUCHA` o `DB_ESCUCHA` en el `.env`.
+- **Solo desde este equipo:** el tablero (8080), la API (8000) y la base (5433) solo aceptan conexiones de la misma computadora. Para usar el tablero desde otras computadoras de la empresa, mira [Abrirlo a la red de la empresa](#abrirlo-a-la-red-de-la-empresa-https).
 - **Documentación de la API:** http://localhost:8000/docs.
 - **Si cambias el código:** vuelve a correr `docker compose up -d --build`.
+
+### Abrirlo a la red de la empresa (HTTPS)
+
+Para que otras computadoras entren al tablero, pon en el `.env` la dirección del equipo en la red:
+
+```
+WEB_ESCUCHA=192.168.1.20   # la IP de este equipo en la red de la empresa
+WEB_NOMBRE=192.168.1.20    # el nombre o la IP con que lo van a abrir
+APP_URL=https://192.168.1.20:8443
+```
+
+y corre `docker compose up -d --build`. En cuanto el tablero se abre a la red, **HTTPS se activa solo**: se entra por **https://192.168.1.20:8443** y el puerto 8080 redirige ahí, así que contraseñas, códigos y datos viajan cifrados (TLS 1.2 o 1.3). Si alguien pone `WEB_HTTPS=no` con el tablero abierto a la red, el contenedor se niega a arrancar.
+
+- **Certificado:** pon el de la empresa en `certs/talentia.crt` y `certs/talentia.key`. Si no hay, se genera uno autofirmado para `WEB_NOMBRE`; funciona, pero el navegador avisa que no lo reconoce hasta que TI lo instale como confiable en cada equipo. `certs/` nunca se sube a GitHub.
+- **Solo el tablero:** la API (`API_ESCUCHA`) y la base (`DB_ESCUCHA`) se quedan en `127.0.0.1`. El tablero ya le pasa a la API todo lo de `/api`, y por HTTPS.
+- `WEB_HTTPS=si` fuerza HTTPS también en este equipo; `WEB_PUERTO_HTTPS` cambia el 8443.
 
 ### Modo desarrollo (para programar)
 
@@ -115,6 +131,8 @@ Para ver los cambios al instante, primero haz la [instalación local](#instalaci
 | `docker compose` dice que no encuentra Docker | Abre Docker Desktop y espera a que diga que está corriendo. |
 | `docker compose up` dice que el puerto 8000, 8080 o 5433 ya está ocupado | Apaga la API o el tablero del modo desarrollo (Ctrl+C) u otro programa que use ese puerto, y vuelve a intentarlo. |
 | La API no arranca y `docker compose logs api` dice `password authentication failed` | Cambiaste `POSTGRES_PASSWORD` después de la primera vez: la base guarda la contraseña original. Vuelve a la anterior, o empieza de cero con `docker compose down -v` (borra los datos). |
+| El navegador dice que la conexión no es privada | Es el certificado autofirmado. Pon el de la empresa en `certs/` y corre `docker compose up -d --build`, o pide a TI que instale `certs/talentia.crt` como confiable. |
+| `rrhh_web` se reinicia y `docker compose logs web` dice "lo dejaria sin cifrar" | Abriste el tablero a la red con `WEB_HTTPS=no`. Quita esa línea del `.env` (o pon `auto`) para que use HTTPS. |
 | La página http://localhost:8080 no abre | Revisa con `docker compose ps` que los tres servicios digan `Up`; si no, mira el motivo con `docker compose logs api`. |
 | `/health` o `pytest` dicen que no se pudo conectar a PostgreSQL | Abre Docker Desktop, corre `docker compose up -d db` y revisa con `docker compose ps` que el estado sea `healthy`. |
 | `pytest` dice que las pruebas apuntan a una base **remota** | Comenta `DATABASE_URL` en el `.env`: las pruebas solo corren contra el PostgreSQL local. |
@@ -364,7 +382,7 @@ frontend/
     componentes/     tarjetas de KPI, gráfica de tendencia, vista del reporte, botón de diseño
     pruebas/         pruebas automáticas (Vitest) con una API simulada
   Dockerfile         imagen del tablero (compilado y servido por nginx)
-  nginx.conf         sirve el tablero y reenvía /api a la API
+  nginx/             sirve el tablero, reenvía /api a la API y elige HTTP o HTTPS al arrancar
 db/                  esquema y tablas (SQL)
 docs/GUIA.md         guía de funcionamiento para quien usa el sistema
 llaves/              llave que cifra los secretos del MFA (se crea sola; no se sube a GitHub)
