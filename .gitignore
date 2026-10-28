@@ -1,6 +1,8 @@
 backend/.venv/
 __pycache__/
 .env
+# Llave que cifra los secretos del MFA: nunca en GitHub ni junto a los respaldos de la base
+llaves/
 node_modules/
 dist/
 

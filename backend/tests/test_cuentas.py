@@ -5,6 +5,8 @@ Como en test_seguridad.py, sin el atajo de sesion: usuarios reales (prefijo
 zz_cta_, se borran al final), su contrasena y su token. El MFA obligatorio
 esta apagado en conftest; las pruebas de MFA lo encienden.
 """
+import base64
+import secrets
 import time
 
 import pyotp
@@ -12,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from app import seguridad
+from app import mfa, seguridad
 from app.database import engine
 from app.main import app
 from app.seguridad import INTENTOS_MAXIMOS, crear_usuario, usuario_actual
@@ -296,3 +298,69 @@ def test_ti_reinicia_el_mfa_de_quien_perdio_el_telefono(client, cuentas, con_mfa
 
     propio = client.post(f"/usuarios/{cuentas['ids']['ti']}/mfa/reiniciar", headers=ti)
     assert propio.status_code == 422 and "propia" in propio.json()["detail"]
+
+
+# ============================================== secreto del MFA cifrado (P7)
+def secreto_guardado(cuentas, nombre):
+    with engine.connect() as conn:
+        return conn.execute(
+            text("SELECT mfa_secreto FROM usuarios WHERE id = :i"), {"i": cuentas["ids"][nombre]}
+        ).scalar_one()
+
+
+def otra_llave():
+    return base64.urlsafe_b64encode(secrets.token_bytes(32)).decode()
+
+
+def test_el_secreto_se_guarda_cifrado(client, cuentas, con_mfa):
+    secreto, _ = configurar(client, token(client, "rrhh"))
+    guardado = secreto_guardado(cuentas, "rrhh")
+    assert guardado.startswith("v1:") and secreto not in guardado
+    assert mfa.descifrar_secreto(cuentas["ids"]["rrhh"], guardado) == secreto
+
+
+def test_copiar_el_secreto_a_otra_cuenta_no_sirve(client, cuentas, con_mfa):
+    """Quien puede escribir en la base no se lleva su secreto a la cuenta de otra persona."""
+    secreto, _ = configurar(client, token(client, "rrhh"))
+    configurar(client, token(client, "ti"))
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE usuarios SET mfa_secreto = :s WHERE id = :i"),
+            {"s": secreto_guardado(cuentas, "rrhh"), "i": cuentas["ids"]["ti"]},
+        )
+    paso = entrar(client, "ti").json()["mfa_token"]
+    r = client.post("/auth/mfa", json={"mfa_token": paso, "codigo": codigo_siguiente(secreto)})
+    assert r.status_code == 409 and "TI" in r.json()["detail"]
+
+
+def test_un_secreto_en_claro_no_sirve_hasta_cifrarlo_al_arrancar(client, cuentas, con_mfa):
+    secreto = pyotp.random_base32()
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE usuarios SET mfa_secreto = :s, mfa_activo = true WHERE id = :i"),
+            {"s": secreto, "i": cuentas["ids"]["rrhh"]},
+        )
+    paso = entrar(client, "rrhh").json()["mfa_token"]
+    assert client.post("/auth/mfa", json={"mfa_token": paso, "codigo": codigo_siguiente(secreto)}).status_code == 409
+
+    assert mfa.cifrar_pendientes() >= 1  # lo que hace la API al arrancar
+    assert secreto_guardado(cuentas, "rrhh").startswith("v1:")
+    paso = entrar(client, "rrhh").json()["mfa_token"]
+    assert client.post("/auth/mfa", json={"mfa_token": paso, "codigo": codigo_siguiente(secreto)}).status_code == 200
+
+
+def test_con_otra_llave_solo_sirven_los_codigos_de_respaldo(client, con_mfa, monkeypatch):
+    secreto, codigos = configurar(client, token(client, "rrhh"))
+    monkeypatch.setenv("MFA_LLAVE", otra_llave())
+    paso = entrar(client, "rrhh").json()["mfa_token"]
+    r = client.post("/auth/mfa", json={"mfa_token": paso, "codigo": codigo_siguiente(secreto)})
+    assert r.status_code == 409 and "respaldo" in r.json()["detail"]
+    paso = entrar(client, "rrhh").json()["mfa_token"]
+    assert client.post("/auth/mfa", json={"mfa_token": paso, "codigo": codigos[0]}).status_code == 200
+
+
+def test_una_llave_mal_escrita_responde_503(client, con_mfa, monkeypatch):
+    h = token(client, "rrhh")
+    monkeypatch.setenv("MFA_LLAVE", "no-es-una-llave")
+    r = client.post("/auth/mfa/configurar", headers=h)
+    assert r.status_code == 503 and "MFA_LLAVE" in r.json()["detail"]

@@ -8,6 +8,7 @@ uvicorn==0.53.0
 python-multipart==0.0.32   # formulario de inicio de sesion (/auth/login)
 PyJWT==2.15.1              # tokens de sesion
 pyotp==2.10.0              # verificacion en dos pasos (TOTP)
+cryptography==50.0.2       # cifra el secreto del MFA (AES-256-GCM)
 qrcode==8.2                # QR para configurar la app de MFA
 
 # Datos

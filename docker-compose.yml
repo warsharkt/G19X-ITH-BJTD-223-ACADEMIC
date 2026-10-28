@@ -42,6 +42,10 @@ services:
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Llave que cifra los secretos del MFA (se genera sola la primera vez si no
+    # hay MFA_LLAVE en el .env). Fuera de la base: un respaldo de la base no la lleva.
+    volumes:
+      - ./llaves:/app/llaves
     depends_on:
       db:
         condition: service_healthy

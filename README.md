@@ -47,7 +47,7 @@ Para dejar las cuentas como nuevas, vuelve a correr `python -m scripts.demo`. Pa
 
 Nada de Nordika está fijo en el código: el nombre sale de `EMPRESA_NOMBRE`, y las áreas, las personas y los indicadores salen de la base. Para instalarlo en una empresa real:
 
-1. En el `.env`, pon `EMPRESA_NOMBRE` con el nombre de la empresa, `MODO_DATOS=reales` y `MODO_DEMO=no`. Así se apagan las cuentas de Nordika, el teléfono simulado y la IA en la nube; los reportes los redacta Ollama en el propio servidor.
+1. En el `.env`, pon `EMPRESA_NOMBRE` con el nombre de la empresa, `MODO_DATOS=reales` y `MODO_DEMO=no`. Así se apagan las cuentas de Nordika, el teléfono simulado y la IA en la nube; los reportes los redacta Ollama en el propio servidor. Fija también `MFA_LLAVE` (cómo generarla viene en `.env.example`) y guárdala aparte de los respaldos de la base.
 2. Parte de una base vacía: `docker compose down -v` y luego `docker compose up -d --build`. Con `MODO_DATOS=reales` no se siembra nada.
 3. Crea la primera cuenta de TI con `python -m scripts.crear_usuario` (sección [Usuarios y roles](#usuarios-y-roles)). Desde el tablero, TI crea las cuentas del personal con contraseña temporal y asigna quién firma.
 4. La Analista de RRHH sube desde **Carga de datos** lo que exporta cada sistema: plantilla de personal, vacantes, metas, capacitación, clima y productividad. Las plantillas de columnas están en la misma pantalla.
@@ -119,6 +119,7 @@ Para ver los cambios al instante, primero haz la [instalación local](#instalaci
 | Con Supabase, la API tarda y falla al conectar | El proyecto gratuito se pausa tras 7 días sin uso: reactívalo desde el panel de Supabase. |
 | El tablero dice "No se pudo conectar con la API" | Enciende la API (terminal 2). Si corre en otra dirección, ajusta `VITE_API_URL` en `frontend/.env`. |
 | El reporte queda en **error** porque el modelo no está disponible | Abre Ollama y corre `ollama pull qwen3:8b`, o usa Groq con `MODO_DATOS=sinteticos`. Luego vuelve a solicitar el reporte. |
+| Al escribir el código dice "No se pudo leer la verificación en dos pasos de tu cuenta" | Cambió o se perdió la llave del MFA (`MFA_LLAVE` o `llaves/mfa.key`). Vuelve a poner la anterior. Si no la tienes, entra con un código de respaldo o pide a TI que reinicie la verificación; con las cuentas de Nordika basta `python -m scripts.demo`. |
 | `eva.munoz` (u otra cuenta de Nordika) dice "Usuario o contraseña incorrectos" | Pon `MODO_DATOS=sinteticos` y `MODO_DEMO=si` en el `.env` y corre `docker compose up -d` (con Docker se crean al arrancar). En modo desarrollo: `python -m scripts.demo`. Después de correr `pytest`, vuelve a correr `python -m scripts.demo`: las pruebas borran esas cuentas. |
 
 ## Instalación local
@@ -242,6 +243,8 @@ Lo normal es que **TI administre las cuentas desde la sección Usuarios** del ta
 
 **Verificación en dos pasos.** Dirección, TI y RRHH la configuran la primera vez que entran: escanean un QR con una app como Google Authenticator o Microsoft Authenticator y, desde entonces, después de la contraseña escriben el código de 6 dígitos de la app. Al activarla reciben 10 códigos de respaldo de un solo uso. Si alguien pierde el teléfono, TI la reinicia desde Usuarios. Los roles obligados se cambian con `MFA_OBLIGATORIO` en el `.env`.
 
+El secreto de la app de cada cuenta se guarda **cifrado** (AES-256) con una llave que no está en la base: `MFA_LLAVE` en el `.env` o, si no la pones, el archivo `llaves/mfa.key`, que se crea solo la primera vez (Docker y el modo desarrollo usan el mismo). Así, quien obtenga una copia de la base no puede generar códigos. **Respalda la llave aparte de la base**: si se pierde, solo sirven los códigos de respaldo y TI tiene que reiniciar la verificación de cada cuenta.
+
 El script sirve para crear la primera cuenta de TI y como respaldo desde la consola:
 
 ```powershell
@@ -315,7 +318,7 @@ backend/
     umbrales.py      edición de umbrales con bitácora
     exportar.py      reporte aprobado en PDF y presentación
     seguridad.py     inicio de sesión, cuentas con bitácora, contraseñas, tokens y permisos por rol
-    mfa.py           verificación en dos pasos (TOTP) y códigos de respaldo
+    mfa.py           verificación en dos pasos (TOTP), secreto cifrado y códigos de respaldo
     demo.py          modo demostración: cuentas del personal de Nordika y teléfono simulado
     cargas.py        carga de archivos de los sistemas fuente: validación y conciliación
     marca.py         nombre del producto y de la empresa
@@ -337,6 +340,7 @@ frontend/
   Dockerfile         imagen del tablero (compilado y servido por nginx)
   nginx.conf         sirve el tablero y reenvía /api a la API
 db/                  esquema y tablas (SQL)
+llaves/              llave que cifra los secretos del MFA (se crea sola; no se sube a GitHub)
 docker-compose.yml   base de datos, API y tablero
 .github/workflows/   pruebas automáticas en GitHub (integración continua)
 ```

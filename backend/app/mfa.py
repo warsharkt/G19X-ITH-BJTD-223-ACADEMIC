@@ -14,31 +14,133 @@ pueden activarlo.
   la persona lo vuelve a configurar al entrar.
 - Los codigos equivocados cuentan como intentos fallidos: tras
   INTENTOS_MAXIMOS la cuenta se bloquea, igual que con la contrasena.
+- El secreto se guarda cifrado (AES-256-GCM) con una llave que no vive en la
+  base: MFA_LLAVE en el .env o, si no esta, el archivo llaves/mfa.key, que se
+  genera solo la primera vez. Quien copie la base no puede generar codigos.
+  El cifrado va atado a la cuenta: copiar el secreto de una cuenta a otra no
+  sirve. Si la llave se pierde, TI reinicia el MFA de cada cuenta.
 """
 import base64
+import binascii
 import hashlib
 import hmac
+import os
 import secrets
 import time
 
 import pyotp
 import qrcode
 import qrcode.image.svg
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import HTTPException, status
 from sqlalchemy import text
 
 from app import seguridad
-from app.database import engine
+from app.database import RAIZ, engine
 from app.marca import PRODUCTO
 from app.seguridad import ErrorDeUsuario, Usuario
 
 EMISOR = PRODUCTO  # el nombre que muestra la app del telefono
 CODIGOS_RESPALDO = 10
 _ALFABETO_RESPALDO = "abcdefghjkmnpqrstuvwxyz23456789"
+_VERSION_CIFRADO = "v1:"
 
 
 class MfaInvalido(ErrorDeUsuario):
     """Codigo incorrecto o MFA en un estado que no permite la operacion."""
+
+
+class LlaveMfaInvalida(RuntimeError):
+    """MFA_LLAVE o el archivo de la llave no tienen una llave valida."""
+
+
+# ------------------------------------------------------- secreto cifrado
+def archivo_de_llave():
+    return RAIZ / "llaves" / "mfa.key"
+
+
+def _leer_o_crear_archivo() -> str:
+    ruta = archivo_de_llave()
+    try:
+        return ruta.read_text(encoding="ascii").strip()
+    except FileNotFoundError:
+        pass
+    nueva = base64.urlsafe_b64encode(AESGCM.generate_key(bit_length=256)).decode()
+    try:
+        ruta.parent.mkdir(parents=True, exist_ok=True)
+        # "x": si otro proceso la creo al mismo tiempo, se usa la suya
+        with open(ruta, "x", encoding="ascii") as f:
+            f.write(nueva + "\n")
+        os.chmod(ruta, 0o600)
+        print(f"Se genero la llave del MFA en {ruta}. Respaldala aparte de la base de datos.")
+        return nueva
+    except FileExistsError:
+        return ruta.read_text(encoding="ascii").strip()
+    except OSError as exc:
+        raise LlaveMfaInvalida(f"No se pudo crear la llave del MFA en {ruta} ({exc}). Pon MFA_LLAVE en el .env")
+
+
+def _llave() -> bytes:
+    """La llave de 32 bytes: MFA_LLAVE, o el archivo (se crea si no existe)."""
+    texto = os.getenv("MFA_LLAVE", "").strip() or _leer_o_crear_archivo()
+    try:
+        llave = base64.urlsafe_b64decode(texto + "=" * (-len(texto) % 4))
+    except (binascii.Error, ValueError):
+        llave = b""
+    if len(llave) != 32:
+        raise LlaveMfaInvalida(
+            "MFA_LLAVE no es una llave valida (32 bytes en base64). Genera una con: "
+            'python -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"'
+        )
+    return llave
+
+
+def _contexto(usuario_id: int) -> bytes:
+    return f"{PRODUCTO}:usuarios:{usuario_id}:mfa_secreto".encode()
+
+
+def cifrar_secreto(usuario_id: int, secreto: str) -> str:
+    nonce = secrets.token_bytes(12)
+    cifrado = AESGCM(_llave()).encrypt(nonce, secreto.encode(), _contexto(usuario_id))
+    return _VERSION_CIFRADO + base64.urlsafe_b64encode(nonce + cifrado).decode()
+
+
+def descifrar_secreto(usuario_id: int, guardado: str | None) -> str | None:
+    """El secreto en claro, o None si no hay o no se puede leer (otra llave,
+    otra cuenta o texto sin cifrar: nunca se acepta un secreto en claro)."""
+    if not guardado or not guardado.startswith(_VERSION_CIFRADO):
+        return None
+    try:
+        crudo = base64.urlsafe_b64decode(guardado[len(_VERSION_CIFRADO):])
+        return AESGCM(_llave()).decrypt(crudo[:12], crudo[12:], _contexto(usuario_id)).decode()
+    except (binascii.Error, ValueError, InvalidTag):
+        return None
+
+
+def cifrar_pendientes() -> int:
+    """Cifra los secretos que quedaron en claro de versiones anteriores. Lo
+    llama la API al arrancar. Devuelve cuantos cifro."""
+    _llave()  # al arrancar: crea el archivo la primera vez y avisa si MFA_LLAVE no sirve
+    with engine.begin() as conn:
+        filas = conn.execute(
+            text("SELECT id, mfa_secreto FROM usuarios WHERE mfa_secreto IS NOT NULL "
+                 "AND mfa_secreto NOT LIKE 'v1:%' FOR UPDATE")
+        ).all()
+        for id_, secreto in filas:
+            conn.execute(
+                text("UPDATE usuarios SET mfa_secreto = :s WHERE id = :i"),
+                {"s": cifrar_secreto(id_, secreto), "i": id_},
+            )
+    return len(filas)
+
+
+def _secreto_ilegible() -> HTTPException:
+    return HTTPException(
+        status.HTTP_409_CONFLICT,
+        "No se pudo leer la verificación en dos pasos de tu cuenta: entra con un código de respaldo "
+        "o pide a TI que la reinicie",
+    )
 
 
 # ---------------------------------------------------------------- codigos
@@ -89,7 +191,7 @@ def iniciar_configuracion(u: Usuario) -> dict:
     with engine.begin() as conn:
         conn.execute(
             text("UPDATE usuarios SET mfa_secreto = :s, mfa_ultimo_paso = NULL WHERE id = :i AND NOT mfa_activo"),
-            {"s": secreto, "i": u.id},
+            {"s": cifrar_secreto(u.id, secreto), "i": u.id},
         )
     uri = pyotp.TOTP(secreto).provisioning_uri(name=u.usuario, issuer_name=EMISOR)
     return {"secreto": secreto, "uri": uri, "qr": qr_svg(uri)}
@@ -107,7 +209,10 @@ def activar(u: Usuario, codigo: str) -> list[str]:
             raise MfaInvalido("La verificación en dos pasos ya está activa")
         if not fila["mfa_secreto"]:
             raise MfaInvalido("Primero genera el código QR")
-        paso = _paso_valido(fila["mfa_secreto"], codigo, None)
+        secreto = descifrar_secreto(u.id, fila["mfa_secreto"])
+        if secreto is None:
+            raise MfaInvalido("No se pudo leer el código QR generado: genera uno nuevo")
+        paso = _paso_valido(secreto, codigo, None)
         if paso is None:
             raise MfaInvalido("El código no es correcto. Revisa que la hora de tu teléfono sea la correcta")
         codigos = _nuevos_respaldos()
@@ -175,7 +280,9 @@ def verificar_entrada(u: Usuario, codigo: str) -> Usuario:
             error = HTTPException(status.HTTP_401_UNAUTHORIZED, "Sesión no válida o vencida; vuelve a iniciar sesión")
         elif (bloqueo := seguridad.error_si_bloqueada(fila)) is not None:
             error = bloqueo
-        elif (paso := _paso_valido(fila["mfa_secreto"], codigo, fila["mfa_ultimo_paso"])) is not None:
+        elif (secreto := descifrar_secreto(u.id, fila["mfa_secreto"])) is not None and (
+            paso := _paso_valido(secreto, codigo, fila["mfa_ultimo_paso"])
+        ) is not None:
             conn.execute(text("UPDATE usuarios SET mfa_ultimo_paso = :p WHERE id = :i"), {"p": paso, "i": u.id})
             seguridad.registrar_entrada(conn, u.id)
         elif conn.execute(
@@ -189,7 +296,10 @@ def verificar_entrada(u: Usuario, codigo: str) -> Usuario:
             seguridad.registrar(conn, fila["usuario"], "usar_codigo_respaldo", fila["usuario"])
         else:
             seguridad.registrar_fallo(conn, u.id)
-            error = HTTPException(status.HTTP_401_UNAUTHORIZED, "El código no es correcto")
+            # con la llave perdida o cambiada, solo sirven los codigos de respaldo
+            error = _secreto_ilegible() if secreto is None else HTTPException(
+                status.HTTP_401_UNAUTHORIZED, "El código no es correcto"
+            )
     if error is not None:
         raise error
     return u

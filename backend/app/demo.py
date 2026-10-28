@@ -166,9 +166,10 @@ def codigo_vigente(usuario_id: int) -> dict:
         ).mappings().first()
     if fila is None or fila["usuario"] not in USUARIOS:
         raise LookupError("Solo las cuentas de demostración muestran su código")
-    if not fila["mfa_secreto"]:
+    secreto = mfa.descifrar_secreto(usuario_id, fila["mfa_secreto"])
+    if secreto is None:
         raise LookupError("Esta cuenta aún no tiene un código QR generado")
-    totp = pyotp.TOTP(fila["mfa_secreto"])
+    totp = pyotp.TOTP(secreto)
     ahora = time.time()
     paso = int(ahora) // totp.interval
     if fila["mfa_ultimo_paso"] is not None and paso <= fila["mfa_ultimo_paso"]:

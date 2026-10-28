@@ -12,6 +12,7 @@ from typing import Literal
 import pandas as pd
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -39,6 +40,11 @@ from app.seguridad import (
 async def ciclo_de_vida(_app):
     try:
         seguridad.asegurar_tabla()
+        try:
+            if cifrados := mfa.cifrar_pendientes():
+                print(f"Se cifraron {cifrados} secretos de verificación en dos pasos que estaban en claro.")
+        except mfa.LlaveMfaInvalida as exc:
+            print(f"Verificación en dos pasos sin llave: {exc}")  # quien la use recibe un 503
         trabajos.marcar_interrumpidas()
         inicializar_umbrales()
         avisos.asegurar_tabla()
@@ -71,6 +77,12 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["Content-Disposition"],  # nombre del archivo al exportar
 )
+
+
+@app.exception_handler(mfa.LlaveMfaInvalida)
+def sin_llave_de_mfa(_request, exc: mfa.LlaveMfaInvalida):
+    """MFA_LLAVE mal configurada: es un problema del servidor, no de la persona."""
+    return JSONResponse(status_code=503, content={"detail": f"Verificación en dos pasos no disponible: {exc}"})
 
 PATRON_MES = r"^\d{4}-(0[1-9]|1[0-2])$"
 SEGUNDOS_CACHE = 60
