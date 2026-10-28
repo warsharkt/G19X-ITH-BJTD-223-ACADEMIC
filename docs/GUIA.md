@@ -99,19 +99,19 @@ Cada persona entra con su propia cuenta y solo ve lo que le corresponde por su p
 > - **Quien prepara no firma:** la Analista prepara y la Responsable firma, así que cada reporte pasa por dos personas. Por la misma razón, solo la Responsable cambia los umbrales: un umbral decide qué sale en rojo en los reportes que prepara la Analista.
 > - **Quien administra cuentas no aprueba contenido:** TI no firma reportes. Así nadie puede crearse una segunda cuenta para aprobarse a sí mismo.
 
-### Cuentas del personal de Nordika
+### Cuentas de prueba
 
-La pantalla de inicio es la de producción: no muestra cuentas ni contraseñas. Todas usan la contraseña inicial **`Nordika-2026`**.
+Con datos de prueba, el sistema trae una cuenta por cada rol del personal de Nordika: Analista de RRHH, Responsable de RRHH, Dirección General, Gerente de Ventas y Soporte TI. La pantalla de inicio es la de producción: no muestra cuentas ni contraseñas, y esta guía tampoco. Quien instala el sistema elige la contraseña (`DEMO_CONTRASENA`) y entrega los usuarios a quien lo va a probar; también aparecen en el registro de arranque (`docker compose logs api`).
 
-| Usuario | Persona | Para qué sirve |
-|---|---|---|
-| `eva.munoz` | Eva Muñoz, Analista de RRHH | Cargar los datos del mes, preparar los reportes y atender los pedidos |
-| `ana.rios` | Ana Ríos, Responsable de RRHH | Firmar los reportes con una Nota de RRHH, designar suplente y ajustar los umbrales |
-| `andrea.salinas` | Andrea Salinas, Dirección General | Solo el consolidado; pedir reportes y descargar los firmados |
-| `luis.ortega` | Luis Ortega, Gerente de Ventas | Solo su área; la verificación en dos pasos es opcional |
-| `carlos.pena` | Carlos Peña, Soporte TI | Administrar cuentas sin ver datos de colaboradores |
+| Cuenta | Para qué sirve |
+|---|---|
+| Analista de RRHH | Cargar los datos del mes, preparar los reportes y atender los pedidos |
+| Responsable de RRHH | Firmar los reportes con una Nota de RRHH, designar suplente y ajustar los umbrales |
+| Dirección General | Solo el consolidado; pedir reportes y descargar los firmados |
+| Gerente de Ventas | Solo su área; la verificación en dos pasos es opcional |
+| Soporte TI | Administrar cuentas sin ver datos de colaboradores |
 
-**Recorrido sugerido:** entra como Andrea o Luis y pide un reporte; luego como Eva, sube los archivos de septiembre de 2026 y prepara el reporte; por último como Ana, fírmalo. Para cambiar de persona se cierra sesión.
+**Recorrido sugerido:** entra como Dirección o como el Gerente y pide un reporte; luego como la Analista, sube los archivos de septiembre de 2026 y prepara el reporte; por último como la Responsable, fírmalo. Para cambiar de persona se cierra sesión.
 
 La primera vez, Dirección, RRHH y TI configuran la verificación en dos pasos. Para no necesitar un celular, en pantalla aparece un **teléfono simulado** con el código (sección 11).
 
@@ -124,7 +124,7 @@ El menú de la izquierda solo muestra las secciones que el rol puede usar. Arrib
 | **Tablero** | Todos menos TI | Muestra los 10 indicadores del mes con su semáforo, cuánto cambiaron contra el mes anterior y contra el mismo mes del año pasado, y una gráfica de los últimos 24 meses del indicador elegido con sus umbrales. Se filtra por área, mes e indicador; los filtros quedan en la dirección de la página, así que se puede compartir el enlace a una vista exacta. La Analista prepara desde aquí el reporte con **Generar reporte con IA**; Dirección y los gerentes usan **Pedir este reporte a RRHH**. |
 | **Reportes** | Todos menos TI | El historial de reportes con su estado (en proceso, listo, con error), su firma (pendiente, aprobado, rechazado) y quién lo firmará. Al abrir uno se ve el resumen, los hallazgos, las alertas y las recomendaciones, cada uno con los datos que lo respaldan y su nivel de confianza. Aquí la Responsable lo aprueba con **Aprobar y firmar** o lo rechaza, y aquí se descarga en PDF o presentación. Dirección y los gerentes también piden reportes desde aquí. |
 | **Avisos** | Todos menos TI | La bandeja de avisos: indicadores en rojo, pedidos, reportes por firmar, aprobados o rechazados. El menú muestra cuántos faltan por leer. Cada aviso lleva directo a donde se atiende. |
-| **Carga de datos** | Solo la Analista | Subir los archivos de cada sistema, ver la validación fila por fila y lo que se descarta, aplicar la carga y ver la conciliación. Incluye las plantillas vacías, los archivos del mes pendiente y la bitácora de todas las cargas. |
+| **Carga de datos** | Solo la Analista | Subir los archivos de cada sistema, ver la validación fila por fila y lo que se descarta, aplicar la carga y ver la conciliación. Cada tarjeta dice qué reporte exportar de su sistema. Incluye el **Formato vacío** de cada fuente (Excel con las columnas), los archivos del mes pendiente y la bitácora de todas las cargas. |
 | **Configuración** | Todos | Quién firma los reportes y la suplencia; los umbrales del semáforo, con la bitácora de quién los cambió y de qué valor a qué valor; y la programación mensual. Los umbrales los cambia solo la Responsable; la programación, cualquiera de RRHH. |
 | **Usuarios** | TI administra, RRHH consulta | Las cuentas y su bitácora. TI crea cuentas con contraseña temporal, cambia rol o área, marca a la Responsable, desactiva y reinicia la verificación en dos pasos. RRHH puede consultar todo para auditar a TI. |
 | **Mi cuenta** | Todos | Cambiar la propia contraseña y activar la verificación en dos pasos. |
@@ -159,7 +159,7 @@ Las columnas marcadas como *opcional* pueden ir vacías. Cualquier otra columna 
 | `codigo` | Código de empleado. Nunca el nombre. |
 | `area` | Área a la que pertenece (debe existir en el catálogo). |
 | `fecha_ingreso` | Fecha de alta. |
-| `fecha_baja` (opcional) | Vacía si sigue activo. |
+| `fecha_baja` (opcional) | Vacía si sigue activo. Una baja no borra a nadie: la persona deja de contar en la plantilla desde esa fecha y sigue en el historial (rotación, reportes pasados). Quien no viene en el archivo se queda como estaba, así que exporta la plantilla completa, con las bajas. |
 | `tipo_baja` (opcional) | `voluntaria` o `involuntaria`. Va junto con `fecha_baja`: las dos llenas o las dos vacías. |
 
 **2. Vacantes (ATS)**
@@ -237,7 +237,7 @@ Solo se guardan las columnas que usa algún indicador. Todo lo demás se descart
 - **Conciliación:** después de aplicar, el sistema compara el archivo contra lo que quedó en la base (conteos y sumas) y muestra si cuadra. Es la prueba de que no se perdió ni se duplicó nada.
 - **Volver a cargar no duplica:** las vacantes se identifican por folio, las metas por empleado y mes, y la encuesta de clima de un mes reemplaza a la anterior de ese mes.
 - **Bitácora de cargas:** quién subió qué archivo, cuándo, su huella SHA-256 (una especie de huella digital que cambia si se modifica un solo carácter), cuántas filas, qué columnas se descartaron y quién lo aplicó.
-- **Archivos del mes pendiente:** mientras haya un mes cerrado sin cargar (hoy, septiembre de 2026), la pantalla ofrece los seis archivos de ese mes como los exportaría cada sistema de Nordika, con el botón **Archivo del mes** de cada fuente. Traen columnas de más (incluso nombres) que el sistema descarta. Cuando ya están cargados todos los meses cerrados, solo quedan las plantillas. Estos archivos son de prueba: **con datos reales no aparecen**, porque serían datos inventados mezclados con los de la empresa; ahí la pantalla solo dice qué mes falta subir.
+- **Archivos del mes pendiente:** mientras haya un mes cerrado sin cargar (hoy, septiembre de 2026), la pantalla ofrece los seis archivos de ese mes como los exportaría cada sistema de Nordika, con el botón **Archivo del mes** de cada fuente. Traen columnas de más (incluso nombres) que el sistema descarta. Cuando ya están cargados todos los meses cerrados, solo queda el **Formato vacío**. Estos archivos son de prueba: **con datos reales no aparecen**, porque serían datos inventados mezclados con los de la empresa; ahí la pantalla solo dice qué mes falta subir.
 - **Mes completo:** un mes está completo cuando tiene sus cuatro fuentes mensuales (metas, capacitación, clima y productividad). Si la Analista elige en **Reportes** un mes al que le falta alguna, la pantalla lo avisa antes de generar: el reporte saldría sin esos indicadores. Los reportes automáticos esperan a que el mes esté completo.
 - **Plantilla y vacantes:** no cuentan para que el mes esté completo, porque un mes sin altas, bajas ni contrataciones es normal. Pero si nadie las subió después de que cerró el mes, el sistema no distingue un mes tranquilo de uno olvidado. Por eso **Reportes** avisa ("Nadie ha subido la plantilla de personal desde que cerró septiembre…") sin impedir que se genere. Solo se revisan los meses que pasaron por Carga de datos, no la historia que ya estaba en la base.
 

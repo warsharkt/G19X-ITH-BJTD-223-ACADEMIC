@@ -1,8 +1,8 @@
 # Datos de prueba para Carga de datos
 
-Archivos de **septiembre de 2026** de Nordika Logística (datos ficticios) para probar la pantalla **Carga de datos**. Entra como **Eva Muñoz** (`eva.munoz`), la Analista de RRHH: es la única que sube archivos.
+Archivos de **septiembre de 2026** de Nordika Logística (datos ficticios) para probar la pantalla **Carga de datos**. Entra con la cuenta de la **Analista de RRHH**: es la única que sube archivos.
 
-Cada archivo se sube con el botón **Subir archivo** de la fuente que dice la tabla. El sistema lo valida completo y muestra:
+Cada archivo se sube con el botón **Subir archivo exportado** de la fuente que dice la tabla. El sistema lo valida completo y muestra:
 
 - **Validado:** lista para aplicar. Abajo dice cuántas filas se agregan o actualizan y qué columnas descartó.
 - **Con errores:** la lista de errores con fila, columna y motivo. Fila 1 son los encabezados, igual que en Excel. Con un solo error no se puede aplicar nada: **todo o nada**.

@@ -5,7 +5,9 @@ datos reales queda apagado, igual que el candado de la IA en la nube.
 
 El sistema se ve como en produccion: la pantalla de inicio no lista cuentas
 ni contrasenas, y las cuentas son las del personal de la empresa (usuario
-nombre.apellido); sus datos de acceso estan en el README. Las medidas de
+nombre.apellido). La contrasena no esta en el codigo ni en la documentacion:
+la elige quien instala en DEMO_CONTRASENA, y sin ella el modo no se activa.
+Los usuarios los lista python -m scripts.demo (o el log de la API). Las medidas de
 seguridad funcionan igual (contrasena, verificacion en dos pasos obligatoria,
 bloqueo por intentos, permisos por rol, bitacoras). Lo unico que agrega es un
 telefono simulado que, al configurar el MFA o al entrar, muestra el codigo
@@ -71,6 +73,9 @@ def motivo_inactivo() -> str | None:
             return "El modo demostración solo funciona con MODO_DATOS=sinteticos (nunca con datos reales)"
     except ConfiguracionIA as exc:
         return str(exc)
+    if len(contrasena()) < seguridad.LONGITUD_MINIMA:
+        return (f"Falta DEMO_CONTRASENA en el .env: la contraseña de las cuentas de prueba, "
+                f"de al menos {seguridad.LONGITUD_MINIMA} caracteres")
     return None
 
 
@@ -79,7 +84,7 @@ def activo() -> bool:
 
 
 def contrasena() -> str:
-    return os.getenv("DEMO_CONTRASENA", "Nordika-2026")
+    return os.getenv("DEMO_CONTRASENA", "").strip()
 
 
 def _renombrar(conn, anterior: str, nuevo: str, por: str):

@@ -48,13 +48,18 @@ def sembrar_si_hace_falta():
 
 
 def preparar_demo():
-    if not demo.activo():
+    if os.getenv("MODO_DEMO", "no").strip().lower() != "si":
         return
     try:
         for linea in demo.preparar_cuentas(por="arranque:docker"):
             print(f"  {linea}")
     except ErrorDeUsuario as exc:
         print(f"Modo demostracion sin cuentas: {exc}")
+        return
+    # los usuarios salen en el log (docker compose logs api); la contrasena no
+    print("Cuentas de prueba (contrasena: DEMO_CONTRASENA del .env):")
+    for usuario, nombre, *_, cargo, _que_hace in demo.CUENTAS:
+        print(f"  {usuario:<16}{nombre}, {cargo}")
 
 
 def main():

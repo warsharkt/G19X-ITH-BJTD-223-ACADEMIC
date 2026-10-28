@@ -14,7 +14,7 @@ from app.database import engine
 from app.main import app
 from app.seguridad import ErrorDeUsuario, crear_usuario, usuario_actual
 
-CONTRASENA = demo.contrasena()
+CONTRASENA = "Prueba-de-demo-1"
 
 
 def _borrar_cuentas():
@@ -31,6 +31,7 @@ def entorno(monkeypatch):
     monkeypatch.setenv("MFA_OBLIGATORIO", "direccion,admin_ti,rrhh")
     monkeypatch.setenv("MODO_DEMO", "si")
     monkeypatch.setenv("MODO_DATOS", "sinteticos")
+    monkeypatch.setenv("DEMO_CONTRASENA", CONTRASENA)
     seguridad.asegurar_tabla()
     _borrar_cuentas()
     yield
@@ -60,6 +61,18 @@ def test_con_datos_reales_se_niega(client, monkeypatch):
         demo.preparar_cuentas("pruebas")
 
 
+@pytest.mark.parametrize("clave", [None, "", "corta"])
+def test_sin_contrasena_propia_no_hay_cuentas(client, monkeypatch, clave):
+    """La contrasena no viene en el codigo: quien instala la elige."""
+    if clave is None:
+        monkeypatch.delenv("DEMO_CONTRASENA")
+    else:
+        monkeypatch.setenv("DEMO_CONTRASENA", clave)
+    assert client.get("/demo").json() == {"activo": False}
+    with pytest.raises(ErrorDeUsuario, match="Falta DEMO_CONTRASENA"):
+        demo.preparar_cuentas("pruebas")
+
+
 def test_crea_una_cuenta_por_rol(client):
     hecho = demo.preparar_cuentas("consola:pruebas")
     assert hecho == [f"{c[0]}: creada" for c in demo.CUENTAS]
@@ -69,7 +82,7 @@ def test_crea_una_cuenta_por_rol(client):
 
 
 def test_la_pantalla_de_inicio_no_revela_cuentas_ni_contrasena(client):
-    """Se ve como en produccion: los datos de acceso estan en el README."""
+    """Se ve como en produccion: la contrasena solo esta en el .env de quien instala."""
     demo.preparar_cuentas("pruebas")
     datos = client.get("/demo").json()
     assert datos == {"activo": True}
