@@ -48,6 +48,9 @@ function NuevoReporte({ areas, periodos, areaPedida, periodoPedido }) {
   const [error, setError] = useState(null)
   const firmas = useConsulta(() => api.firmas(), [])
   const firmante = firmanteDeHoy(firmas.datos)
+  const faltantes = useConsulta(() => api.fuentesFaltantes(periodo), [periodo])
+  const sinDatos = faltantes.datos?.fuentes ?? []
+  const sinActualizar = faltantes.datos?.sin_actualizar ?? []
 
   async function enviar(e) {
     e.preventDefault()
@@ -94,6 +97,25 @@ function NuevoReporte({ areas, periodos, areaPedida, periodoPedido }) {
         <p className="nota">
           Al terminar se enviará a <strong>{firmante.nombre}</strong> ({firmante.cargo}) para su firma.
         </p>
+      )}
+      {(sinDatos.length > 0 || sinActualizar.length > 0) && (
+        <Mensaje
+          tipo="advertencia"
+          titulo={sinDatos.length > 0 ? `A ${nombreMes(periodo)} le faltan datos` : `Revisa los datos de ${nombreMes(periodo)}`}
+        >
+          {sinDatos.length > 0 && (
+            <p>
+              Aún no se cargan {sinDatos.join(', ')}. El reporte saldría sin esos indicadores: súbelos en Carga de datos
+              antes de generarlo.
+            </p>
+          )}
+          {sinActualizar.length > 0 && (
+            <p>
+              Nadie ha subido {sinActualizar.join(' ni ')} desde que cerró {nombreMes(periodo)}. Si hubo altas, bajas o
+              contrataciones, el reporte no las incluiría.
+            </p>
+          )}
+        </Mensaje>
       )}
       {error && <Mensaje>{error}</Mensaje>}
     </form>

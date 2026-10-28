@@ -197,7 +197,7 @@ Abre http://localhost:5173 e inicia sesión con tu usuario. Si la API no está e
 | **Tablero** | Indicadores del mes con semáforo (siempre con icono y texto), variación contra el mes y el año anterior, y la tendencia del indicador elegido con sus umbrales. Filtros por área, mes e indicador; quedan en la dirección de la página, así que se pueden compartir |
 | **Reportes** | La Analista prepara el reporte con IA de un área y mes y ve el avance mientras se redacta; Dirección y los gerentes se lo piden a RRHH. La Responsable lo aprueba (con Nota de RRHH opcional) o lo rechaza. Descarga de los aprobados en PDF o presentación e historial consultable por área, mes y firma |
 | **Avisos** | Indicadores en rojo, pedidos de reportes, reportes por firmar y reportes aprobados o rechazados de tus áreas. El menú muestra cuántos faltan por leer |
-| **Carga de datos** (solo la Analista de RRHH) | Subir el Excel o CSV de cada sistema, revisar la validación y lo que se descarta, aplicar y ver la conciliación. Plantillas y archivos del mes pendiente (hoy, septiembre 2026). Bitácora de cargas con la huella SHA-256 de cada archivo |
+| **Carga de datos** (solo la Analista de RRHH) | Subir el Excel o CSV de cada sistema, revisar la validación y lo que se descarta, aplicar y ver la conciliación. Plantillas y, solo con datos de prueba (`MODO_DATOS=sinteticos`), archivos del mes pendiente (hoy, septiembre 2026). Bitácora de cargas con la huella SHA-256 de cada archivo |
 | **Configuración** | Umbrales del semáforo con su bitácora de cambios, y programación mensual. Todos la ven. Los umbrales los cambia solo la Responsable de RRHH; la programación, cualquiera de RRHH |
 | **Usuarios** | Cuentas y su bitácora. TI las crea, modifica, desactiva y les restablece la contraseña o la verificación en dos pasos; RRHH solo las consulta |
 | **Mi cuenta** (tu nombre, arriba a la derecha) | Cambiar tu contraseña y activar la verificación en dos pasos |
@@ -244,7 +244,7 @@ Si ya tenías el entorno instalado, vuelve a correr `pip install -r requirements
 | Reporte aprobado | Su audiencia y quien lo pidió |
 | Reporte rechazado | Quien lo pidió |
 
-**Programación mensual.** En **Configuración**, una persona de RRHH la activa y elige el día. A partir de ese día se generan los reportes del último mes cerrado con datos (el consolidado y cada área), una sola vez por mes. Nacen pendientes de revisión y los puede aprobar cualquier persona de RRHH. Nace **desactivada**: con Ollama en CPU, cada mes son varios reportes de minutos cada uno.
+**Programación mensual.** En **Configuración**, una persona de RRHH la activa y elige el día. A partir de ese día se generan los reportes del último mes cerrado con datos (el consolidado y cada área), una sola vez por mes. Si a ese mes le falta alguna de las cuatro fuentes mensuales (metas, capacitación, clima o productividad), espera a que se suban: al aplicar la última, se generan. Nacen pendientes de revisión y los puede aprobar cualquier persona de RRHH. Nace **desactivada**: con Ollama en CPU, cada mes son varios reportes de minutos cada uno.
 
 La API revisa al arrancar y cada hora, así que si estuvo apagada el día programado se pone al día al encenderse. Para que funcione aunque la API esté apagada, programa el script en el Programador de tareas de Windows (cambia la ruta):
 

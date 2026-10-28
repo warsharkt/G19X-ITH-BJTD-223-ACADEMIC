@@ -19,7 +19,8 @@ Seguridad y privacidad:
 
 ejemplo() genera los archivos del mes pendiente (el siguiente al ultimo
 cargado) como los exportaria cada sistema, consistentes entre si y con lo
-que ya hay en la base.
+que ya hay en la base. Solo con MODO_DATOS=sinteticos: con datos reales
+serian datos inventados mezclados con los de la empresa.
 """
 import calendar
 import hashlib
@@ -35,6 +36,7 @@ import pandas as pd
 from sqlalchemy import text
 
 from app.database import ejecutar_sql, engine
+from app.llm import modo_datos
 from app.narrativa import MESES_ES
 
 BYTES_MAXIMOS = 5 * 1024 * 1024
@@ -153,6 +155,14 @@ FUENTES = {
             ("area", "periodo"),
         ),
     )
+}
+
+# Fuentes con columna periodo y la tabla donde quedan. Un mes esta completo
+# cuando las cuatro tienen datos. La plantilla y las vacantes no se revisan
+# asi: un mes sin bajas ni contrataciones es normal.
+MENSUALES = {
+    "desempeno": "metas_desempeno", "capacitacion": "programas_capacitacion",
+    "clima": "respuestas_clima", "productividad": "productividad",
 }
 
 # Reglas entre columnas de una misma fila: (condicion de error, mensaje)
@@ -757,14 +767,46 @@ def _sumar_meses(d: date, n: int) -> date:
     return date(d.year + m // 12, m % 12 + 1, 1)
 
 
+def fuentes_faltantes(periodo: date) -> list[str]:
+    """Nombres de las fuentes mensuales que aun no tienen datos de ese mes."""
+    with engine.connect() as conn:
+        return [
+            FUENTES[clave].nombre for clave, tabla in MENSUALES.items()
+            if conn.execute(text(f"SELECT 1 FROM {tabla} WHERE periodo = :p LIMIT 1"), {"p": periodo}).first() is None
+        ]
+
+
+def fuentes_sin_actualizar(periodo: date) -> list[str]:
+    """Plantilla y vacantes que nadie ha subido desde que cerro el mes.
+
+    Un mes sin altas, bajas ni contrataciones es normal, asi que no faltan:
+    pero si no se subieron, no se distingue de haberlas olvidado (la rotacion
+    saldria sin las bajas del mes). Solo se revisan los meses que pasan por
+    Carga de datos; la historia que ya estaba en la base no."""
+    asegurar_tabla()
+    cierre = _sumar_meses(periodo, 1)
+    with engine.connect() as conn:
+        cargado = conn.execute(
+            text("SELECT 1 FROM cargas WHERE estado = 'aplicada' AND periodos @> CAST(:p AS jsonb) LIMIT 1"),
+            {"p": json.dumps([periodo.strftime("%Y-%m")])},
+        ).first()
+        if cargado is None and not fuentes_faltantes(periodo):
+            return []
+        return [
+            FUENTES[clave].nombre for clave in ("hris", "ats")
+            if conn.execute(
+                text("SELECT 1 FROM cargas WHERE fuente = :f AND estado = 'aplicada' AND aplicada_en >= :c LIMIT 1"),
+                {"f": clave, "c": cierre},
+            ).first() is None
+        ]
+
+
 def mes_de_ejemplo() -> date | None:
     """Mes siguiente al ultimo que tienen TODAS las fuentes mensuales. None si
     ese mes aun no termina (no se reportan meses en curso)."""
+    maximos = ", ".join(f"(SELECT MAX(periodo) FROM {tabla})" for tabla in MENSUALES.values())
     with engine.connect() as conn:
-        ultimo = conn.execute(text(
-            "SELECT LEAST((SELECT MAX(periodo) FROM metas_desempeno), (SELECT MAX(periodo) FROM programas_capacitacion), "
-            "(SELECT MAX(periodo) FROM respuestas_clima), (SELECT MAX(periodo) FROM productividad))"
-        )).scalar()
+        ultimo = conn.execute(text(f"SELECT LEAST({maximos})")).scalar()
     if ultimo is None:
         return None
     mes = _sumar_meses(ultimo, 1)
@@ -886,6 +928,10 @@ def _paquete(mes: date) -> dict[str, pd.DataFrame]:
 def ejemplo(clave_fuente: str, formato: str = "xlsx") -> tuple[bytes, str]:
     """(contenido, nombre de archivo) del archivo del mes pendiente."""
     _fuente(clave_fuente)
+    if not _ejemplos_permitidos():
+        raise ErrorDeCarga(
+            "Con datos reales no hay archivos del mes de ejemplo: sube los que exporta cada sistema"
+        )
     mes = mes_de_ejemplo()
     if mes is None:
         raise ErrorDeCarga("Ya están cargados todos los meses cerrados: no hay un mes pendiente por subir")
@@ -893,6 +939,14 @@ def ejemplo(clave_fuente: str, formato: str = "xlsx") -> tuple[bytes, str]:
     return _exportar(df, formato), f"{clave_fuente}-{mes:%Y-%m}.{formato}"
 
 
+def _ejemplos_permitidos() -> bool:
+    return modo_datos() == "sinteticos"
+
+
 def info_ejemplos() -> dict:
+    """Mes pendiente por subir y si se pueden descargar sus archivos de ejemplo."""
     mes = mes_de_ejemplo()
-    return {"mes": mes.strftime("%Y-%m") if mes else None, "nombre_mes": _nombre_mes(mes) if mes else None}
+    return {
+        "mes": mes.strftime("%Y-%m") if mes else None, "nombre_mes": _nombre_mes(mes) if mes else None,
+        "descargables": _ejemplos_permitidos(),
+    }

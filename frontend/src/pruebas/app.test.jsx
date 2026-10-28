@@ -207,6 +207,31 @@ describe('narrativas', () => {
     expect(tabla).toHaveTextContent('Ventas')
     expect(within(tabla).getByRole('link', { name: '#5' })).toHaveAttribute('href', '/narrativas/5')
   })
+
+  it('avisa si al mes le faltan fuentes antes de generarlo', async () => {
+    const { contrasena } = instalarApiFalsa({
+      faltantes: {
+        '2026-08': { fuentes: ['Encuesta de clima', 'Productividad'], sin_actualizar: ['Plantilla de personal'] },
+        '2026-07': { sin_actualizar: ['Plantilla de personal', 'Vacantes'] },
+      },
+    })
+    const persona = await entrar('ana', contrasena, '/narrativas')
+    const aviso = (await screen.findByText('A agosto 2026 le faltan datos')).parentElement
+    expect(aviso).toHaveTextContent('Aún no se cargan Encuesta de clima, Productividad')
+    expect(aviso).toHaveTextContent('Nadie ha subido Plantilla de personal desde que cerró agosto 2026')
+    const formulario = screen.getByRole('heading', { name: 'Nuevo reporte' }).closest('form')
+    expect(within(formulario).getByRole('button', { name: 'Generar con IA' })).toBeEnabled()
+
+    // completo, pero sin plantilla ni vacantes nuevas: no se distingue de un mes sin movimientos
+    const mes = within(formulario).getByRole('combobox', { name: 'Mes' })
+    await persona.selectOptions(mes, '2026-07')
+    const revisa = (await screen.findByText('Revisa los datos de julio 2026')).parentElement
+    expect(revisa).toHaveTextContent('Nadie ha subido Plantilla de personal ni Vacantes desde que cerró julio 2026')
+    expect(revisa).not.toHaveTextContent('Aún no se cargan')
+
+    await persona.selectOptions(mes, '2026-06')
+    await waitFor(() => expect(screen.queryByText(/Revisa los datos|le faltan datos/)).not.toBeInTheDocument())
+  })
 })
 
 describe('firma de reportes (RF-05)', () => {
@@ -657,6 +682,7 @@ describe('carga de datos (RF-01)', () => {
     const persona = await entrar('ana', contrasena)
     await persona.click(await screen.findByRole('link', { name: 'Carga de datos' }))
     expect(await screen.findByText('Mes pendiente: septiembre 2026')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Descargar archivo de septiembre 2026 de Productividad' })).toBeInTheDocument()
 
     const archivo = new File(['codigo,nombre_completo,area'], 'hris-2026-09.xlsx')
     await persona.upload(await screen.findByLabelText('Subir archivo de Plantilla de personal'), archivo)
@@ -684,6 +710,15 @@ describe('carga de datos (RF-01)', () => {
     expect(errores).toHaveTextContent("'Marte' el área 'Marte' no existe")
     expect(screen.getByText('El archivo no se puede cargar')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Aplicar a la base de datos' })).not.toBeInTheDocument()
+  })
+
+  it('con datos reales no hay archivos del mes: se suben los que exporta cada sistema', async () => {
+    const { contrasena } = instalarApiFalsa({ datosReales: true })
+    await entrar('ana', contrasena, '/carga')
+    expect(await screen.findByText('Mes pendiente: septiembre 2026')).toBeInTheDocument()
+    expect(screen.getByText(/Exporta de cada sistema los archivos de septiembre 2026/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Descargar archivo de septiembre 2026/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Descargar plantilla de Productividad' })).toBeInTheDocument()
   })
 
   it('solo RRHH ve la carga de datos', async () => {

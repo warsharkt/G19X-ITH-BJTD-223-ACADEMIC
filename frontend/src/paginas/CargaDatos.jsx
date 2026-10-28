@@ -290,9 +290,11 @@ export default function CargaDatos() {
       {error && <Mensaje>{error}</Mensaje>}
       {ejemplos && (
         <Mensaje tipo="info" titulo={ejemplos.mes ? `Mes pendiente: ${ejemplos.nombre_mes}` : 'Sin meses pendientes'}>
-          {ejemplos.mes
-            ? `Ya están los archivos de ${ejemplos.nombre_mes} exportados de cada sistema. Descárgalos con «Archivo del mes» y súbelos en orden: al aplicarlos, el mes aparece en el tablero. Traen columnas de más (incluso nombres) que el sistema descarta.`
-            : 'Ya están cargados todos los meses cerrados. El siguiente se sube cuando cierre, con el formato de las plantillas.'}
+          {!ejemplos.mes
+            ? 'Ya están cargados todos los meses cerrados. El siguiente se sube cuando cierre, con el formato de las plantillas.'
+            : ejemplos.descargables
+              ? `Ya están los archivos de ${ejemplos.nombre_mes} exportados de cada sistema. Descárgalos con «Archivo del mes» y súbelos en orden: al aplicarlos, el mes aparece en el tablero. Traen columnas de más (incluso nombres) que el sistema descarta.`
+              : `Exporta de cada sistema los archivos de ${ejemplos.nombre_mes} y súbelos en orden, empezando por la plantilla de personal: al aplicar las seis fuentes, el mes aparece completo en el tablero.`}
         </Mensaje>
       )}
 
@@ -345,7 +347,7 @@ export default function CargaDatos() {
                   }}
                 />
               </label>
-              {ejemplos?.mes && (
+              {ejemplos?.mes && ejemplos.descargables && (
                 <button
                   type="button"
                   className="boton-secundario"

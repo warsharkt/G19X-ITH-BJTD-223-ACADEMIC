@@ -237,7 +237,9 @@ Solo se guardan las columnas que usa algún indicador. Todo lo demás se descart
 - **Conciliación:** después de aplicar, el sistema compara el archivo contra lo que quedó en la base (conteos y sumas) y muestra si cuadra. Es la prueba de que no se perdió ni se duplicó nada.
 - **Volver a cargar no duplica:** las vacantes se identifican por folio, las metas por empleado y mes, y la encuesta de clima de un mes reemplaza a la anterior de ese mes.
 - **Bitácora de cargas:** quién subió qué archivo, cuándo, su huella SHA-256 (una especie de huella digital que cambia si se modifica un solo carácter), cuántas filas, qué columnas se descartaron y quién lo aplicó.
-- **Archivos del mes pendiente:** mientras haya un mes cerrado sin cargar (hoy, septiembre de 2026), la pantalla ofrece los seis archivos de ese mes como los exportaría cada sistema de Nordika, con el botón **Archivo del mes** de cada fuente. Traen columnas de más (incluso nombres) que el sistema descarta. Cuando ya están cargados todos los meses cerrados, solo quedan las plantillas.
+- **Archivos del mes pendiente:** mientras haya un mes cerrado sin cargar (hoy, septiembre de 2026), la pantalla ofrece los seis archivos de ese mes como los exportaría cada sistema de Nordika, con el botón **Archivo del mes** de cada fuente. Traen columnas de más (incluso nombres) que el sistema descarta. Cuando ya están cargados todos los meses cerrados, solo quedan las plantillas. Estos archivos son de prueba: **con datos reales no aparecen**, porque serían datos inventados mezclados con los de la empresa; ahí la pantalla solo dice qué mes falta subir.
+- **Mes completo:** un mes está completo cuando tiene sus cuatro fuentes mensuales (metas, capacitación, clima y productividad). Si la Analista elige en **Reportes** un mes al que le falta alguna, la pantalla lo avisa antes de generar: el reporte saldría sin esos indicadores. Los reportes automáticos esperan a que el mes esté completo.
+- **Plantilla y vacantes:** no cuentan para que el mes esté completo, porque un mes sin altas, bajas ni contrataciones es normal. Pero si nadie las subió después de que cerró el mes, el sistema no distingue un mes tranquilo de uno olvidado. Por eso **Reportes** avisa ("Nadie ha subido la plantilla de personal desde que cerró septiembre…") sin impedir que se genere. Solo se revisan los meses que pasaron por Carga de datos, no la historia que ya estaba en la base.
 
 ## 6. Qué se analiza: los 10 indicadores
 
@@ -456,7 +458,7 @@ Ningún reporte llega a la dirección sin que la Responsable de RRHH lo haya le�
 
 ### Programación mensual
 
-RRHH la activa en Configuración y elige el día del mes (1 a 28). A partir de ese día se generan solos los reportes del último mes cerrado: el consolidado y uno por cada área. Cada mes se genera una sola vez, aunque el servidor se reinicie. Si el servidor estuvo apagado el día programado, se pone al día al volver. Los reportes automáticos también los firma la Responsable o su suplente.
+RRHH la activa en Configuración y elige el día del mes (1 a 28). A partir de ese día se generan solos los reportes del último mes cerrado: el consolidado y uno por cada área. Solo se generan cuando el mes está **completo**, con las cuatro fuentes mensuales cargadas (metas, capacitación, clima y productividad); si falta alguna, el sistema espera y los genera en cuanto se aplica la última. Cada mes se genera una sola vez, aunque el servidor se reinicie. Si el servidor estuvo apagado el día programado, se pone al día al volver. Los reportes automáticos también los firma la Responsable o su suplente.
 
 > **Por qué se calcula así.** Un mes en curso nunca se reporta, aunque ya tenga datos parciales: un reporte del 15 de octubre diría que la rotación de octubre es la mitad de la real.
 

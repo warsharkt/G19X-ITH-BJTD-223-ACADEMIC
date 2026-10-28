@@ -132,6 +132,28 @@ def test_genera_el_consolidado_y_cada_area_una_sola_vez():
     assert len(nuevas_narrativas()) == len(areas)
 
 
+def test_un_mes_a_medio_cargar_espera_a_sus_fuentes():
+    """Solo las vacantes de septiembre: el mes ya tiene un indicador, pero no
+    se genera hasta que esten las cuatro fuentes mensuales."""
+    configurar()
+    with engine.begin() as conn:
+        id_ = conn.execute(text(
+            "INSERT INTO vacantes (area_id, fecha_apertura, fecha_contratacion, costo_proceso) "
+            "VALUES ((SELECT MIN(id) FROM areas), '2026-08-20', '2026-09-15', 10000) RETURNING id"
+        )).scalar_one()
+    try:
+        assert "2026-09-01" in set(calcular_kpis()["periodo"].astype(str))
+        r = programacion.revisar(dia=OCTUBRE)
+        assert r["narrativas"] == [] and r["mensaje"] == (
+            "Los reportes de septiembre 2026 se generan cuando estén todas sus fuentes. Falta: "
+            "Metas de desempeño, Capacitación, Encuesta de clima, Productividad."
+        )
+        assert programacion.corridas() == [] and nuevas_narrativas() == []  # se vuelve a revisar luego
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM vacantes WHERE id = :i"), {"i": id_})
+
+
 def test_si_dos_procesos_compiten_solo_uno_gana():
     configurar()
     df = calcular_kpis()

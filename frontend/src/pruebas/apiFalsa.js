@@ -220,11 +220,14 @@ const FUENTES_DATOS = [
   { clave: 'productividad', nombre: 'Productividad', sistema: 'Proyectos', descripcion: 'Horas por área.', columnas: [{ nombre: 'area', requerida: true, ayuda: '' }] },
 ]
 
-function cargasFalsas(usuario, pathname, metodo, cuerpo, estado) {
+function cargasFalsas(usuario, pathname, metodo, cuerpo, estado, datosReales) {
   if (usuario.rol !== 'rrhh' || usuario.firma_reportes)
     return respuesta(403, { detail: 'Los reportes y la carga de datos los prepara la Analista de RRHH' })
   if (pathname === '/cargas/fuentes')
-    return respuesta(200, { fuentes: FUENTES_DATOS, ejemplos: { mes: '2026-09', nombre_mes: 'septiembre 2026' } })
+    return respuesta(200, {
+      fuentes: FUENTES_DATOS,
+      ejemplos: { mes: '2026-09', nombre_mes: 'septiembre 2026', descargables: !datosReales },
+    })
   if (pathname === '/cargas' && metodo === 'GET') return respuesta(200, estado.cargas)
   const aplicar = pathname.match(/^\/cargas\/(\d+)\/(aplicar|descartar)$/)
   if (aplicar) {
@@ -263,7 +266,8 @@ function respuesta(estado, cuerpo) {
 // Instala la API falsa. `opciones.consultasHastaLista`: cuantas veces se
 // consulta la narrativa nueva antes de que pase de en_proceso a lista.
 // `opciones.demo`: modo demostracion activo (el telefono simulado da el codigo).
-export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = false, demo = false } = {}) {
+// faltantes: { 'AAAA-MM': { fuentes, sin_actualizar } } para simular un mes a medio cargar
+export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = false, demo = false, datosReales = false, faltantes = {} } = {}) {
   const estado = {
     tokenValido: null, consultas: 0, solicitudes: [], exportaciones: [], pedidos: [], suplencia: null,
     pendientes: Object.fromEntries(Object.values(USUARIOS).map((u) => [u.usuario, u.pendiente ?? null])),
@@ -340,9 +344,11 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
     }
     if (pendiente) return respuesta(403, { detail: 'Antes de continuar resuelve lo pendiente' })
     if (pathname.startsWith('/usuarios')) return cuentas(usuario, pathname, metodo, opciones.body && JSON.parse(opciones.body), estado)
-    if (pathname.startsWith('/cargas')) return cargasFalsas(usuario, pathname, metodo, opciones.body, estado)
+    if (pathname.startsWith('/cargas')) return cargasFalsas(usuario, pathname, metodo, opciones.body, estado, datosReales)
     if (pathname === '/areas') return respuesta(200, AREAS.filter((a) => usuario.areas_permitidas.includes(a.id)))
     if (pathname === '/periodos') return respuesta(200, PERIODOS)
+    const enFaltantes = pathname.match(/^\/periodos\/([\d-]+)\/faltantes$/)
+    if (enFaltantes) return respuesta(200, { fuentes: [], sin_actualizar: [], ...faltantes[enFaltantes[1]] })
     if (pathname === '/umbrales') return respuesta(200, estado.umbrales)
     if (pathname === '/umbrales/cambios') return respuesta(200, estado.cambios)
     const enUmbral = pathname.match(/^\/umbrales\/(\w+)$/)

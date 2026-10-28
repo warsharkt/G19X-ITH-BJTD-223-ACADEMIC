@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from typing import Literal
 
 import pandas as pd
-from fastapi import Depends, FastAPI, File, HTTPException, Query, Response, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Path, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
@@ -249,6 +249,21 @@ def areas(u: Usuario = Depends(usuario_actual)):
 def periodos(_u: Usuario = Depends(usuario_actual)):
     """Meses con datos, en formato AAAA-MM, del mas antiguo al mas reciente."""
     return sorted(p.strftime("%Y-%m") for p in kpis_df()["periodo"].unique())
+
+
+@app.get("/periodos/{periodo}/faltantes", response_model=schemas.FuentesDelMes, tags=["Catalogos"])
+def fuentes_faltantes(periodo: str = Path(pattern=r"^\d{4}-(0[1-9]|1[0-2])$"), _u: Usuario = Depends(usuario_actual)):
+    """Que le falta a un mes (AAAA-MM) antes de generar su reporte.
+
+    `fuentes`: fuentes mensuales sin datos de ese mes (el reporte saldria sin
+    sus indicadores). `sin_actualizar`: plantilla y vacantes que nadie ha
+    subido desde que cerro el mes (si hubo altas, bajas o contrataciones, el
+    reporte no las incluiria)."""
+    mes = _mes(periodo).date()
+    try:
+        return {"fuentes": cargas.fuentes_faltantes(mes), "sin_actualizar": cargas.fuentes_sin_actualizar(mes)}
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
 
 
 @app.get("/umbrales", response_model=list[schemas.Umbral], tags=["Catalogos"])

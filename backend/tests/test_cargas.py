@@ -32,6 +32,12 @@ def datos_originales():
     _cache["df"] = None
 
 
+@pytest.fixture(autouse=True)
+def datos_de_prueba(monkeypatch):
+    # Los archivos del mes de ejemplo solo existen con datos sinteticos
+    monkeypatch.setenv("MODO_DATOS", "sinteticos")
+
+
 @pytest.fixture()
 def client():
     return TestClient(app)
@@ -63,10 +69,29 @@ def test_solo_rrhh_carga_datos(client, rol):
 def test_catalogo_y_plantillas(client):
     datos = client.get("/cargas/fuentes").json()
     assert [f["clave"] for f in datos["fuentes"]] == ["hris", "ats", "desempeno", "capacitacion", "clima", "productividad"]
-    assert datos["ejemplos"] == {"mes": "2026-09", "nombre_mes": "septiembre 2026"}
+    assert datos["ejemplos"] == {"mes": "2026-09", "nombre_mes": "septiembre 2026", "descargables": True}
     plantilla = client.get("/cargas/plantillas/desempeno", params={"formato": "csv"})
     assert plantilla.content.decode("utf-8-sig").strip() == "codigo_empleado,periodo,metas_asignadas,metas_logradas,calificacion"
     assert client.get("/cargas/plantillas/no_existe").status_code == 404
+
+
+def test_con_datos_reales_no_hay_archivos_de_ejemplo(client, monkeypatch):
+    monkeypatch.setenv("MODO_DATOS", "reales")
+    ejemplos = client.get("/cargas/fuentes").json()["ejemplos"]
+    assert ejemplos["mes"] == "2026-09" and ejemplos["descargables"] is False  # el mes pendiente si se dice
+    r = client.get("/cargas/ejemplos/hris")
+    assert r.status_code == 422 and "sube los que exporta cada sistema" in r.json()["detail"]
+
+
+def test_lo_que_le_falta_a_un_mes(client):
+    # la historia que ya estaba en la base no paso por Carga de datos: no se revisa
+    assert client.get("/periodos/2026-08/faltantes").json()["fuentes"] == []
+    # nadie ha subido la plantilla ni las vacantes despues de enero de 2030
+    assert client.get("/periodos/2030-01/faltantes").json() == {
+        "fuentes": ["Metas de desempeño", "Capacitación", "Encuesta de clima", "Productividad"],
+        "sin_actualizar": ["Plantilla de personal", "Vacantes"],
+    }
+    assert client.get("/periodos/2026-13/faltantes").status_code == 422
 
 
 # ------------------------------------------------------------ validacion
@@ -169,6 +194,7 @@ def test_cargar_el_mes_siguiente_completo_lo_lleva_al_tablero(client):
             assert aplicada["resultado"]["actualizadas"] > 300  # la plantilla que ya estaba
 
     assert client.get("/periodos").json()[-1] == "2026-09"
+    assert client.get("/periodos/2026-09/faltantes").json() == {"fuentes": [], "sin_actualizar": []}
     kpis = client.get("/kpis", params={"periodo": "2026-09", "area_id": 0}).json()
     assert {k["indicador"] for k in kpis} >= {"rotacion_total", "enps", "indice_productividad", "cumplimiento_metas"}
     # septiembre ya esta completo y octubre sigue en curso: no hay mes pendiente

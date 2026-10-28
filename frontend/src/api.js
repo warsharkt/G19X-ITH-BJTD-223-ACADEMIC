@@ -125,6 +125,7 @@ export const api = {
   codigoDemoConfiguracion: () => pedir('/demo/codigo-configuracion'),
   areas: () => pedir('/areas'),
   periodos: () => pedir('/periodos'),
+  fuentesFaltantes: (periodo) => pedir(`/periodos/${encodeURIComponent(periodo)}/faltantes`),
   umbrales: () => pedir('/umbrales'),
   kpis: (periodo, areaId) => pedir('/kpis' + consulta({ periodo, area_id: areaId })),
   serie: (indicador, areaId) => pedir(`/kpis/serie/${encodeURIComponent(indicador)}` + consulta({ area_id: areaId })),

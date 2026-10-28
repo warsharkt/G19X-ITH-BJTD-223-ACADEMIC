@@ -2,7 +2,8 @@
 
 Cada mes, a partir del dia que configure RRHH, se generan los reportes del
 ultimo mes CERRADO con datos (anterior al mes en curso: un mes a medias no se
-reporta): el consolidado y cada area con indicadores. Nacen pendientes de
+reporta) y COMPLETO (las cuatro fuentes mensuales cargadas: si falta alguna,
+espera): el consolidado y cada area con indicadores. Nacen pendientes de
 revision y sin solicitante, asi que los puede revisar cualquier persona de
 RRHH (regla 10.3.9), y RRHH recibe un aviso conforme cada uno termina.
 
@@ -28,7 +29,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 from sqlalchemy import text
 
-from app import avisos, narrativa, trabajos
+from app import avisos, cargas, narrativa, trabajos
 from app.database import ejecutar_sql, engine
 from app.kpis import calcular_kpis
 from app.llm import ConfiguracionIA, obtener_proveedor
@@ -173,6 +174,12 @@ def revisar(origen: str = "api", dia: date | None = None) -> dict:
         resultado["mensaje"] = "No hay meses cerrados con datos."
     elif _ya_generado(objetivo):
         resultado["mensaje"] = f"Los reportes de {_mes(objetivo)} ya se generaron."
+    elif faltan := cargas.fuentes_faltantes(objetivo.date()):
+        # Se revisa al aplicar cada archivo: sin esto, la primera fuente del
+        # mes generaria reportes incompletos, y un mes se genera una sola vez.
+        resultado["mensaje"] = (
+            f"Los reportes de {_mes(objetivo)} se generan cuando estén todas sus fuentes. Falta: {', '.join(faltan)}."
+        )
     else:
         resultado.update(_generar(objetivo, df, origen))
 

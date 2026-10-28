@@ -116,6 +116,13 @@ class Area(BaseModel):
     nombre: str
 
 
+class FuentesDelMes(BaseModel):
+    fuentes: list[str] = Field(description="Fuentes mensuales sin datos de ese mes")
+    sin_actualizar: list[str] = Field(
+        description="Plantilla y vacantes que nadie ha subido desde que cerro el mes"
+    )
+
+
 class Umbral(BaseModel):
     indicador: str
     nombre: str
