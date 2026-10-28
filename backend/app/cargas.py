@@ -17,8 +17,9 @@ Seguridad y privacidad:
   - Cada carga queda en la tabla `cargas`: quien, cuando, archivo, huella
     SHA-256, filas, columnas descartadas y conciliacion.
 
-ejemplo() genera los archivos del mes siguiente para la empresa de
-demostracion, consistentes entre si y con lo que ya hay en la base.
+ejemplo() genera los archivos del mes pendiente (el siguiente al ultimo
+cargado) como los exportaria cada sistema, consistentes entre si y con lo
+que ya hay en la base.
 """
 import calendar
 import hashlib
@@ -881,11 +882,11 @@ def _paquete(mes: date) -> dict[str, pd.DataFrame]:
 
 
 def ejemplo(clave_fuente: str, formato: str = "xlsx") -> tuple[bytes, str]:
-    """(contenido, nombre de archivo) del ejemplo del mes siguiente."""
+    """(contenido, nombre de archivo) del archivo del mes pendiente."""
     _fuente(clave_fuente)
     mes = mes_de_ejemplo()
     if mes is None:
-        raise ErrorDeCarga("Ya están cargados todos los meses cerrados: no hay un mes siguiente que simular")
+        raise ErrorDeCarga("Ya están cargados todos los meses cerrados: no hay un mes pendiente por subir")
     df = _paquete(mes)[clave_fuente]
     return _exportar(df, formato), f"{clave_fuente}-{mes:%Y-%m}.{formato}"
 

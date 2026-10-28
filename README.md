@@ -6,7 +6,7 @@
 
 **Analítica de Recursos Humanos con IA responsable.** Talentia Insights consolida lo que exportan los sistemas de RRHH (reclutamiento, nómina, desempeño, capacitación, clima laboral y productividad), calcula los indicadores con su semáforo y redacta con IA el reporte ejecutivo de cada área y mes, que una persona de RRHH aprueba antes de distribuirse.
 
-La demostración corre con **Nordika Logística**, una empresa ficticia: operador logístico en Guadalajara con unas 350 personas en Operaciones, Ventas, Transporte, Finanzas, Almacén y Jurídico, y 24 meses de historia.
+El sistema viene instalado para **Nordika Logística**, operador logístico en Guadalajara con unas 350 personas en Operaciones, Ventas, Transporte, Finanzas, Almacén y Jurídico. Arranca con 24 meses de historia (septiembre de 2024 a agosto de 2026), y la Analista de RRHH carga cada mes nuevo desde **Carga de datos**.
 
 - **Carga de datos:** RRHH sube el Excel o CSV que exporta cada sistema. Se valida completo (todo o nada), se descartan los datos personales, se concilia contra la base y queda en bitácora con la huella del archivo.
 - **Motor analítico (sin IA):** calcula los indicadores con SQL y pandas, de forma reproducible y verificada con pruebas.
@@ -15,37 +15,43 @@ La demostración corre con **Nordika Logística**, una empresa ficticia: operado
 - **Quien prepara no firma:** la Analista de RRHH carga los datos y genera los reportes; la Responsable de RRHH los firma (con suplente si no está y una Nota de RRHH opcional). Dirección y los gerentes los piden a RRHH. Cada reporte dice quién lo firmará, y los firmados se descargan en PDF y presentación.
 - **Avisos y programación mensual:** alertas de indicadores en rojo y de reportes por revisar; los reportes del mes se pueden generar solos.
 
-> Todos los datos son **ficticios** (generados por `scripts/seed.py`). No contienen información de personas reales.
+> Nordika Logística y sus datos son ficticios (`scripts/seed.py`) y no corresponden a personas reales. Dentro del sistema se tratan como los datos de la empresa: para usarlo en otra, se cambian todos (ver [Usarlo con los datos de otra empresa](#usarlo-con-los-datos-de-otra-empresa)).
 
-## Demostración
+## Cuentas de Nordika
 
-La demostración recorre el sistema completo como en producción y enseña **cómo se entra de verdad**: contraseña y código de verificación en dos pasos. Ninguna medida de seguridad se apaga. En la pantalla de inicio, una nota indica que se puede probar desde ahí: se pulsa **Usar** en una cuenta y luego **Entrar**. Al llegar al código, un **teléfono simulado** lo muestra, y la pantalla aclara que ese teléfono no es parte del sistema: solo enseña cómo se usaría en realidad, donde cada persona ve el código en la app de su propio celular. La primera vez que se entra con cada cuenta se configura la verificación (el teléfono ya muestra el código del QR) y se guardan los códigos de respaldo.
+La pantalla de inicio es la de producción: no muestra cuentas ni contraseñas. Estas son las cuentas del personal de Nordika. Todas usan la contraseña inicial **`Nordika-2026`**, que se cambia con `DEMO_CONTRASENA` en el `.env`.
 
-1. Levántalo con Docker ([Cómo levantarlo](#cómo-levantarlo)), con `MODO_DATOS=sinteticos` y `MODO_DEMO=si` en el `.env`.
-2. Las cuentas de prueba se crean solas al arrancar. En modo desarrollo, créalas con `python -m scripts.demo`.
-3. Abre el tablero y elige un rol en la pantalla de inicio.
-
-| Cuenta | Persona | Para mostrar |
+| Usuario | Persona | Qué hace |
 |---|---|---|
-| `demo_analista` | Eva Muñoz, Analista de RRHH | Carga de datos y generar los reportes con IA; ve a quién se le enviarán para su firma |
-| `demo_rrhh` | Ana Ríos, Responsable de RRHH | Firmar (aprobar o rechazar) los reportes con una Nota de RRHH, designar suplente, umbrales y programación |
-| `demo_direccion` | Andrea Salinas, Dirección General | Solo el consolidado; recibe los reportes firmados y puede pedir uno a RRHH |
-| `demo_gerente` | Luis Ortega, Gerente de Ventas | Solo su área; recibe su reporte firmado y puede pedir uno a RRHH |
-| `demo_ti` | Carlos Peña, Soporte TI | Administrar cuentas y asignar quién firma, sin ver datos de colaboradores |
+| `eva.munoz` | Eva Muñoz, Analista de RRHH | Carga los datos de cada mes y genera los reportes con IA; ve a quién se le enviarán para su firma |
+| `ana.rios` | Ana Ríos, Responsable de RRHH | Firma (aprueba o rechaza) los reportes con una Nota de RRHH; designa suplente; umbrales y programación |
+| `andrea.salinas` | Andrea Salinas, Dirección General | Solo el consolidado; recibe los reportes firmados y puede pedir uno a RRHH |
+| `luis.ortega` | Luis Ortega, Gerente de Ventas | Solo su área; recibe su reporte firmado y puede pedir uno a RRHH |
+| `carlos.pena` | Carlos Peña, Soporte TI | Administra las cuentas y asigna quién firma, sin ver datos de colaboradores |
 
-**Un recorrido sugerido:**
-Para pasar de un rol a otro, cierra sesión y entra con la siguiente cuenta.
+Se entra como en producción: usuario, contraseña y código de verificación en dos pasos. Ninguna medida de seguridad se apaga. La primera vez, Dirección, RRHH y TI configuran la verificación (escanean el QR) y guardan sus códigos de respaldo. Para no necesitar un celular, un **teléfono simulado** junto al formulario muestra el código. La pantalla aclara que no es parte del sistema: es una simulación de la app que cada persona tendría en su propio celular.
+
+Las cuentas se crean solas al arrancar con Docker (en modo desarrollo: `python -m scripts.demo`). Para eso se necesita `MODO_DATOS=sinteticos` y `MODO_DEMO=si` en el `.env`. El modo **se niega a funcionar con `MODO_DATOS=reales`** y nunca muestra el código de otra cuenta. Si tu base tiene las cuentas `demo_*` de una versión anterior, el script las renombra y conserva su historial.
+
+**Un recorrido sugerido** (para cambiar de persona, cierra sesión y entra con la siguiente cuenta):
 
 1. Entra como **Andrea** (Dirección) y, en **Reportes**, pide a RRHH el reporte del último mes.
-2. Entra como **Eva** (Analista): el aviso del pedido abre el formulario con el área y el mes ya elegidos. En **Carga de datos** puedes subir antes los archivos de ejemplo de septiembre de 2026 (vienen con nombres de personas: el sistema los descarta, valida cada fila y concilia archivo contra base). Genera el reporte: la pantalla dice que se enviará a Ana para su firma.
+2. Entra como **Eva** (Analista). Antes de generar, sube en **Carga de datos** los seis archivos de septiembre de 2026, el mes pendiente: el sistema valida cada fila, descarta las columnas con datos personales (como nombres) y concilia el archivo contra la base. Después, el aviso del pedido abre el formulario con el área y el mes ya elegidos. Genera el reporte; la pantalla dice que se enviará a Ana para su firma.
 3. Entra como **Ana** (Responsable): el aviso "listo para tu firma" lleva al reporte. Apruébalo con una Nota de RRHH, o recházalo con motivo.
 4. Vuelve a entrar como **Andrea** para verlo firmado y descargarlo en PDF o presentación, con la Nota de RRHH.
 5. Entra como **Carlos** (TI) para crear una cuenta con contraseña temporal y revisar la bitácora de cuentas.
 
+Para dejar las cuentas como nuevas, vuelve a correr `python -m scripts.demo`. Para volver a los datos iniciales de Nordika, corre `python -m scripts.seed`. Con `MODO_DATOS=sinteticos` también puedes usar Groq para que los reportes salgan en segundos (sección [Inteligencia artificial](#inteligencia-artificial)).
 
-Para dejar las cuentas como nuevas después de una demostración, vuelve a correr `python -m scripts.demo`. Para volver a los datos originales de Nordika, corre `python -m scripts.seed`.
+## Usarlo con los datos de otra empresa
 
-El modo demostración **se niega a funcionar con `MODO_DATOS=reales`**, y nunca muestra el código de una cuenta que no sea `demo_`. Con `MODO_DATOS=sinteticos` también puedes usar Groq para que los reportes salgan en segundos (sección Inteligencia artificial).
+Nada de Nordika está fijo en el código: el nombre sale de `EMPRESA_NOMBRE`, y las áreas, las personas y los indicadores salen de la base. Para instalarlo en una empresa real:
+
+1. En el `.env`, pon `EMPRESA_NOMBRE` con el nombre de la empresa, `MODO_DATOS=reales` y `MODO_DEMO=no`. Así se apagan las cuentas de Nordika, el teléfono simulado y la IA en la nube; los reportes los redacta Ollama en el propio servidor.
+2. Parte de una base vacía: `docker compose down -v` y luego `docker compose up -d --build`. Con `MODO_DATOS=reales` no se siembra nada.
+3. Crea la primera cuenta de TI con `python -m scripts.crear_usuario` (sección [Usuarios y roles](#usuarios-y-roles)). Desde el tablero, TI crea las cuentas del personal con contraseña temporal y asigna quién firma.
+4. La Analista de RRHH sube desde **Carga de datos** lo que exporta cada sistema: plantilla de personal, vacantes, metas, capacitación, clima y productividad. Las plantillas de columnas están en la misma pantalla.
+5. La Responsable de RRHH revisa los umbrales en **Configuración** antes del primer reporte.
 
 ## Tecnologías
 
@@ -77,7 +83,7 @@ MODO_DEMO=si
 docker compose up -d --build
 ```
 
-La primera vez tarda unos minutos: descarga lo necesario, arma la API y el tablero y carga los datos ficticios de Nordika. Después abre **http://localhost:8080** y elige un rol.
+La primera vez tarda unos minutos: descarga lo necesario, arma la API y el tablero y carga los datos iniciales de Nordika. Después abre **http://localhost:8080** y entra con una de las [cuentas de Nordika](#cuentas-de-nordika).
 
 - **IA para redactar los reportes:** instala [Ollama](https://ollama.com), corre `ollama pull qwen3:8b` y deja la app abierta. Sin Ollama todo funciona menos generar reportes, que quedan en error con el motivo. Con datos sintéticos también puedes usar Groq (sección [Inteligencia artificial](#inteligencia-artificial)).
 - **Apagar y volver a encender:** `docker compose stop` y `docker compose up -d`. Los datos se conservan.
@@ -113,7 +119,7 @@ Para ver los cambios al instante, primero haz la [instalación local](#instalaci
 | Con Supabase, la API tarda y falla al conectar | El proyecto gratuito se pausa tras 7 días sin uso: reactívalo desde el panel de Supabase. |
 | El tablero dice "No se pudo conectar con la API" | Enciende la API (terminal 2). Si corre en otra dirección, ajusta `VITE_API_URL` en `frontend/.env`. |
 | El reporte queda en **error** porque el modelo no está disponible | Abre Ollama y corre `ollama pull qwen3:8b`, o usa Groq con `MODO_DATOS=sinteticos`. Luego vuelve a solicitar el reporte. |
-| No aparecen las cuentas de prueba en la pantalla de inicio | Pon `MODO_DATOS=sinteticos` y `MODO_DEMO=si` en el `.env` y corre `docker compose up -d` (con Docker se crean al arrancar). En modo desarrollo: `python -m scripts.demo` y reinicia la API. |
+| `eva.munoz` (u otra cuenta de Nordika) dice "Usuario o contraseña incorrectos" | Pon `MODO_DATOS=sinteticos` y `MODO_DEMO=si` en el `.env` y corre `docker compose up -d` (con Docker se crean al arrancar). En modo desarrollo: `python -m scripts.demo`. Después de correr `pytest`, vuelve a correr `python -m scripts.demo`: las pruebas borran esas cuentas. |
 
 ## Instalación local
 
@@ -137,7 +143,7 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 
-# 4. Datos de Nordika Logística (ficticios: 24 meses, 6 áreas)
+# 4. Datos iniciales de Nordika Logística (24 meses, 6 áreas)
 python -m scripts.seed
 
 # 5. Tu usuario (la contraseña se escribe oculta; mínimo 10 caracteres)
@@ -170,7 +176,7 @@ Abre http://localhost:5173 e inicia sesión con tu usuario. Si la API no está e
 | **Tablero** | Indicadores del mes con semáforo (siempre con icono y texto), variación contra el mes y el año anterior, y la tendencia del indicador elegido con sus umbrales. Filtros por área, mes e indicador; quedan en la dirección de la página, así que se pueden compartir |
 | **Narrativas** | Solicita el reporte con IA de un área y mes, muestra el avance mientras se redacta, permite aprobarlo o rechazarlo, descargar los aprobados en PDF o presentación, y guarda el historial consultable por área, mes y revisión |
 | **Avisos** | Indicadores en rojo, reportes por revisar y reportes aprobados o rechazados de tus áreas. El menú muestra cuántos faltan por leer |
-| **Carga de datos** (solo RRHH) | Subir el Excel o CSV de cada sistema, revisar la validación y lo que se descarta, aplicar y ver la conciliación. Plantillas y archivos de ejemplo del mes siguiente. Bitácora de cargas con la huella SHA-256 de cada archivo |
+| **Carga de datos** (solo RRHH) | Subir el Excel o CSV de cada sistema, revisar la validación y lo que se descarta, aplicar y ver la conciliación. Plantillas y archivos del mes pendiente (hoy, septiembre 2026). Bitácora de cargas con la huella SHA-256 de cada archivo |
 | **Configuración** | Umbrales del semáforo con su bitácora de cambios, y programación mensual. Todos la ven; solo RRHH la cambia |
 | **Usuarios** | Cuentas y su bitácora. TI las crea, modifica, desactiva y les restablece la contraseña o la verificación en dos pasos; RRHH solo las consulta |
 | **Mi cuenta** (tu nombre, arriba a la derecha) | Cambiar tu contraseña y activar la verificación en dos pasos |
@@ -192,7 +198,7 @@ Los reportes se generan en segundo plano: `POST /narrativas` devuelve un id y `G
 
 ### Revisión antes de distribuir
 
-Todo reporte nace **pendiente de revisión**. Una persona de RRHH lo **aprueba** o lo **rechaza** con motivo desde la pantalla del reporte (o con `POST /narrativas/{id}/revision`). Quien lo solicitó no puede aprobarlo: para probar este flujo necesitas **dos usuarios con rol `rrhh`**. La decisión es definitiva y queda registrada con usuario, fecha y comentario. Si se rechaza, se solicita uno nuevo.
+Todo reporte nace **pendiente de firma** y dice quién lo firmará. La Responsable de RRHH (o su suplente) lo **aprueba**, con una Nota de RRHH opcional, o lo **rechaza** con motivo desde la pantalla del reporte (o con `POST /narrativas/{id}/revision`). Nadie firma lo que pidió. La decisión es definitiva y queda registrada con usuario, fecha y comentario. Si se rechaza, se solicita uno nuevo.
 
 ### Exportar
 
@@ -253,7 +259,7 @@ Al crear un usuario puedes agregar `--correo` para que reciba el correo de aviso
 | Rol | Ve |
 |---|---|
 | `direccion` | Solo el consolidado corporativo |
-| `rrhh` | Todo; aprueba o rechaza los reportes que solicitó otra persona; cambia umbrales y programación |
+| `rrhh` | Todo. La Analista carga los datos y genera los reportes; la Responsable (la marca TI) los firma, nunca los que pidió. Cambia umbrales y programación |
 | `gerente` | Solo su área |
 | `admin_ti` | Administra las cuentas; ve la configuración sin cambiarla; sin datos de colaboradores ni avisos |
 
@@ -310,7 +316,7 @@ backend/
     exportar.py      reporte aprobado en PDF y presentación
     seguridad.py     inicio de sesión, cuentas con bitácora, contraseñas, tokens y permisos por rol
     mfa.py           verificación en dos pasos (TOTP) y códigos de respaldo
-    demo.py          modo demostración: cuentas de prueba por rol y teléfono simulado
+    demo.py          modo demostración: cuentas del personal de Nordika y teléfono simulado
     cargas.py        carga de archivos de los sistemas fuente: validación y conciliación
     marca.py         nombre del producto y de la empresa
     database.py      conexión a PostgreSQL (local o Supabase)

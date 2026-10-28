@@ -692,11 +692,10 @@ def reiniciar_mfa(usuario_id: int, u: Usuario = Depends(solo_ti)):
 # --------------------------------------------------- modo demostracion
 @app.get("/demo", response_model=schemas.Demo, tags=["Demostración"])
 def ver_demo():
-    """Si el modo demostracion esta activo (MODO_DEMO=si con datos sinteticos),
-    las cuentas de demostracion y su contrasena. No requiere sesion."""
-    if not demo.activo():
-        return {"activo": False}
-    return {"activo": True, "contrasena": demo.contrasena(), "cuentas": demo.cuentas_publicas()}
+    """Si el modo demostracion esta activo (MODO_DEMO=si con datos sinteticos).
+    No requiere sesion, asi que no dice que cuentas existen ni su contrasena:
+    la pantalla de inicio se ve como en produccion."""
+    return {"activo": demo.activo()}
 
 
 def _codigo_demo(usuario_id: int) -> dict:
@@ -711,7 +710,7 @@ def _codigo_demo(usuario_id: int) -> dict:
 @app.post("/demo/codigo", response_model=schemas.CodigoDemo, tags=["Demostración"])
 def codigo_demo_al_entrar(solicitud: schemas.CodigoDemoSolicitud):
     """Codigo vigente de una cuenta de demostracion durante el segundo paso del
-    inicio de sesion. Solo en modo demo y solo para cuentas demo_."""
+    inicio de sesion. Solo en modo demo y solo para las cuentas de demostracion."""
     u = seguridad.usuario_del_token(solicitud.mfa_token, "mfa")
     if u is None:
         raise HTTPException(status_code=401, detail="La verificación venció; vuelve a escribir tu usuario y contraseña")
@@ -721,7 +720,7 @@ def codigo_demo_al_entrar(solicitud: schemas.CodigoDemoSolicitud):
 @app.get("/demo/codigo-configuracion", response_model=schemas.CodigoDemo, tags=["Demostración"])
 def codigo_demo_al_configurar(u: Usuario = Depends(sesion_actual)):
     """Codigo vigente del QR recien generado, para activar el MFA sin telefono.
-    Solo en modo demo y solo para cuentas demo_."""
+    Solo en modo demo y solo para las cuentas de demostracion."""
     return _codigo_demo(u.id)
 
 
@@ -746,7 +745,7 @@ def _carga(funcion, *args):
 
 @app.get("/cargas/fuentes", tags=["Carga de datos"])
 def fuentes_de_datos(_u: Usuario = Depends(solo_analista)) -> dict:
-    """Fuentes que se pueden cargar, sus columnas y el mes de los archivos de ejemplo."""
+    """Fuentes que se pueden cargar, sus columnas y el mes pendiente por subir."""
     return {"fuentes": cargas.catalogo(), "ejemplos": _carga(cargas.info_ejemplos)}
 
 
@@ -791,7 +790,7 @@ def plantilla_de_carga(
 def ejemplo_de_carga(
     fuente: str, formato: Literal["csv", "xlsx"] = "xlsx", _u: Usuario = Depends(solo_analista)
 ):
-    """Archivo de ejemplo de la empresa de demostracion para el mes siguiente
-    al ultimo cargado, como lo exportaria su sistema (con columnas de mas)."""
+    """Archivo del mes pendiente (el siguiente al ultimo cargado), como lo
+    exportaria el sistema de la fuente (con columnas de mas)."""
     contenido, nombre = _carga(cargas.ejemplo, fuente, formato)
     return _archivo(contenido, nombre, _TIPOS[formato])

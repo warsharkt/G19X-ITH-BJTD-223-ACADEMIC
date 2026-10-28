@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import BotonTema from '../componentes/BotonTema'
 import Icono from '../componentes/Iconos'
 import Marca from '../componentes/Marca'
@@ -13,44 +13,10 @@ const SEGURIDAD = [
   ['ia', 'IA revisada por personas', 'RRHH prepara cada reporte y su Responsable lo firma antes de distribuirlo.'],
 ]
 
-// Modo demostracion: cuentas de prueba por rol. Se entra como en produccion
-// (contrasena y codigo); el telefono simulado aparece en el paso del codigo.
-function CuentasDemo({ demo, empresa, elegida, alUsar }) {
-  return (
-    <section className="cuentas-demo" aria-label="Cuentas de prueba">
-      <h2>Cuentas de prueba{empresa && ` de ${empresa}`}</h2>
-      <p className="nota">
-        Puedes probar el sistema desde aquí: pulsa <strong>Usar</strong> en una cuenta y luego <strong>Entrar</strong>.
-      </p>
-      <ul>
-        {demo.cuentas.map((c) => (
-          <li key={c.usuario} className={elegida === c.usuario ? 'elegida' : undefined}>
-            <div>
-              <strong>{c.cargo}</strong>
-              <span>{c.nombre}</span>
-              <span className="nota">{c.descripcion}</span>
-            </div>
-            <button
-              type="button"
-              className="boton-secundario"
-              aria-label={`Usar ${c.usuario}`}
-              aria-pressed={elegida === c.usuario}
-              onClick={() => alUsar(c.usuario)}
-            >
-              {elegida === c.usuario ? 'Elegida' : 'Usar'}
-            </button>
-          </li>
-        ))}
-      </ul>
-      <p className="nota">
-        Contraseña de todas: <code className="clave-demo">{demo.contrasena}</code>
-      </p>
-    </section>
-  )
-}
-
 // Inicio de sesion en uno o dos pasos: contrasena y, si la cuenta tiene
-// verificacion en dos pasos, el codigo de la app (o uno de respaldo).
+// verificacion en dos pasos, el codigo de la app (o uno de respaldo). Igual
+// en el modo demostracion: no lista cuentas; solo el telefono simulado
+// aparece en el paso del codigo.
 export default function Login() {
   const { iniciarSesion, verificarMfa, aviso, demo, marca } = useSesion()
   const [usuario, setUsuario] = useState('')
@@ -59,7 +25,6 @@ export default function Login() {
   const [codigo, setCodigo] = useState('')
   const [error, setError] = useState(null)
   const [enviando, setEnviando] = useState(false)
-  const botonEntrar = useRef(null)
 
   async function enviar(e) {
     e.preventDefault()
@@ -88,15 +53,6 @@ export default function Login() {
     setCodigo('')
     setError(null)
   }
-
-  function usarCuenta(nombre) {
-    setUsuario(nombre)
-    setContrasena(demo.contrasena)
-    setError(null)
-    botonEntrar.current?.focus() // el siguiente paso es Entrar
-  }
-
-  const elegida = demo.activo && contrasena === demo.contrasena ? usuario : null
 
   return (
     <main className="pagina-login">
@@ -206,15 +162,11 @@ export default function Login() {
                   required
                 />
               </label>
-              <button type="submit" className="boton-primario" disabled={enviando} ref={botonEntrar}>
+              <button type="submit" className="boton-primario" disabled={enviando}>
                 {enviando ? 'Entrando…' : 'Entrar'}
               </button>
               <p className="nota">Tras 5 intentos fallidos seguidos la cuenta se bloquea unos minutos.</p>
             </>
-          )}
-
-          {demo.activo && !mfaToken && (
-            <CuentasDemo demo={demo} empresa={marca.empresa} elegida={elegida} alUsar={usarCuenta} />
           )}
         </form>
       </section>

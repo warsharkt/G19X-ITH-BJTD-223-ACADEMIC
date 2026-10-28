@@ -7,7 +7,7 @@ import App from '../App'
 import { SEGUNDOS_ENTRE_CONSULTAS } from '../paginas/DetalleNarrativa'
 import { ProveedorSesion } from '../sesion'
 import { aplicarTema, temaInicial } from '../tema'
-import { CODIGO_MFA, CONTRASENA_DEMO, instalarApiFalsa } from './apiFalsa'
+import { CODIGO_MFA, instalarApiFalsa } from './apiFalsa'
 
 function montar(ruta = '/') {
   return render(
@@ -605,29 +605,20 @@ describe('demostración', () => {
     expect(screen.getByRole('heading', { name: 'Inicia sesión' })).toBeInTheDocument()
   })
 
-  it('dice que se puede probar desde aquí y lista cada cuenta con su cargo', async () => {
+  it('como en producción, la pantalla de inicio no lista cuentas ni contraseñas', async () => {
     instalarApiFalsa({ demo: true })
     montar()
-    const cuentas = await screen.findByRole('region', { name: 'Cuentas de prueba' })
-    expect(cuentas).toHaveTextContent('Puedes probar el sistema desde aquí')
-    expect(cuentas).toHaveTextContent('Analista de RRHH')
-    expect(cuentas).toHaveTextContent('Responsable de RRHH')
-    expect(cuentas).toHaveTextContent(CONTRASENA_DEMO)
+    expect(await screen.findByText('Nordika Logística')).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Cuentas de prueba' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Usar/ })).not.toBeInTheDocument()
+    expect(screen.queryByText(/demostración|de prueba/i)).not.toBeInTheDocument()
     // no hay atajo: siempre se entra con contraseña y código
     expect(screen.queryByLabelText('Cambiar de rol')).not.toBeInTheDocument()
   })
 
   it('pide el código y el teléfono simulado lo muestra', async () => {
-    instalarApiFalsa({ demo: true })
-    const persona = userEvent.setup()
-    montar()
-    const cuentas = await screen.findByRole('region', { name: 'Cuentas de prueba' })
-
-    await persona.click(within(cuentas).getByRole('button', { name: 'Usar lia' }))
-    expect(screen.getByLabelText('Usuario')).toHaveValue('lia')
-    expect(within(cuentas).getByRole('button', { name: 'Usar lia' })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByRole('button', { name: 'Entrar' })).toHaveFocus() // el siguiente paso
-    await persona.click(screen.getByRole('button', { name: 'Entrar' }))
+    const { contrasena } = instalarApiFalsa({ demo: true })
+    const persona = await entrar('lia', contrasena)
 
     // la verificacion en dos pasos se sigue pidiendo
     expect(await screen.findByRole('heading', { name: 'Verificación en dos pasos' })).toBeInTheDocument()
@@ -657,7 +648,7 @@ describe('carga de datos (RF-01)', () => {
     const { contrasena, estado } = instalarApiFalsa()
     const persona = await entrar('ana', contrasena)
     await persona.click(await screen.findByRole('link', { name: 'Carga de datos' }))
-    expect(await screen.findByText('Archivos de ejemplo: septiembre 2026')).toBeInTheDocument()
+    expect(await screen.findByText('Mes pendiente: septiembre 2026')).toBeInTheDocument()
 
     const archivo = new File(['codigo,nombre_completo,area'], 'hris-2026-09.xlsx')
     await persona.upload(await screen.findByLabelText('Subir archivo de Plantilla de personal'), archivo)

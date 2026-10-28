@@ -259,20 +259,9 @@ function respuesta(estado, cuerpo) {
   return Promise.resolve(new Response(JSON.stringify(cuerpo), { status: estado, headers: { 'Content-Type': 'application/json' } }))
 }
 
-export const CONTRASENA_DEMO = 'Demo-RRHH-2026'
-const DEMO = {
-  activo: true,
-  contrasena: CONTRASENA_DEMO,
-  cuentas: [
-    { usuario: 'lia', nombre: 'Lía Torres', rol: 'rrhh', cargo: 'Analista de RRHH', descripcion: 'Carga los datos y genera los reportes.' },
-    { usuario: 'eva', nombre: 'Eva Ruiz', rol: 'rrhh', cargo: 'Responsable de RRHH', descripcion: 'Firma los reportes.' },
-    { usuario: 'dir', nombre: 'Dirección General', rol: 'direccion', cargo: 'Dirección General', descripcion: 'Recibe el consolidado.' },
-  ],
-}
-
 // Instala la API falsa. `opciones.consultasHastaLista`: cuantas veces se
 // consulta la narrativa nueva antes de que pase de en_proceso a lista.
-// `opciones.demo`: modo demostracion activo (las cuentas aceptan CONTRASENA_DEMO).
+// `opciones.demo`: modo demostracion activo (el telefono simulado da el codigo).
 export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = false, demo = false } = {}) {
   const estado = {
     tokenValido: null, consultas: 0, solicitudes: [], exportaciones: [], pedidos: [], suplencia: null,
@@ -298,7 +287,7 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
     const metodo = opciones.method ?? 'GET'
 
     if (pathname === '/marca') return respuesta(200, { producto: 'Talentia Insights', empresa: 'Nordika Logística' })
-    if (pathname === '/demo') return respuesta(200, demo ? DEMO : { activo: false, contrasena: null, cuentas: [] })
+    if (pathname === '/demo') return respuesta(200, { activo: demo })
     if (pathname === '/demo/codigo') {
       if (!demo) return respuesta(404, { detail: 'El modo demostración no está activo' })
       return respuesta(200, { codigo: CODIGO_MFA, segundos: 17 })
@@ -307,7 +296,7 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
       const f = new URLSearchParams(opciones.body)
       const quien = USUARIOS[f.get('username')]
       const clave = f.get('password')
-      if (!quien || (clave !== CONTRASENA && !(demo && clave === CONTRASENA_DEMO)))
+      if (!quien || clave !== CONTRASENA)
         return respuesta(401, { detail: 'Usuario o contraseña incorrectos' })
       if (quien.mfa_activo)
         return respuesta(200, { access_token: null, mfa_requerido: true, mfa_token: `mfa-${quien.usuario}`, token_type: 'bearer', expira_en_minutos: 5 })

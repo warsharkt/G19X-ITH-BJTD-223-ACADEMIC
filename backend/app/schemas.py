@@ -401,18 +401,8 @@ class PedidoCreado(BaseModel):
 
 
 # -------------------------------------------------------- modo demostracion
-class CuentaDemo(BaseModel):
-    usuario: str
-    nombre: str
-    rol: str
-    cargo: str = Field(description="Como se ve el rol en pantalla, p. ej. Analista de RRHH")
-    descripcion: str
-
-
 class Demo(BaseModel):
-    activo: bool
-    contrasena: str | None = Field(None, description="Contrasena de las cuentas de demostracion")
-    cuentas: list[CuentaDemo] = []
+    activo: bool = Field(description="Si el telefono simulado muestra el codigo de las cuentas de demostracion")
 
 
 class CodigoDemo(BaseModel):

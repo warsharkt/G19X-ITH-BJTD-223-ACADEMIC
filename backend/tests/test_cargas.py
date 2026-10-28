@@ -159,7 +159,7 @@ def test_cargar_el_mes_siguiente_completo_lo_lleva_al_tablero(client):
     assert client.get("/periodos").json()[-1] == "2026-09"
     kpis = client.get("/kpis", params={"periodo": "2026-09", "area_id": 0}).json()
     assert {k["indicador"] for k in kpis} >= {"rotacion_total", "enps", "indice_productividad", "cumplimiento_metas"}
-    # septiembre ya esta completo y octubre sigue en curso: no hay mas meses que simular
+    # septiembre ya esta completo y octubre sigue en curso: no hay mes pendiente
     r = client.get("/cargas/ejemplos/hris")
     assert r.status_code == 422 and "Ya están cargados" in r.json()["detail"]
 

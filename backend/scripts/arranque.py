@@ -3,7 +3,8 @@
 Deja todo listo para entrar sin correr scripts a mano:
   1. Si la base esta vacia y MODO_DATOS=sinteticos, carga los datos ficticios
      de Nordika (scripts/seed.py). Con datos reales nunca siembra nada.
-  2. Si el modo demostracion esta activo, crea o restablece las cuentas demo_.
+  2. Si el modo demostracion esta activo, crea o restablece las cuentas
+     del personal de Nordika (app/demo.py).
   3. Si no hay JWT_SECRETO, genera uno al azar para esta ejecucion (las
      sesiones se cierran al reiniciar el contenedor; nada se guarda en disco).
   4. Arranca la API (uvicorn) en el puerto 8000 del contenedor.

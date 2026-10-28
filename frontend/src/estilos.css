@@ -976,13 +976,6 @@ textarea:focus {
   color: var(--estado-bueno);
 }
 
-.clave-demo {
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  white-space: nowrap;
-  color: var(--texto);
-  font-weight: 600;
-}
-
 .huella {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 0.78rem;
@@ -1819,58 +1812,6 @@ a.cuenta-enlace:hover,
 a.cuenta-enlace.active {
   background: var(--superficie-2);
 }
-
-/* Modo demostracion: cuentas de prueba y los pasos para entrar */
-.cuentas-demo {
-  border-top: 1px solid var(--borde);
-  padding-top: 1rem;
-}
-
-.cuentas-demo h2 {
-  font-size: 0.95rem;
-  margin: 0 0 0.15rem;
-}
-
-.cuentas-demo > .nota {
-  margin: 0 0 0.6rem;
-}
-
-.cuentas-demo ul {
-  list-style: none;
-  margin: 0 0 0.6rem;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-}
-
-.cuentas-demo li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  background: var(--superficie);
-  border: 1px solid var(--borde);
-  border-radius: 12px;
-  padding: 0.55rem 0.7rem;
-}
-
-.cuentas-demo li.elegida {
-  border-color: var(--acento);
-  background: var(--fondo-info);
-}
-
-.cuentas-demo li div {
-  display: flex;
-  flex-direction: column;
-  font-size: 0.88rem;
-}
-
-.cuentas-demo li .nota {
-  text-align: left;
-  font-size: 0.78rem;
-}
-
 
 /* ------------------------------------------------------------ pantallas chicas */
 @media (max-width: 900px) {

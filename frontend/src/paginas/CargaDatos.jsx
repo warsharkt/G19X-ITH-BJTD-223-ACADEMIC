@@ -289,10 +289,10 @@ export default function CargaDatos() {
       {catalogo.error && <Mensaje>{catalogo.error.message}</Mensaje>}
       {error && <Mensaje>{error}</Mensaje>}
       {ejemplos && (
-        <Mensaje tipo="info" titulo={ejemplos.mes ? `Archivos de ejemplo: ${ejemplos.nombre_mes}` : 'Sin meses por simular'}>
+        <Mensaje tipo="info" titulo={ejemplos.mes ? `Mes pendiente: ${ejemplos.nombre_mes}` : 'Sin meses pendientes'}>
           {ejemplos.mes
-            ? 'Descarga el ejemplo de cada fuente y súbelo en orden: así se ve cómo llega un mes nuevo al tablero. Vienen como los exporta cada sistema, con columnas de más (incluso nombres) para mostrar qué se descarta.'
-            : 'Ya están cargados todos los meses cerrados. Puedes subir tus propios archivos con las plantillas.'}
+            ? `Ya están los archivos de ${ejemplos.nombre_mes} exportados de cada sistema. Descárgalos con «Archivo del mes» y súbelos en orden: al aplicarlos, el mes aparece en el tablero. Traen columnas de más (incluso nombres) que el sistema descarta.`
+            : 'Ya están cargados todos los meses cerrados. El siguiente se sube cuando cierre, con el formato de las plantillas.'}
         </Mensaje>
       )}
 
@@ -349,10 +349,10 @@ export default function CargaDatos() {
                 <button
                   type="button"
                   className="boton-secundario"
-                  aria-label={`Descargar ejemplo de ${f.nombre}`}
+                  aria-label={`Descargar archivo de ${ejemplos.nombre_mes} de ${f.nombre}`}
                   onClick={() => descargar(() => api.ejemploDeCarga(f.clave))}
                 >
-                  <Icono nombre="descargar" tamano={16} /> Ejemplo
+                  <Icono nombre="descargar" tamano={16} /> Archivo del mes
                 </button>
               )}
               <button
