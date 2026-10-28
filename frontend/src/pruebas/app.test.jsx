@@ -393,9 +393,9 @@ describe('avisos (RF-09)', () => {
 })
 
 describe('configuración (RF-12)', () => {
-  it('RRHH edita un umbral y el cambio queda en la bitácora', async () => {
+  it('la Responsable de RRHH edita un umbral y el cambio queda en la bitácora', async () => {
     const { contrasena, estado } = instalarApiFalsa()
-    const persona = await entrar('ana', contrasena, '/configuracion')
+    const persona = await entrar('eva', contrasena, '/configuracion')
     await persona.click(await screen.findByRole('button', { name: 'Editar Tasa de rotación mensual' }))
     const atencion = screen.getByLabelText('Atención de Tasa de rotación mensual')
     const critico = screen.getByLabelText('Crítico de Tasa de rotación mensual')
@@ -409,14 +409,22 @@ describe('configuración (RF-12)', () => {
     expect(cambios).toHaveTextContent('Tasa de rotación mensual')
     expect(cambios).toHaveTextContent('2.0 % / 3.5 %')
     expect(cambios).toHaveTextContent('2.5 % / 4.0 %')
-    expect(cambios).toHaveTextContent('ana')
+    expect(cambios).toHaveTextContent('eva')
     expect(estado.umbrales.find((u) => u.indicador === 'rotacion_total').umbral_critico).toBe(4)
     expect(screen.queryByLabelText('Atención de Tasa de rotación mensual')).not.toBeInTheDocument()
   })
 
+  it('la Analista ve los umbrales pero no los edita', async () => {
+    const { contrasena } = instalarApiFalsa()
+    await entrar('ana', contrasena, '/configuracion')
+    expect(await screen.findByText(/Solo la Responsable de RRHH los cambia/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Editar Tasa de rotación mensual' })).not.toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'Generar los reportes cada mes' })).toBeEnabled() // la programación sí
+  })
+
   it('muestra el motivo si la API rechaza el umbral', async () => {
     const { contrasena } = instalarApiFalsa()
-    const persona = await entrar('ana', contrasena, '/configuracion')
+    const persona = await entrar('eva', contrasena, '/configuracion')
     await persona.click(await screen.findByRole('button', { name: 'Editar Tasa de rotación mensual' }))
     const critico = screen.getByLabelText('Crítico de Tasa de rotación mensual')
     await persona.clear(critico)

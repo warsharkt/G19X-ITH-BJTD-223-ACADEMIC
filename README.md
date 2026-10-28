@@ -178,7 +178,7 @@ Abre http://localhost:5173 e inicia sesión con tu usuario. Si la API no está e
 | **Narrativas** | Solicita el reporte con IA de un área y mes, muestra el avance mientras se redacta, permite aprobarlo o rechazarlo, descargar los aprobados en PDF o presentación, y guarda el historial consultable por área, mes y revisión |
 | **Avisos** | Indicadores en rojo, reportes por revisar y reportes aprobados o rechazados de tus áreas. El menú muestra cuántos faltan por leer |
 | **Carga de datos** (solo RRHH) | Subir el Excel o CSV de cada sistema, revisar la validación y lo que se descarta, aplicar y ver la conciliación. Plantillas y archivos del mes pendiente (hoy, septiembre 2026). Bitácora de cargas con la huella SHA-256 de cada archivo |
-| **Configuración** | Umbrales del semáforo con su bitácora de cambios, y programación mensual. Todos la ven; solo RRHH la cambia |
+| **Configuración** | Umbrales del semáforo con su bitácora de cambios, y programación mensual. Todos la ven. Los umbrales los cambia solo la Responsable de RRHH; la programación, cualquiera de RRHH |
 | **Usuarios** | Cuentas y su bitácora. TI las crea, modifica, desactiva y les restablece la contraseña o la verificación en dos pasos; RRHH solo las consulta |
 | **Mi cuenta** (tu nombre, arriba a la derecha) | Cambiar tu contraseña y activar la verificación en dos pasos |
 
@@ -262,7 +262,7 @@ Al crear un usuario puedes agregar `--correo` para que reciba el correo de aviso
 | Rol | Ve |
 |---|---|
 | `direccion` | Solo el consolidado corporativo |
-| `rrhh` | Todo. La Analista carga los datos y genera los reportes; la Responsable (la marca TI) los firma, nunca los que pidió. Cambia umbrales y programación |
+| `rrhh` | Todo. La Analista carga los datos y genera los reportes; la Responsable (la marca TI) los firma, nunca los que pidió, y es la única que cambia los umbrales. Cualquiera de RRHH cambia la programación |
 | `gerente` | Solo su área |
 | `admin_ti` | Administra las cuentas; ve la configuración sin cambiarla; sin datos de colaboradores ni avisos |
 

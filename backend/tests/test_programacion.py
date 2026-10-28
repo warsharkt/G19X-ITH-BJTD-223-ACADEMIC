@@ -206,7 +206,17 @@ def test_api_programacion_dia_invalido():
 
 
 # -------------------------------------------------------- API: umbrales
-def test_api_rrhh_cambia_un_umbral_y_queda_en_la_bitacora():
+RESPONSABLE = Usuario(-3, "pruebas_responsable", "Responsable", "rrhh", None, firma_reportes=True)
+
+
+@pytest.fixture()
+def como_responsable():
+    """Los umbrales los cambia solo la Responsable de RRHH (la sesion por
+    defecto de las pruebas es una Analista)."""
+    app.dependency_overrides[usuario_actual] = lambda: RESPONSABLE
+
+
+def test_api_la_responsable_cambia_un_umbral_y_queda_en_la_bitacora(como_responsable):
     cliente = TestClient(app)
     antes = {u["indicador"]: u for u in cliente.get("/umbrales").json()}["rotacion_total"]
 
@@ -214,7 +224,7 @@ def test_api_rrhh_cambia_un_umbral_y_queda_en_la_bitacora():
     assert r.status_code == 200
     assert r.json()["umbral_atencion"] == 2.5 and r.json()["umbral_critico"] == 4.0
 
-    [cambio] = [c for c in cliente.get("/umbrales/cambios").json() if c["usuario"] == USUARIO_RRHH.usuario][:1]
+    [cambio] = [c for c in cliente.get("/umbrales/cambios").json() if c["usuario"] == RESPONSABLE.usuario][:1]
     assert cambio["indicador"] == "rotacion_total" and cambio["nombre"] == "Tasa de rotación mensual"
     assert (cambio["atencion_antes"], cambio["critico_antes"]) == (antes["umbral_atencion"], antes["umbral_critico"])
     assert (cambio["atencion_nuevo"], cambio["critico_nuevo"]) == (2.5, 4.0)
@@ -224,7 +234,7 @@ def test_api_rrhh_cambia_un_umbral_y_queda_en_la_bitacora():
     assert kpi["umbral_critico"] == 4.0
 
 
-def test_api_sin_cambios_no_ensucia_la_bitacora():
+def test_api_sin_cambios_no_ensucia_la_bitacora(como_responsable):
     cliente = TestClient(app)
     actual = {u["indicador"]: u for u in cliente.get("/umbrales").json()}["enps"]
     total = len(cliente.get("/umbrales/cambios?limite=100").json())
@@ -242,19 +252,20 @@ def test_api_sin_cambios_no_ensucia_la_bitacora():
         ("tiempo_contratacion", -5, 60, "de 0 o más"),
     ],
 )
-def test_api_umbrales_sin_sentido_se_rechazan(indicador, atencion, critico, mensaje):
+def test_api_umbrales_sin_sentido_se_rechazan(como_responsable, indicador, atencion, critico, mensaje):
     r = TestClient(app).put(f"/umbrales/{indicador}", json={"umbral_atencion": atencion, "umbral_critico": critico})
     assert r.status_code == 422 and mensaje in r.json()["detail"]
 
 
-def test_api_umbral_inexistente():
+def test_api_umbral_inexistente(como_responsable):
     r = TestClient(app).put("/umbrales/no_existe", json={"umbral_atencion": 1, "umbral_critico": 2})
     assert r.status_code == 404
 
 
-@pytest.mark.parametrize("rol", ["direccion", "gerente", "admin_ti"])
-def test_api_solo_rrhh_cambia_umbrales(rol):
+@pytest.mark.parametrize("rol", ["rrhh", "direccion", "gerente", "admin_ti"])
+def test_api_solo_la_responsable_cambia_umbrales(rol):
+    """Ni la Analista (rrhh sin firma), que prepara los reportes, ni los demas roles."""
     cliente = como(rol, 1 if rol == "gerente" else None)
     r = cliente.put("/umbrales/rotacion_total", json={"umbral_atencion": 2.5, "umbral_critico": 4.0})
-    assert r.status_code == 403
+    assert r.status_code == 403 and "Responsable" in r.json()["detail"]
     assert cliente.get("/umbrales/cambios").status_code == 200  # la bitacora si la ven

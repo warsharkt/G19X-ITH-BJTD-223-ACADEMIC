@@ -473,15 +473,24 @@ def historial_narrativas(
 
 # ------------------------------------------------- configuracion (RF-12)
 def solo_rrhh(u: Usuario = Depends(usuario_actual)) -> Usuario:
-    """Dependencia: los umbrales y la programacion los cambia solo RRHH (regla 10.3.3)."""
+    """Dependencia: la programacion mensual la cambia solo RRHH (regla 10.3.10)."""
     if u.rol != "rrhh":
         raise HTTPException(status_code=403, detail="Solo Recursos Humanos puede cambiar esta configuración")
     return u
 
 
+def solo_responsable(u: Usuario = Depends(usuario_actual)) -> Usuario:
+    """Dependencia: los umbrales los cambia solo la Responsable de RRHH (regla
+    10.3.3). Un umbral decide que sale en rojo en los reportes, asi que quien
+    los prepara (la Analista) no lo mueve."""
+    if not u.es_responsable:
+        raise HTTPException(status_code=403, detail="Solo la Responsable de RRHH puede cambiar los umbrales")
+    return u
+
+
 @app.put("/umbrales/{indicador}", response_model=schemas.Umbral, tags=["Configuración"])
-def cambiar_umbral(indicador: str, cambio: schemas.UmbralCambio, u: Usuario = Depends(solo_rrhh)):
-    """Cambia los umbrales de un indicador (solo RRHH). Queda en la bitacora.
+def cambiar_umbral(indicador: str, cambio: schemas.UmbralCambio, u: Usuario = Depends(solo_responsable)):
+    """Cambia los umbrales de un indicador (solo la Responsable de RRHH). Queda en la bitacora.
 
     El semaforo se recalcula de inmediato. Las alertas que resulten se avisan
     en la siguiente revision de la programacion (cada hora)."""

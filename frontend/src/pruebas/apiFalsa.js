@@ -152,7 +152,8 @@ function avisosIniciales() {
 
 // Mismas reglas que PUT /umbrales/{indicador} de la API real
 function actualizarUmbral(usuario, indicador, { umbral_atencion, umbral_critico }, estado) {
-  if (usuario.rol !== 'rrhh') return respuesta(403, { detail: 'Solo Recursos Humanos puede cambiar esta configuración' })
+  if (usuario.rol !== 'rrhh' || !usuario.firma_reportes)
+    return respuesta(403, { detail: 'Solo la Responsable de RRHH puede cambiar los umbrales' })
   const u = estado.umbrales.find((x) => x.indicador === indicador)
   if (!u) return respuesta(404, { detail: `El indicador '${indicador}' no existe` })
   if (u.sentido === 'mayor_es_peor' && umbral_critico < umbral_atencion)

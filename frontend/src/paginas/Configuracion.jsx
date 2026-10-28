@@ -132,8 +132,8 @@ function FirmaReportes() {
   )
 }
 
-// Umbrales del semaforo (seccion 10.2 del PRD). RRHH los edita fila por
-// fila; la API valida que tengan sentido y registra cada cambio.
+// Umbrales del semaforo (seccion 10.2 del PRD). La Responsable de RRHH los
+// edita fila por fila; la API valida que tengan sentido y registra cada cambio.
 function Umbrales({ editable, alGuardar }) {
   const [version, setVersion] = useState(0)
   const umbrales = useConsulta(() => api.umbrales(), [version])
@@ -185,7 +185,8 @@ function Umbrales({ editable, alGuardar }) {
       <h2>Umbrales del semáforo</h2>
       <p className="texto-secundario">
         Valores que definen cuándo un indicador pasa a atención o a crítico. Un indicador en rojo genera un aviso para
-        quien le corresponde.
+        quien le corresponde.{' '}
+        {!editable && 'Solo la Responsable de RRHH los cambia: deciden qué sale en rojo en los reportes.'}
       </p>
       {umbrales.error && <Mensaje>{umbrales.error.message}</Mensaje>}
       {error && <Mensaje>{error}</Mensaje>}
@@ -404,11 +405,14 @@ function Programacion({ editable }) {
   )
 }
 
-// Panel de configuracion (RF-12). Todos la ven; solo RRHH la cambia: un umbral
-// decide que se pinta de rojo y a quien le llega una alerta (regla 10.3.3).
+// Panel de configuracion (RF-12). Todos la ven. Los umbrales los cambia solo
+// la Responsable de RRHH: un umbral decide que se pinta de rojo y a quien le
+// llega una alerta, asi que quien prepara los reportes no lo mueve (regla
+// 10.3.3). La programacion mensual, cualquiera de RRHH.
 export default function Configuracion() {
   const { usuario } = useSesion()
   const editable = usuario.rol === 'rrhh'
+  const umbralesEditables = editable && Boolean(usuario.firma_reportes)
   const [cambios, setCambios] = useState(0)
 
   return (
@@ -429,7 +433,7 @@ export default function Configuracion() {
         </Mensaje>
       )}
       {puedeVerDatos(usuario) && <FirmaReportes />}
-      <Umbrales editable={editable} alGuardar={() => setCambios((v) => v + 1)} />
+      <Umbrales editable={umbralesEditables} alGuardar={() => setCambios((v) => v + 1)} />
       <CambiosUmbrales version={cambios} />
       <Programacion editable={editable} />
     </div>
