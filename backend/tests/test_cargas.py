@@ -70,6 +70,7 @@ def test_catalogo_y_plantillas(client):
     datos = client.get("/cargas/fuentes").json()
     assert [f["clave"] for f in datos["fuentes"]] == ["hris", "ats", "desempeno", "capacitacion", "clima", "productividad"]
     assert datos["ejemplos"] == {"mes": "2026-09", "nombre_mes": "septiembre 2026", "descargables": True}
+    assert all(f["exportar"] for f in datos["fuentes"])
     plantilla = client.get("/cargas/plantillas/desempeno", params={"formato": "csv"})
     assert plantilla.content.decode("utf-8-sig").strip() == "codigo_empleado,periodo,metas_asignadas,metas_logradas,calificacion"
     assert client.get("/cargas/plantillas/no_existe").status_code == 404

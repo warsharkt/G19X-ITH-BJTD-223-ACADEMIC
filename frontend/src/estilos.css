@@ -821,6 +821,56 @@ textarea:focus {
   color: var(--acento-2);
 }
 
+.pasos-carga {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+  margin: 0 0 1.25rem;
+  padding: 0;
+  list-style: none;
+}
+
+.pasos-carga li {
+  display: flex;
+  gap: 0.7rem;
+  align-items: flex-start;
+  background: var(--superficie);
+  border: 1px solid var(--borde);
+  border-radius: var(--radio);
+  padding: 0.85rem 1rem;
+}
+
+.pasos-carga p {
+  margin: 0.15rem 0 0;
+  font-size: 0.85rem;
+  color: var(--texto-secundario);
+}
+
+.exportar-fuente {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  background: var(--acento-suave);
+  border-radius: 10px;
+  padding: 0.7rem 0.8rem;
+}
+
+.exportar-fuente svg {
+  color: var(--acento);
+  flex: none;
+  margin-top: 0.1rem;
+}
+
+.exportar-fuente strong {
+  font-size: 0.86rem;
+  color: var(--acento);
+}
+
+.tarjeta-fuente .exportar-fuente p {
+  margin-top: 0.15rem;
+  font-size: 0.85rem;
+}
+
 .rejilla-fuentes {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));

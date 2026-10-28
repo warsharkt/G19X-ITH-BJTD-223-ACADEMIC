@@ -21,6 +21,12 @@ const SELLOS = [
   ['bitacora', 'Bitácora de quién cargó qué'],
 ]
 
+const PASOS = [
+  ['Exporta', 'Saca de cada sistema (HRIS, ATS, LMS…) el reporte que pide su tarjeta, en Excel o CSV.'],
+  ['Sube', 'Súbelo en la tarjeta de esa fuente, empezando por la plantilla de personal.'],
+  ['Revisa y aplica', 'El sistema valida el archivo completo; nada se guarda hasta que lo apliques.'],
+]
+
 const numero = (n) => (typeof n === 'number' ? n.toLocaleString('es-MX') : n)
 
 function Estado({ estado }) {
@@ -272,10 +278,24 @@ export default function CargaDatos() {
         <div>
           <h1>Carga de datos</h1>
           <p className="texto-secundario">
-            Sube lo que exporta cada sistema de RRHH. Nada se guarda hasta que el archivo completo pasa las validaciones.
+            Aquí no se capturan datos: se suben los reportes que exportas de cada sistema de RRHH.
           </p>
         </div>
       </div>
+
+      <ol className="pasos-carga" aria-label="Cómo se cargan los datos">
+        {PASOS.map(([titulo, texto], i) => (
+          <li key={titulo}>
+            <span className="paso-fuente" aria-hidden="true">
+              {i + 1}
+            </span>
+            <div>
+              <strong>{titulo}</strong>
+              <p>{texto}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
 
       <ul className="sellos" aria-label="Controles de la carga">
         {SELLOS.map(([icono, texto]) => (
@@ -325,6 +345,14 @@ export default function CargaDatos() {
               </div>
             </header>
             <p>{f.descripcion}</p>
+            <div className="exportar-fuente">
+              <Icono nombre="archivo" tamano={18} />
+              <div>
+                <strong>Exporta de {f.sistema}</strong>
+                <p>{f.exportar}</p>
+              </div>
+            </div>
+            <span className="nota">Columnas que debe traer (las que tienen ? pueden ir vacías):</span>
             <div className="columnas-fuente" aria-label="Columnas">
               {f.columnas.map((c) => (
                 <code key={c.nombre} className={c.requerida ? undefined : 'opcional'} title={c.ayuda || undefined}>
@@ -335,7 +363,7 @@ export default function CargaDatos() {
             </div>
             <div className="acciones-fuente">
               <label className="boton-primario subir-archivo">
-                {subiendo === f.clave ? 'Validando…' : 'Subir archivo'}
+                {subiendo === f.clave ? 'Validando…' : 'Subir archivo exportado'}
                 <input
                   type="file"
                   accept=".csv,.xlsx"
@@ -361,9 +389,10 @@ export default function CargaDatos() {
                 type="button"
                 className="boton-texto"
                 aria-label={`Descargar plantilla de ${f.nombre}`}
+                title="Excel vacío con las columnas, por si tu sistema no exporta en este formato"
                 onClick={() => descargar(() => api.plantilla(f.clave))}
               >
-                Plantilla
+                Formato vacío
               </button>
             </div>
           </article>

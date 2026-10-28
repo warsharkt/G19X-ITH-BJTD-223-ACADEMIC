@@ -216,8 +216,8 @@ function cuentas(usuario, pathname, metodo, cuerpo, estado) {
 // Carga de datos: misma forma que /cargas de la API real. El archivo de
 // productividad trae errores; los demas pasan la validacion.
 const FUENTES_DATOS = [
-  { clave: 'hris', nombre: 'Plantilla de personal', sistema: 'HRIS / Nómina', descripcion: 'Altas y bajas.', columnas: [{ nombre: 'codigo', requerida: true, ayuda: '' }, { nombre: 'area', requerida: true, ayuda: '' }] },
-  { clave: 'productividad', nombre: 'Productividad', sistema: 'Proyectos', descripcion: 'Horas por área.', columnas: [{ nombre: 'area', requerida: true, ayuda: '' }] },
+  { clave: 'hris', nombre: 'Plantilla de personal', sistema: 'HRIS / Nómina', descripcion: 'Altas y bajas.', exportar: 'Toda la plantilla, con activos y bajas.', columnas: [{ nombre: 'codigo', requerida: true, ayuda: '' }, { nombre: 'area', requerida: true, ayuda: '' }] },
+  { clave: 'productividad', nombre: 'Productividad', sistema: 'Proyectos', descripcion: 'Horas por área.', exportar: 'Las horas del mes.', columnas: [{ nombre: 'area', requerida: true, ayuda: '' }] },
 ]
 
 function cargasFalsas(usuario, pathname, metodo, cuerpo, estado, datosReales) {

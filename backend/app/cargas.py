@@ -75,6 +75,7 @@ class Fuente:
     sistema: str
     descripcion: str
     columnas: tuple
+    exportar: str  # que reporte sacar del sistema, en palabras de RRHH
     llave: tuple = field(default=())  # columnas que no se pueden repetir en el archivo
 
 
@@ -91,6 +92,9 @@ FUENTES = {
                 Columna("fecha_baja", "fecha", requerida=False, ayuda="Vacía si sigue activo"),
                 Columna("tipo_baja", "opcion", requerida=False, opciones=("voluntaria", "involuntaria")),
             ),
+            "Toda la plantilla: activos y también quienes se dieron de baja, con su fecha y tipo de baja. "
+            "Nadie se borra: desde su fecha de baja deja de contar en la plantilla y sigue en el historial. "
+            "Quien no venga en el archivo se queda como estaba.",
             ("codigo",),
         ),
         Fuente(
@@ -103,6 +107,7 @@ FUENTES = {
                 Columna("fecha_contratacion", "fecha", requerida=False, ayuda="Vacía si sigue abierta"),
                 Columna("costo_proceso", "numero", minimo=0, ayuda="MXN"),
             ),
+            "Las vacantes abiertas y las que se cubrieron, con su folio, fechas y costo del proceso.",
             ("folio",),
         ),
         Fuente(
@@ -115,6 +120,7 @@ FUENTES = {
                 Columna("metas_logradas", "entero", minimo=0),
                 Columna("calificacion", "entero", minimo=1, maximo=5),
             ),
+            "Las metas del mes de cada colaborador, con su código de empleado.",
             ("codigo_empleado", "periodo"),
         ),
         Fuente(
@@ -129,6 +135,7 @@ FUENTES = {
                 Columna("completado", "si_no"),
                 Columna("horas_cursadas", "numero", minimo=0),
             ),
+            "Las inscripciones del mes a cada programa, con horas cursadas y si se completó.",
             ("programa", "periodo", "area_programa", "codigo_empleado"),
         ),
         Fuente(
@@ -140,6 +147,7 @@ FUENTES = {
                 Columna("dimension", "opcion", opciones=("enps", "satisfaccion", "liderazgo", "carga_trabajo")),
                 Columna("puntaje", "entero", minimo=0, maximo=10),
             ),
+            "Las respuestas de la encuesta del mes por área, sin nombres ni códigos.",
         ),
         Fuente(
             "productividad", "Productividad", "Sistema de proyectos y tickets",
@@ -152,6 +160,7 @@ FUENTES = {
                 Columna("entregables_planificados", "entero", minimo=0),
                 Columna("entregables_completados", "entero", minimo=0),
             ),
+            "Las horas y los entregables del mes de cada área.",
             ("area", "periodo"),
         ),
     )
@@ -189,6 +198,7 @@ def catalogo() -> list[dict]:
     return [
         {
             "clave": f.clave, "nombre": f.nombre, "sistema": f.sistema, "descripcion": f.descripcion,
+            "exportar": f.exportar,
             "columnas": [{"nombre": c.nombre, "requerida": c.requerida, "ayuda": c.ayuda} for c in f.columnas],
         }
         for f in FUENTES.values()

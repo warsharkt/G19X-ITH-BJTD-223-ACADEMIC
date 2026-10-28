@@ -683,6 +683,10 @@ describe('carga de datos (RF-01)', () => {
     await persona.click(await screen.findByRole('link', { name: 'Carga de datos' }))
     expect(await screen.findByText('Mes pendiente: septiembre 2026')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Descargar archivo de septiembre 2026 de Productividad' })).toBeInTheDocument()
+    expect(screen.getByRole('list', { name: 'Cómo se cargan los datos' })).toHaveTextContent('Exporta')
+    expect(screen.getByRole('article', { name: 'Plantilla de personal' })).toHaveTextContent(
+      'Exporta de HRIS / NóminaToda la plantilla, con activos y bajas.',
+    )
 
     const archivo = new File(['codigo,nombre_completo,area'], 'hris-2026-09.xlsx')
     await persona.upload(await screen.findByLabelText('Subir archivo de Plantilla de personal'), archivo)
