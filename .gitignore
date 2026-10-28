@@ -3,6 +3,8 @@ __pycache__/
 .env
 # Llave que cifra los secretos del MFA: nunca en GitHub ni junto a los respaldos de la base
 llaves/
+# Respaldos de la base (python -m scripts.respaldo): con datos reales llevan datos de colaboradores
+respaldos/
 node_modules/
 dist/
 

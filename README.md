@@ -237,6 +237,30 @@ schtasks /create /tn "Talentia Insights" /sc daily /st 07:00 /tr "cmd /c cd /d C
 
 **Correo (opcional).** Está apagado por defecto. Si llenas `SMTP_HOST` y los demás datos `SMTP_*` en el `.env`, quien tenga correo registrado recibe un correo con "tienes N avisos nuevos" y la liga al sistema. **El correo nunca lleva datos**: ni áreas, ni indicadores, ni cifras. Con Gmail usa `smtp.gmail.com`, puerto `587` y una [contraseña de aplicación](https://myaccount.google.com/apppasswords), nunca tu contraseña normal.
 
+## Respaldos
+
+Un respaldo que nunca se probó no sirve, así que **cada respaldo se prueba**: el script lo restaura en una base temporal y compara las filas de cada tabla con la base real. Si no cuadra, termina con error.
+
+```powershell
+cd backend
+python -m scripts.respaldo                        # respalda la base y prueba restaurarlo
+python -m scripts.respaldo --llave E:\Talentia    # además copia la llave del MFA a otra unidad
+python -m scripts.respaldo --ver                  # lista los respaldos
+python -m scripts.respaldo --restaurar ..\respaldos\talentia-20261027-020000.dump
+```
+
+- Los respaldos van en `respaldos/` (o en `RESPALDOS_DIR`), cada uno con su huella SHA-256. Se conservan los últimos 30 (`RESPALDOS_CONSERVAR`).
+- Usa el `pg_dump` de adentro del contenedor `rrhh_db`: no hace falta instalar PostgreSQL en el equipo.
+- **La llave del MFA nunca va en el respaldo.** Cópiala con `--llave` a otra unidad o a una USB; el script se niega a guardarla junto a los respaldos. Así, quien se lleve un respaldo no puede generar códigos de verificación.
+- **Restaurar** reemplaza toda la base. Primero apaga la API (`docker compose stop api`), escribe el nombre de la base para confirmar y el script guarda antes una copia del estado actual (`antes-de-restaurar-…`). Verifica la huella antes de tocar nada.
+- Con datos reales, los respaldos tienen datos de colaboradores: guárdalos en un disco cifrado y con acceso solo para TI.
+
+Para respaldar todos los días a las 2:00 con el Programador de tareas de Windows (cambia la ruta):
+
+```powershell
+schtasks /create /tn "Talentia Insights respaldo" /sc daily /st 02:00 /tr "cmd /c cd /d C:\ruta\backend && .venv\Scripts\python.exe -m scripts.respaldo"
+```
+
 ## Usuarios y roles
 
 Lo normal es que **TI administre las cuentas desde la sección Usuarios** del tablero. Al crear una cuenta o restablecer una contraseña, el sistema genera una **contraseña temporal** que se muestra una sola vez; la persona la cambia al entrar. Las cuentas no se borran, se desactivan, y cada cambio queda en la bitácora de cuentas.
@@ -324,7 +348,7 @@ backend/
     marca.py         nombre del producto y de la empresa
     database.py      conexión a PostgreSQL (local o Supabase)
     firmas.py        quién firma cada reporte, suplencias
-  scripts/           seed, arranque (Docker), crear_usuario, demo, programar, generar_narrativa, evaluar_narrativa
+  scripts/           seed, arranque (Docker), crear_usuario, demo, programar, respaldo, generar_narrativa, evaluar_narrativa
   Dockerfile         imagen de la API
   tests/             pruebas automáticas
   reportes/          resultados de las evaluaciones del modelo de IA
@@ -341,6 +365,7 @@ frontend/
   nginx.conf         sirve el tablero y reenvía /api a la API
 db/                  esquema y tablas (SQL)
 llaves/              llave que cifra los secretos del MFA (se crea sola; no se sube a GitHub)
+respaldos/           respaldos de la base (python -m scripts.respaldo; no se suben a GitHub)
 docker-compose.yml   base de datos, API y tablero
 .github/workflows/   pruebas automáticas en GitHub (integración continua)
 ```
