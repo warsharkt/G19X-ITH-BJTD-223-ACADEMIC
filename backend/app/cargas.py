@@ -92,7 +92,7 @@ FUENTES = {
                 Columna("fecha_baja", "fecha", requerida=False, ayuda="Vacía si sigue activo"),
                 Columna("tipo_baja", "opcion", requerida=False, opciones=("voluntaria", "involuntaria")),
             ),
-            "Toda la plantilla: activos y también quienes se dieron de baja, con su fecha y tipo de baja. "
+            "La plantilla del mes: todos los activos, más las altas y las bajas del mes con su fecha y tipo de baja. "
             "Nadie se borra: desde su fecha de baja deja de contar en la plantilla y sigue en el historial. "
             "Quien no venga en el archivo se queda como estaba.",
             ("codigo",),
@@ -139,8 +139,9 @@ FUENTES = {
             ("programa", "periodo", "area_programa", "codigo_empleado"),
         ),
         Fuente(
-            "clima", "Encuesta de clima", "Encuestas (respuestas anónimas)",
-            "Respuestas anónimas por área y mes: sin código de empleado. Reemplaza la encuesta de ese mes.",
+            "clima", "Encuesta de ambiente laboral", "Encuestas (respuestas anónimas)",
+            "Respuestas anónimas sobre el ambiente de trabajo, por área y mes: sin código de empleado. "
+            "Reemplaza la encuesta de ese mes.",
             (
                 Columna("area", "area"),
                 Columna("periodo", "mes", ayuda="AAAA-MM"),
@@ -191,6 +192,15 @@ REGLAS = {
         (lambda f: f["entregables_completados"] > f["entregables_planificados"], "Hay más entregables completados que planificados"),
     ],
 }
+
+
+# Nombre de los archivos que se descargan. La clave interna "clima" se queda
+# (tablas, bitacora y direcciones de la API); la gente ve "ambiente laboral".
+_PREFIJOS = {"clima": "ambiente"}
+
+
+def prefijo_de_archivo(clave: str) -> str:
+    return _PREFIJOS.get(clave, clave)
 
 
 def catalogo() -> list[dict]:
@@ -946,7 +956,7 @@ def ejemplo(clave_fuente: str, formato: str = "xlsx") -> tuple[bytes, str]:
     if mes is None:
         raise ErrorDeCarga("Ya están cargados todos los meses cerrados: no hay un mes pendiente por subir")
     df = _paquete(mes)[clave_fuente]
-    return _exportar(df, formato), f"{clave_fuente}-{mes:%Y-%m}.{formato}"
+    return _exportar(df, formato), f"{prefijo_de_archivo(clave_fuente)}-{mes:%Y-%m}.{formato}"
 
 
 def _ejemplos_permitidos() -> bool:

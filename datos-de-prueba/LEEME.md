@@ -2,7 +2,7 @@
 
 Archivos de **septiembre de 2026** de Nordika Logística (datos ficticios) para probar la pantalla **Carga de datos**. Entra con la cuenta de la **Analista de RRHH**: es la única que sube archivos.
 
-Cada archivo se sube con el botón **Subir archivo exportado** de la fuente que dice la tabla. El sistema lo valida completo y muestra:
+Cada archivo se sube con el botón **Importar datos** de la fuente que dice la tabla. El sistema lo valida completo y muestra:
 
 - **Validado:** lista para aplicar. Abajo dice cuántas filas se agregan o actualizan y qué columnas descartó.
 - **Con errores:** la lista de errores con fila, columna y motivo. Fila 1 son los encabezados, igual que en Excel. Con un solo error no se puede aplicar nada: **todo o nada**.
@@ -21,7 +21,7 @@ El mes completo, como lo exportaría cada sistema. **Súbelos en este orden**, a
 | 2 | `2-ats-2026-09.xlsx` | Vacantes | Validado: 8 vacantes, una todavía abierta (sin fecha de contratación). |
 | 3 | `3-desempeno-2026-09.xlsx` | Metas de desempeño | Validado: 370 evaluaciones. |
 | 4 | `4-capacitacion-2026-09.xlsx` | Capacitación | Validado: 376 inscripciones. |
-| 5 | `5-clima-2026-09.xlsx` | Encuesta de clima | Validado: 1,108 respuestas anónimas. |
+| 5 | `5-ambiente-2026-09.xlsx` | Encuesta de ambiente laboral | Validado: 1,108 respuestas anónimas. |
 | 6 | `6-productividad-2026-09.xlsx` | Productividad | Validado: 6 áreas. |
 
 Con los seis aplicados, septiembre aparece en el **Tablero** y ya se puede generar su reporte. El aviso de "Mes pendiente" desaparece, porque octubre todavía no termina.
@@ -38,7 +38,7 @@ El sistema rechaza el archivo completo antes de revisar las filas.
 | `b-archivo-vacio.csv` | Cualquiera | "El archivo está vacío" |
 | `c-solo-encabezados.csv` | Productividad | "El archivo no tiene filas" |
 | `d-le-falta-una-columna.xlsx` | Productividad | "Falta esta columna en el archivo": `horas_disponibles` |
-| `e-fuente-equivocada.xlsx` | Productividad | Es la encuesta de clima subida en el lugar equivocado: faltan `horas_efectivas`, `horas_disponibles`, `entregables_planificados` y `entregables_completados` |
+| `e-fuente-equivocada.xlsx` | Productividad | Es la encuesta de ambiente laboral subida en el lugar equivocado: faltan `horas_efectivas`, `horas_disponibles`, `entregables_planificados` y `entregables_completados` |
 | `f-excel-danado.xlsx` | Cualquiera | "No se pudo leer el archivo…": dice .xlsx pero por dentro es texto |
 | `g-demasiado-grande.csv` | Plantilla de personal | "El archivo pesa más de 5 MB" (pesa unos 5.5 MB) |
 
@@ -92,7 +92,7 @@ El archivo se lee bien, pero algunas filas no cumplen las reglas. Ninguno se pue
 | 5 | Área "Recursos Humanos" | El área no existe |
 | 378 | Repite la inscripción de la fila 7 | Registro repetido en el archivo |
 
-### `clima-con-errores-2026-09.xlsx` → Encuesta de clima (5 errores)
+### `ambiente-con-errores-2026-09.xlsx` → Encuesta de ambiente laboral (5 errores)
 
 | Fila | Qué tiene mal | Mensaje |
 |---|---|---|

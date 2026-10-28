@@ -89,7 +89,7 @@ def test_lo_que_le_falta_a_un_mes(client):
     assert client.get("/periodos/2026-08/faltantes").json()["fuentes"] == []
     # nadie ha subido la plantilla ni las vacantes despues de enero de 2030
     assert client.get("/periodos/2030-01/faltantes").json() == {
-        "fuentes": ["Metas de desempeño", "Capacitación", "Encuesta de clima", "Productividad"],
+        "fuentes": ["Metas de desempeño", "Capacitación", "Encuesta de ambiente laboral", "Productividad"],
         "sin_actualizar": ["Plantilla de personal", "Vacantes"],
     }
     assert client.get("/periodos/2026-13/faltantes").status_code == 422
@@ -181,7 +181,8 @@ def test_cargar_el_mes_siguiente_completo_lo_lleva_al_tablero(client):
     """Las seis fuentes de septiembre, en orden, como lo haria RRHH."""
     for fuente in ("hris", "ats", "desempeno", "capacitacion", "clima", "productividad"):
         contenido, nombre = ejemplo(client, fuente)
-        assert nombre == f"{fuente}-2026-09.xlsx"
+        # la encuesta se llama "ambiente laboral" en lo que ve la gente
+        assert nombre == f"{'ambiente' if fuente == 'clima' else fuente}-2026-09.xlsx"
         carga = subir(client, fuente, contenido, nombre).json()
         assert carga["estado"] == "validada", (fuente, carga["errores"][:3])
         r = client.post(f"/cargas/{carga['id']}/aplicar")

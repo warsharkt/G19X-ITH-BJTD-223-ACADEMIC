@@ -2,7 +2,7 @@
 
 [![Pruebas](https://github.com/warsharkt/G19X-ITH-BJTD-223-ACADEMIC/actions/workflows/pruebas.yml/badge.svg)](https://github.com/warsharkt/G19X-ITH-BJTD-223-ACADEMIC/actions/workflows/pruebas.yml)
 
-**Analítica de Recursos Humanos con IA responsable.** Talentia Insights consolida lo que exportan los sistemas de RRHH (nómina, reclutamiento, desempeño, capacitación, clima laboral y productividad), calcula los indicadores con su semáforo y redacta con IA el reporte ejecutivo de cada área y mes. Una persona de RRHH lo firma antes de que llegue a Dirección.
+**Analítica de Recursos Humanos con IA responsable.** Talentia Insights consolida lo que exportan los sistemas de RRHH (nómina, reclutamiento, desempeño, capacitación, ambiente laboral y productividad), calcula los indicadores con su semáforo y redacta con IA el reporte ejecutivo de cada área y mes. Una persona de RRHH lo firma antes de que llegue a Dirección.
 
 > **Proyecto académico.** Título asignado: *Motor Inteligente de Reportes Ejecutivos de RRHH*; *Talentia Insights* es el nombre del producto. Viene con los datos de **Nordika Logística**, una empresa ficticia (unas 350 personas, 6 áreas y 24 meses de historia, de septiembre de 2024 a agosto de 2026) generada por `scripts/seed.py`. Ningún dato corresponde a personas reales.
 
@@ -137,7 +137,7 @@ Nada de Nordika está fijo en el código: el nombre sale de `EMPRESA_NOMBRE`, y 
 1. En el `.env`, pon `EMPRESA_NOMBRE`, `MODO_DATOS=reales` y `MODO_DEMO=no`. Así se apagan las cuentas de prueba, el teléfono simulado y la IA en la nube; los reportes los redacta Ollama en el propio servidor. Fija también `MFA_LLAVE` y guárdala aparte de los respaldos.
 2. Parte de una base vacía: `docker compose down -v` y luego `docker compose up -d --build`. Con `MODO_DATOS=reales` no se siembra nada.
 3. Crea la primera cuenta de TI con `python -m scripts.crear_usuario` ([Cuentas desde la consola](#cuentas-desde-la-consola)). Desde el tablero, TI crea las demás con contraseña temporal y asigna quién firma.
-4. La Analista de RRHH sube desde **Carga de datos** lo que exporta cada sistema: plantilla de personal, vacantes, metas, capacitación, clima y productividad. Cada fuente dice qué reporte exportar y trae su formato vacío.
+4. La Analista de RRHH sube desde **Carga de datos** lo que exporta cada sistema: plantilla de personal, vacantes, metas, capacitación, ambiente laboral y productividad. Cada fuente dice qué reporte exportar y trae su formato vacío.
 5. La Responsable de RRHH revisa los umbrales en **Configuración** antes del primer reporte.
 
 ## Seguridad
@@ -198,7 +198,7 @@ En cuanto el tablero se abre a la red, **HTTPS se activa solo**: se entra por `h
 | Reporte aprobado | Su audiencia y quien lo pidió |
 | Reporte rechazado | Quien lo pidió |
 
-**Programación mensual.** En **Configuración**, RRHH la activa y elige el día. Desde ese día se generan los reportes del último mes cerrado (el consolidado y cada área), una sola vez por mes. Si al mes le falta alguna de las cuatro fuentes mensuales (metas, capacitación, clima o productividad), espera a que se suban. Nace **desactivada**, porque con Ollama en CPU cada reporte tarda minutos.
+**Programación mensual.** En **Configuración**, RRHH la activa y elige el día. Desde ese día se generan los reportes del último mes cerrado (el consolidado y cada área), una sola vez por mes. Si al mes le falta alguna de las cuatro fuentes mensuales (metas, capacitación, ambiente laboral o productividad), espera a que se suban. Nace **desactivada**, porque con Ollama en CPU cada reporte tarda minutos.
 
 La API revisa al arrancar y cada hora. Para que funcione aunque la API esté apagada, programa el script en el Programador de tareas de Windows (cambia la ruta):
 

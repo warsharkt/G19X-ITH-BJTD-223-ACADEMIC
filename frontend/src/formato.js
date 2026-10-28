@@ -14,7 +14,7 @@ export const INDICADORES = {
   rotacion_total: { proceso: 'Rotación', base: PROMEDIO },
   rotacion_voluntaria: { proceso: 'Rotación', base: PROMEDIO },
   rotacion_involuntaria: { proceso: 'Rotación', base: PROMEDIO },
-  enps: { proceso: 'Clima laboral', base: ['respuesta', 'respuestas'] },
+  enps: { proceso: 'Ambiente laboral', base: ['respuesta', 'respuestas'] },
   indice_productividad: { proceso: 'Productividad', base: ['persona equivalente', 'personas equivalentes'] },
 }
 

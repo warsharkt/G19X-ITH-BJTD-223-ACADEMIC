@@ -211,13 +211,13 @@ describe('narrativas', () => {
   it('avisa si al mes le faltan fuentes antes de generarlo', async () => {
     const { contrasena } = instalarApiFalsa({
       faltantes: {
-        '2026-08': { fuentes: ['Encuesta de clima', 'Productividad'], sin_actualizar: ['Plantilla de personal'] },
+        '2026-08': { fuentes: ['Encuesta de ambiente laboral', 'Productividad'], sin_actualizar: ['Plantilla de personal'] },
         '2026-07': { sin_actualizar: ['Plantilla de personal', 'Vacantes'] },
       },
     })
     const persona = await entrar('ana', contrasena, '/narrativas')
     const aviso = (await screen.findByText('A agosto 2026 le faltan datos')).parentElement
-    expect(aviso).toHaveTextContent('Aún no se cargan Encuesta de clima, Productividad')
+    expect(aviso).toHaveTextContent('Aún no se cargan Encuesta de ambiente laboral, Productividad')
     expect(aviso).toHaveTextContent('Nadie ha subido Plantilla de personal desde que cerró agosto 2026')
     const formulario = screen.getByRole('heading', { name: 'Nuevo reporte' }).closest('form')
     expect(within(formulario).getByRole('button', { name: 'Generar con IA' })).toBeEnabled()
@@ -682,18 +682,22 @@ describe('carga de datos (RF-01)', () => {
     const persona = await entrar('ana', contrasena)
     await persona.click(await screen.findByRole('link', { name: 'Carga de datos' }))
     expect(await screen.findByText('Mes pendiente: septiembre 2026')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Descargar archivo de septiembre 2026 de Productividad' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Exportar septiembre 2026 de Proyectos' })).toBeInTheDocument()
+    expect(screen.getByText(/Simulación: los botones «Exportar septiembre 2026»/)).toBeInTheDocument()
     expect(screen.getByRole('list', { name: 'Cómo se cargan los datos' })).toHaveTextContent('Exporta')
     expect(screen.getByRole('article', { name: 'Plantilla de personal' })).toHaveTextContent(
-      'Exporta de HRIS / NóminaToda la plantilla, con activos y bajas.',
+      'Qué exportar de HRIS / NóminaToda la plantilla, con activos y bajas.',
     )
 
     const archivo = new File(['codigo,nombre_completo,area'], 'hris-2026-09.xlsx')
-    await persona.upload(await screen.findByLabelText('Subir archivo de Plantilla de personal'), archivo)
+    await persona.upload(await screen.findByLabelText('Importar datos de Plantilla de personal'), archivo)
     const revision = await screen.findByRole('region', { name: 'Revisión del archivo' })
     expect(revision).toHaveTextContent('Lista para aplicar')
     expect(revision).toHaveTextContent('nombre_completo')
     expect(revision).toHaveTextContent('dato personal: no se guarda')
+    expect(revision).toHaveTextContent('Vista previa: las primeras 1 de 358 filas')
+    expect(revision).toHaveTextContent('3nuevas: se agregarán')
+    expect(revision).toHaveTextContent('355ya existían: se actualizarán')
     expect(estado.subidas).toEqual([{ fuente: 'hris', archivo: 'hris-2026-09.xlsx' }])
 
     await persona.click(within(revision).getByRole('button', { name: 'Aplicar a la base de datos' }))
@@ -701,13 +705,16 @@ describe('carga de datos (RF-01)', () => {
     expect(conciliacion).toHaveTextContent('Colaboradores')
     expect(conciliacion).toHaveTextContent('✓ Cuadra')
     expect(await screen.findByRole('table', { name: 'Bitácora de cargas' })).toHaveTextContent('Aplicada')
+    // cada tarjeta muestra como quedo su ultima importacion
+    await waitFor(() => expect(screen.getByRole('article', { name: 'Plantilla de personal' })).toHaveTextContent('Aplicada'))
+    expect(screen.getByRole('article', { name: 'Productividad' })).toHaveTextContent('Sin importar')
   })
 
   it('un archivo con errores dice fila y motivo y no se puede aplicar', async () => {
     const { contrasena } = instalarApiFalsa()
     const persona = await entrar('ana', contrasena, '/carga')
     await persona.upload(
-      await screen.findByLabelText('Subir archivo de Productividad'),
+      await screen.findByLabelText('Importar datos de Productividad'),
       new File(['x'], 'productividad.csv'),
     )
     const errores = await screen.findByRole('table', { name: 'Errores del archivo' })
@@ -721,8 +728,9 @@ describe('carga de datos (RF-01)', () => {
     await entrar('ana', contrasena, '/carga')
     expect(await screen.findByText('Mes pendiente: septiembre 2026')).toBeInTheDocument()
     expect(screen.getByText(/Exporta de cada sistema los archivos de septiembre 2026/)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Descargar archivo de septiembre 2026/ })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Descargar plantilla de Productividad' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Exportar septiembre 2026/ })).not.toBeInTheDocument()
+    expect(screen.queryByText(/Simulación/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Descargar formato vacío de Productividad' })).toBeInTheDocument()
   })
 
   it('solo RRHH ve la carga de datos', async () => {

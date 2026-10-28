@@ -45,7 +45,7 @@ FUENTES = {
     "rotacion_total": "HRIS (empleados)",
     "rotacion_voluntaria": "HRIS (empleados)",
     "rotacion_involuntaria": "HRIS (empleados)",
-    "enps": "Encuesta de clima (respuestas_clima)",
+    "enps": "Encuesta de ambiente laboral (respuestas_clima)",
     "indice_productividad": "Sistema de proyectos (productividad)",
 }
 

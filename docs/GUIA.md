@@ -33,11 +33,11 @@ Talentia Insights junta en un solo lugar lo que exportan los sistemas de Recurso
 
 ### El problema que resuelve
 
-En casi todas las empresas la información de personas vive en sistemas separados: reclutamiento, nómina, desempeño, capacitación, encuestas de clima y productividad. Para armar un reporte mensual alguien de RRHH exporta cada sistema, lo pega en hojas de cálculo, hace las cuentas y escribe el resumen. Eso provoca:
+En casi todas las empresas la información de personas vive en sistemas separados: reclutamiento, nómina, desempeño, capacitación, encuestas de ambiente laboral y productividad. Para armar un reporte mensual alguien de RRHH exporta cada sistema, lo pega en hojas de cálculo, hace las cuentas y escribe el resumen. Eso provoca:
 
 - Reportes que tardan días y dependen de quién esté disponible.
 - El mismo indicador calculado de forma distinta cada mes, según quién lo hizo.
-- Señales que se pierden: por ejemplo, que el clima laboral y la rotación empeoraron al mismo tiempo en un área.
+- Señales que se pierden: por ejemplo, que el ambiente laboral y la rotación empeoraron al mismo tiempo en un área.
 
 ### La idea central: dos motores separados
 
@@ -124,7 +124,7 @@ El menú de la izquierda solo muestra las secciones que el rol puede usar. Arrib
 | **Tablero** | Todos menos TI | Muestra los 10 indicadores del mes con su semáforo, cuánto cambiaron contra el mes anterior y contra el mismo mes del año pasado, y una gráfica de los últimos 24 meses del indicador elegido con sus umbrales. Se filtra por área, mes e indicador; los filtros quedan en la dirección de la página, así que se puede compartir el enlace a una vista exacta. La Analista prepara desde aquí el reporte con **Generar reporte con IA**; Dirección y los gerentes usan **Pedir este reporte a RRHH**. |
 | **Reportes** | Todos menos TI | El historial de reportes con su estado (en proceso, listo, con error), su firma (pendiente, aprobado, rechazado) y quién lo firmará. Al abrir uno se ve el resumen, los hallazgos, las alertas y las recomendaciones, cada uno con los datos que lo respaldan y su nivel de confianza. Aquí la Responsable lo aprueba con **Aprobar y firmar** o lo rechaza, y aquí se descarga en PDF o presentación. Dirección y los gerentes también piden reportes desde aquí. |
 | **Avisos** | Todos menos TI | La bandeja de avisos: indicadores en rojo, pedidos, reportes por firmar, aprobados o rechazados. El menú muestra cuántos faltan por leer. Cada aviso lleva directo a donde se atiende. |
-| **Carga de datos** | Solo la Analista | Subir los archivos de cada sistema, ver la validación fila por fila y lo que se descarta, aplicar la carga y ver la conciliación. Cada tarjeta dice qué reporte exportar de su sistema. Incluye el **Formato vacío** de cada fuente (Excel con las columnas), los archivos del mes pendiente y la bitácora de todas las cargas. |
+| **Carga de datos** | Solo la Analista | Subir los archivos de cada sistema, ver la validación fila por fila y lo que se descarta, aplicar la carga y ver la conciliación. Cada tarjeta dice qué reporte exportar de su sistema, se importa con **Importar datos** y muestra cómo quedó su última importación. Incluye el **Formato vacío** de cada fuente (Excel con las columnas), los archivos del mes pendiente y la bitácora de todas las cargas. |
 | **Configuración** | Todos | Quién firma los reportes y la suplencia; los umbrales del semáforo, con la bitácora de quién los cambió y de qué valor a qué valor; y la programación mensual. Los umbrales los cambia solo la Responsable; la programación, cualquiera de RRHH. |
 | **Usuarios** | TI administra, RRHH consulta | Las cuentas y su bitácora. TI crea cuentas con contraseña temporal, cambia rol o área, marca a la Responsable, desactiva y reinicia la verificación en dos pasos. RRHH puede consultar todo para auditar a TI. |
 | **Mi cuenta** | Todos | Cambiar la propia contraseña y activar la verificación en dos pasos. |
@@ -143,7 +143,7 @@ La Analista de RRHH sube el archivo que ya exporta cada sistema, en Excel (.xlsx
 | 2 | Vacantes | ATS (reclutamiento) | Vacantes abiertas y cubiertas, con su costo. | Tiempo y costo de contratación |
 | 3 | Metas de desempeño | Sistema de desempeño | Metas asignadas y logradas por persona y mes. | Cumplimiento de metas |
 | 4 | Capacitación | LMS | Inscripciones a programas y si se completaron. | Cobertura y tasa de finalización |
-| 5 | Encuesta de clima | Encuestas | Respuestas anónimas por área y mes. | eNPS |
+| 5 | Encuesta de ambiente laboral | Encuestas | Respuestas anónimas por área y mes. | eNPS |
 | 6 | Productividad | Proyectos y tickets | Horas efectivas y disponibles por área y mes. | Índice de productividad |
 
 La plantilla de personal va primero porque las demás fuentes se refieren a sus códigos de empleado: una meta de desempeño de un código que no existe se rechaza.
@@ -159,7 +159,7 @@ Las columnas marcadas como *opcional* pueden ir vacías. Cualquier otra columna 
 | `codigo` | Código de empleado. Nunca el nombre. |
 | `area` | Área a la que pertenece (debe existir en el catálogo). |
 | `fecha_ingreso` | Fecha de alta. |
-| `fecha_baja` (opcional) | Vacía si sigue activo. Una baja no borra a nadie: la persona deja de contar en la plantilla desde esa fecha y sigue en el historial (rotación, reportes pasados). Quien no viene en el archivo se queda como estaba, así que exporta la plantilla completa, con las bajas. |
+| `fecha_baja` (opcional) | Vacía si sigue activo. Una baja no borra a nadie: la persona deja de contar en la plantilla desde esa fecha y sigue en el historial (rotación, reportes pasados). Quien no viene en el archivo se queda como estaba, así que exporta la plantilla del mes: todos los activos, más las altas y las bajas del mes. |
 | `tipo_baja` (opcional) | `voluntaria` o `involuntaria`. Va junto con `fecha_baja`: las dos llenas o las dos vacías. |
 
 **2. Vacantes (ATS)**
@@ -194,7 +194,7 @@ Las columnas marcadas como *opcional* pueden ir vacías. Cualquier otra columna 
 | `completado` | Sí o no. |
 | `horas_cursadas` | No puede superar las horas del programa. |
 
-**5. Encuesta de clima**
+**5. Encuesta de ambiente laboral**
 
 | Columna | Qué es |
 |---|---|
@@ -235,10 +235,10 @@ Solo se guardan las columnas que usa algún indicador. Todo lo demás se descart
 ### Conciliación, bitácora y mes pendiente
 
 - **Conciliación:** después de aplicar, el sistema compara el archivo contra lo que quedó en la base (conteos y sumas) y muestra si cuadra. Es la prueba de que no se perdió ni se duplicó nada.
-- **Volver a cargar no duplica:** las vacantes se identifican por folio, las metas por empleado y mes, y la encuesta de clima de un mes reemplaza a la anterior de ese mes.
+- **Volver a cargar no duplica:** las vacantes se identifican por folio, las metas por empleado y mes, y la encuesta de ambiente laboral de un mes reemplaza a la anterior de ese mes.
 - **Bitácora de cargas:** quién subió qué archivo, cuándo, su huella SHA-256 (una especie de huella digital que cambia si se modifica un solo carácter), cuántas filas, qué columnas se descartaron y quién lo aplicó.
-- **Archivos del mes pendiente:** mientras haya un mes cerrado sin cargar (hoy, septiembre de 2026), la pantalla ofrece los seis archivos de ese mes como los exportaría cada sistema de Nordika, con el botón **Archivo del mes** de cada fuente. Traen columnas de más (incluso nombres) que el sistema descarta. Cuando ya están cargados todos los meses cerrados, solo queda el **Formato vacío**. Estos archivos son de prueba: **con datos reales no aparecen**, porque serían datos inventados mezclados con los de la empresa; ahí la pantalla solo dice qué mes falta subir.
-- **Mes completo:** un mes está completo cuando tiene sus cuatro fuentes mensuales (metas, capacitación, clima y productividad). Si la Analista elige en **Reportes** un mes al que le falta alguna, la pantalla lo avisa antes de generar: el reporte saldría sin esos indicadores. Los reportes automáticos esperan a que el mes esté completo.
+- **Archivos del mes pendiente:** mientras haya un mes cerrado sin cargar (hoy, septiembre de 2026), la pantalla ofrece los seis archivos de ese mes como los exportaría cada sistema de Nordika, con el botón **Exportar septiembre 2026** de cada fuente, que simula la exportación de ese sistema (solo trae ese mes). Traen columnas de más (incluso nombres) que el sistema descarta. Cuando ya están cargados todos los meses cerrados, solo queda el **Formato vacío**. Estos archivos son de prueba: **con datos reales no aparecen**, porque serían datos inventados mezclados con los de la empresa; ahí la pantalla solo dice qué mes falta subir.
+- **Mes completo:** un mes está completo cuando tiene sus cuatro fuentes mensuales (metas, capacitación, ambiente laboral y productividad). Si la Analista elige en **Reportes** un mes al que le falta alguna, la pantalla lo avisa antes de generar: el reporte saldría sin esos indicadores. Los reportes automáticos esperan a que el mes esté completo.
 - **Plantilla y vacantes:** no cuentan para que el mes esté completo, porque un mes sin altas, bajas ni contrataciones es normal. Pero si nadie las subió después de que cerró el mes, el sistema no distingue un mes tranquilo de uno olvidado. Por eso **Reportes** avisa ("Nadie ha subido la plantilla de personal desde que cerró septiembre…") sin impedir que se genere. Solo se revisan los meses que pasaron por Carga de datos, no la historia que ya estaba en la base.
 
 ## 6. Qué se analiza: los 10 indicadores
@@ -255,7 +255,7 @@ Cada indicador se calcula para cada área y para el consolidado de la empresa, m
 | Rotación | Rotación total | % | sube | 2.0 | 3.5 |
 | Rotación | Rotación voluntaria | % | sube | 1.5 | 3.0 |
 | Rotación | Rotación involuntaria | % | sube | 1.0 | 2.0 |
-| Clima laboral | eNPS | puntos | baja | 10 | 0 |
+| Ambiente laboral | eNPS | puntos | baja | 10 | 0 |
 | Productividad | Índice de productividad | % | baja | 68 | 62 |
 
 A continuación, cada indicador con su fórmula, de dónde sale y por qué se calcula así.
@@ -300,10 +300,10 @@ A continuación, cada indicador con su fórmula, de dónde sale y por qué se ca
 
 **Fórmula:** bajas del mes ÷ plantilla promedio × 100. Plantilla promedio = (personas al inicio del mes + personas al inicio del mes siguiente) ÷ 2. La voluntaria y la involuntaria usan solo las bajas de ese tipo.
 
-> **Por qué se calcula así.** Se divide entre el promedio y no entre la plantilla del inicio porque en un mes con muchas altas o bajas el número de personas cambia; el promedio representa mejor a cuántas personas había. Se separa en voluntaria (renuncias) e involuntaria (despidos) porque piden acciones muy distintas: la primera habla de retención y clima; la segunda, de selección o desempeño.
+> **Por qué se calcula así.** Se divide entre el promedio y no entre la plantilla del inicio porque en un mes con muchas altas o bajas el número de personas cambia; el promedio representa mejor a cuántas personas había. Se separa en voluntaria (renuncias) e involuntaria (despidos) porque piden acciones muy distintas: la primera habla de retención y ambiente laboral; la segunda, de selección o desempeño.
 
 ### eNPS (Employee Net Promoter Score)
-*Clima laboral · Encuesta de clima*
+*Ambiente laboral · Encuesta de ambiente laboral*
 
 **Fórmula:** % de promotores (puntaje 9 o 10) − % de detractores (puntaje 0 a 6), en la pregunta "¿recomendarías trabajar aquí?". Va de −100 a +100.
 
@@ -458,7 +458,7 @@ Ningún reporte llega a la dirección sin que la Responsable de RRHH lo haya le�
 
 ### Programación mensual
 
-RRHH la activa en Configuración y elige el día del mes (1 a 28). A partir de ese día se generan solos los reportes del último mes cerrado: el consolidado y uno por cada área. Solo se generan cuando el mes está **completo**, con las cuatro fuentes mensuales cargadas (metas, capacitación, clima y productividad); si falta alguna, el sistema espera y los genera en cuanto se aplica la última. Cada mes se genera una sola vez, aunque el servidor se reinicie. Si el servidor estuvo apagado el día programado, se pone al día al volver. Los reportes automáticos también los firma la Responsable o su suplente.
+RRHH la activa en Configuración y elige el día del mes (1 a 28). A partir de ese día se generan solos los reportes del último mes cerrado: el consolidado y uno por cada área. Solo se generan cuando el mes está **completo**, con las cuatro fuentes mensuales cargadas (metas, capacitación, ambiente laboral y productividad); si falta alguna, el sistema espera y los genera en cuanto se aplica la última. Cada mes se genera una sola vez, aunque el servidor se reinicie. Si el servidor estuvo apagado el día programado, se pone al día al volver. Los reportes automáticos también los firma la Responsable o su suplente.
 
 > **Por qué se calcula así.** Un mes en curso nunca se reporta, aunque ya tenga datos parciales: un reporte del 15 de octubre diría que la rotación de octubre es la mitad de la real.
 

@@ -146,7 +146,7 @@ def test_un_mes_a_medio_cargar_espera_a_sus_fuentes():
         r = programacion.revisar(dia=OCTUBRE)
         assert r["narrativas"] == [] and r["mensaje"] == (
             "Los reportes de septiembre 2026 se generan cuando estén todas sus fuentes. Falta: "
-            "Metas de desempeño, Capacitación, Encuesta de clima, Productividad."
+            "Metas de desempeño, Capacitación, Encuesta de ambiente laboral, Productividad."
         )
         assert programacion.corridas() == [] and nuevas_narrativas() == []  # se vuelve a revisar luego
     finally:

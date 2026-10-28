@@ -22,8 +22,8 @@ const SELLOS = [
 ]
 
 const PASOS = [
-  ['Exporta', 'Saca de cada sistema (HRIS, ATS, LMS…) el reporte que pide su tarjeta, en Excel o CSV.'],
-  ['Sube', 'Súbelo en la tarjeta de esa fuente, empezando por la plantilla de personal.'],
+  ['Exporta de cada sistema', 'Saca de HRIS, ATS, LMS… el reporte que dice cada tarjeta, en Excel o CSV.'],
+  ['Importa aquí', 'Con «Importar datos» en la tarjeta de esa fuente, empezando por la plantilla de personal.'],
   ['Revisa y aplica', 'El sistema valida el archivo completo; nada se guarda hasta que lo apliques.'],
 ]
 
@@ -83,12 +83,12 @@ function RevisionCarga({ carga, fuente, alCambiar }) {
           <>
             <div className="cifra">
               <strong>{numero(carga.resultado?.nuevas ?? previo.nuevas)}</strong>
-              <span>{esClima ? 'respuestas (reemplazan la encuesta del mes)' : carga.estado === 'aplicada' ? 'se agregaron' : 'se agregarán'}</span>
+              <span>{esClima ? 'respuestas (reemplazan la encuesta del mes)' : carga.estado === 'aplicada' ? 'nuevas: se agregaron' : 'nuevas: se agregarán'}</span>
             </div>
             {!esClima && (
               <div className="cifra">
                 <strong>{numero(carga.resultado?.actualizadas ?? previo.existentes)}</strong>
-                <span>{carga.estado === 'aplicada' ? 'se actualizaron' : 'se actualizarán'}</span>
+                <span>{carga.estado === 'aplicada' ? 'ya existían: se actualizaron' : 'ya existían: se actualizarán'}</span>
               </div>
             )}
           </>
@@ -158,7 +158,10 @@ function RevisionCarga({ carga, fuente, alCambiar }) {
 
       {carga.estado === 'validada' && carga.resultado?.muestra?.filas?.length > 0 && (
         <div>
-          <h3>Vista previa</h3>
+          <h3>
+            Vista previa: las primeras {carga.resultado.muestra.filas.length} de {numero(carga.filas)} filas
+          </h3>
+          <p className="nota">Solo es una muestra para revisar el formato: al aplicar se importan todas las filas.</p>
           <div className="tabla-desplazable">
             <table className="tabla" aria-label="Vista previa">
               <thead>
@@ -310,11 +313,15 @@ export default function CargaDatos() {
       {error && <Mensaje>{error}</Mensaje>}
       {ejemplos && (
         <Mensaje tipo="info" titulo={ejemplos.mes ? `Mes pendiente: ${ejemplos.nombre_mes}` : 'Sin meses pendientes'}>
-          {!ejemplos.mes
-            ? 'Ya están cargados todos los meses cerrados. El siguiente se sube cuando cierre, con el formato de las plantillas.'
-            : ejemplos.descargables
-              ? `Ya están los archivos de ${ejemplos.nombre_mes} exportados de cada sistema. Descárgalos con «Archivo del mes» y súbelos en orden: al aplicarlos, el mes aparece en el tablero. Traen columnas de más (incluso nombres) que el sistema descarta.`
-              : `Exporta de cada sistema los archivos de ${ejemplos.nombre_mes} y súbelos en orden, empezando por la plantilla de personal: al aplicar las seis fuentes, el mes aparece completo en el tablero.`}
+          {ejemplos.mes
+            ? `Exporta de cada sistema los archivos de ${ejemplos.nombre_mes} e impórtalos en orden, empezando por la plantilla de personal: al aplicar las seis fuentes, el mes aparece completo en el tablero.`
+            : 'Ya están cargados todos los meses cerrados. El siguiente se importa cuando cierre.'}
+          {ejemplos.mes && ejemplos.descargables && (
+            <span className="nota-simulacion">
+              Simulación: los botones «Exportar {ejemplos.nombre_mes}» hacen lo que haría cada sistema de Nordika. En
+              producción el archivo se saca del propio HRIS, ATS, LMS…
+            </span>
+          )}
         </Mensaje>
       )}
 
@@ -333,70 +340,93 @@ export default function CargaDatos() {
       </div>
 
       <div className="rejilla-fuentes">
-        {fuentes.map((f, i) => (
-          <article className="tarjeta-fuente" key={f.clave} aria-label={f.nombre}>
-            <header>
-              <span className="paso-fuente" aria-hidden="true">
-                {i + 1}
-              </span>
-              <div>
-                <h3>{f.nombre}</h3>
-                <span className="sistema-fuente">{f.sistema}</span>
+        {fuentes.map((f, i) => {
+          // la bitacora viene de la mas reciente a la mas antigua
+          const ultima = historial.datos?.find((c) => c.fuente === f.clave)
+          const opcionales = f.columnas.some((c) => !c.requerida)
+          return (
+            <article className="tarjeta-fuente" key={f.clave} aria-label={f.nombre}>
+              <header className="cabeza-fuente">
+                <span className="paso-fuente" aria-hidden="true">
+                  {i + 1}
+                </span>
+                <div className="titulo-fuente">
+                  <h3>{f.nombre}</h3>
+                  <span className="sistema-fuente">{f.sistema}</span>
+                </div>
+                {ultima ? (
+                  <span title={`Último archivo: ${ultima.archivo}, ${fechaHora(ultima.subida_en)}`}>
+                    <Estado estado={ultima.estado} />
+                  </span>
+                ) : (
+                  <span className="semaforo semaforo-neutro semaforo-pequeno">Sin importar</span>
+                )}
+              </header>
+
+              <div className="cuerpo-fuente">
+                <p>{f.descripcion}</p>
+                <div className="exportar-fuente">
+                  <Icono nombre="archivo" tamano={18} />
+                  <div>
+                    <strong>Qué exportar de {f.sistema}</strong>
+                    <p>{f.exportar}</p>
+                    {ejemplos?.mes && ejemplos.descargables && (
+                      <button
+                        type="button"
+                        className="boton-secundario boton-exportar"
+                        aria-label={`Exportar ${ejemplos.nombre_mes} de ${f.sistema}`}
+                        title={`Simula la exportación de ${f.sistema}: el archivo de ${ejemplos.nombre_mes}, solo de ese mes`}
+                        onClick={() => descargar(() => api.ejemploDeCarga(f.clave))}
+                      >
+                        <Icono nombre="descargar" tamano={16} /> Exportar {ejemplos.nombre_mes}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <details className="columnas-detalle">
+                  <summary>Columnas del archivo ({f.columnas.length})</summary>
+                  <div className="columnas-fuente" aria-label="Columnas">
+                    {f.columnas.map((c) => (
+                      <code key={c.nombre} className={c.requerida ? undefined : 'opcional'} title={c.ayuda || undefined}>
+                        {c.nombre}
+                        {!c.requerida && '?'}
+                      </code>
+                    ))}
+                  </div>
+                  {opcionales && <p className="nota">Las que llevan ? pueden ir vacías.</p>}
+                </details>
               </div>
-            </header>
-            <p>{f.descripcion}</p>
-            <div className="exportar-fuente">
-              <Icono nombre="archivo" tamano={18} />
-              <div>
-                <strong>Exporta de {f.sistema}</strong>
-                <p>{f.exportar}</p>
-              </div>
-            </div>
-            <span className="nota">Columnas que debe traer (las que tienen ? pueden ir vacías):</span>
-            <div className="columnas-fuente" aria-label="Columnas">
-              {f.columnas.map((c) => (
-                <code key={c.nombre} className={c.requerida ? undefined : 'opcional'} title={c.ayuda || undefined}>
-                  {c.nombre}
-                  {!c.requerida && '?'}
-                </code>
-              ))}
-            </div>
-            <div className="acciones-fuente">
-              <label className="boton-primario subir-archivo">
-                {subiendo === f.clave ? 'Validando…' : 'Subir archivo exportado'}
-                <input
-                  type="file"
-                  accept=".csv,.xlsx"
-                  aria-label={`Subir archivo de ${f.nombre}`}
-                  disabled={Boolean(subiendo)}
-                  onChange={(e) => {
-                    subir(f, e.target.files[0])
-                    e.target.value = ''
-                  }}
-                />
-              </label>
-              {ejemplos?.mes && ejemplos.descargables && (
-                <button
-                  type="button"
-                  className="boton-secundario"
-                  aria-label={`Descargar archivo de ${ejemplos.nombre_mes} de ${f.nombre}`}
-                  onClick={() => descargar(() => api.ejemploDeCarga(f.clave))}
-                >
-                  <Icono nombre="descargar" tamano={16} /> Archivo del mes
-                </button>
-              )}
-              <button
-                type="button"
-                className="boton-texto"
-                aria-label={`Descargar plantilla de ${f.nombre}`}
-                title="Excel vacío con las columnas, por si tu sistema no exporta en este formato"
-                onClick={() => descargar(() => api.plantilla(f.clave))}
-              >
-                Formato vacío
-              </button>
-            </div>
-          </article>
-        ))}
+
+              <footer className="pie-fuente">
+                <label className="boton-primario subir-archivo">
+                  <Icono nombre="carga" tamano={18} />
+                  {subiendo === f.clave ? 'Validando…' : 'Importar datos'}
+                  <input
+                    type="file"
+                    accept=".csv,.xlsx"
+                    aria-label={`Importar datos de ${f.nombre}`}
+                    disabled={Boolean(subiendo)}
+                    onChange={(e) => {
+                      subir(f, e.target.files[0])
+                      e.target.value = ''
+                    }}
+                  />
+                </label>
+                <div className="descargas-fuente">
+                  <button
+                    type="button"
+                    className="boton-texto"
+                    aria-label={`Descargar formato vacío de ${f.nombre}`}
+                    title="Excel vacío con las columnas, por si tu sistema no exporta en este formato"
+                    onClick={() => descargar(() => api.plantilla(f.clave))}
+                  >
+                    <Icono nombre="descargar" tamano={16} /> Formato vacío
+                  </button>
+                </div>
+              </footer>
+            </article>
+          )
+        })}
       </div>
 
       <section className="seccion">

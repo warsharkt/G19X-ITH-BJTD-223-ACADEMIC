@@ -846,59 +846,47 @@ textarea:focus {
   color: var(--texto-secundario);
 }
 
-.exportar-fuente {
-  display: flex;
-  gap: 0.6rem;
-  align-items: flex-start;
-  background: var(--acento-suave);
-  border-radius: 10px;
-  padding: 0.7rem 0.8rem;
-}
-
-.exportar-fuente svg {
-  color: var(--acento);
-  flex: none;
-  margin-top: 0.1rem;
-}
-
-.exportar-fuente strong {
-  font-size: 0.86rem;
-  color: var(--acento);
-}
-
-.tarjeta-fuente .exportar-fuente p {
-  margin-top: 0.15rem;
-  font-size: 0.85rem;
-}
-
 .rejilla-fuentes {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 1rem;
   margin-bottom: 1.5rem;
 }
 
+/* tarjeta de cada fuente: cabeza, cuerpo y pie con las acciones */
 .tarjeta-fuente {
   background: var(--superficie);
   border: 1px solid var(--borde);
   border-radius: var(--radio);
-  padding: 1.1rem;
   box-shadow: var(--sombra);
   display: flex;
   flex-direction: column;
-  gap: 0.7rem;
+  overflow: hidden;
+  transition: box-shadow 0.15s, border-color 0.15s;
 }
 
-.tarjeta-fuente header {
+.tarjeta-fuente:hover {
+  border-color: var(--eje);
+  box-shadow: 0 6px 18px rgba(20, 24, 50, 0.08);
+}
+
+.cabeza-fuente {
   display: flex;
   gap: 0.75rem;
-  align-items: flex-start;
+  align-items: center;
+  padding: 1rem 1.1rem 0.85rem;
+  border-bottom: 1px solid var(--borde);
+}
+
+.titulo-fuente {
+  flex: 1;
+  min-width: 0;
 }
 
 .paso-fuente {
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
   display: grid;
   place-items: center;
   background: var(--acento-suave);
@@ -909,20 +897,93 @@ textarea:focus {
 
 .tarjeta-fuente h3 {
   font-size: 1rem;
+  margin: 0;
 }
 
 .sistema-fuente {
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   color: var(--texto-tenue);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
 
+.cuerpo-fuente {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.9rem 1.1rem 1rem;
+  flex: 1;
+}
+
 .tarjeta-fuente p {
   margin: 0;
   font-size: 0.88rem;
   color: var(--texto-secundario);
+}
+
+.exportar-fuente {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  background: var(--fondo-info);
+  border-left: 3px solid var(--acento);
+  border-radius: 8px;
+  padding: 0.65rem 0.8rem;
+}
+
+.exportar-fuente svg {
+  color: var(--acento);
+  flex: none;
+  margin-top: 0.1rem;
+}
+
+.exportar-fuente strong {
+  font-size: 0.84rem;
+  color: var(--texto);
+}
+
+.tarjeta-fuente .exportar-fuente p {
+  margin-top: 0.2rem;
+  font-size: 0.84rem;
+}
+
+.boton-exportar {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+  padding: 0.4rem 0.8rem;
+  font-size: 0.84rem;
+}
+
+.nota-simulacion {
+  display: block;
+  margin-top: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--texto-tenue);
+}
+
+.columnas-detalle summary {
+  cursor: pointer;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--texto-secundario);
+  width: fit-content;
+  border-radius: 6px;
+}
+
+.columnas-detalle summary:hover {
+  color: var(--acento);
+}
+
+.columnas-detalle[open] summary {
+  margin-bottom: 0.5rem;
+}
+
+.columnas-detalle .nota {
+  margin-top: 0.4rem;
+  font-size: 0.78rem;
 }
 
 .columnas-fuente {
@@ -943,12 +1004,38 @@ textarea:focus {
   opacity: 0.65;
 }
 
-.acciones-fuente {
+.pie-fuente {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.85rem 1.1rem 0.9rem;
+  background: var(--superficie-2);
+  border-top: 1px solid var(--borde);
+}
+
+.pie-fuente label.boton-primario.subir-archivo {
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.subir-archivo:focus-within {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+}
+
+.descargas-fuente {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  justify-content: center;
+  gap: 0.25rem 1rem;
+}
+
+.descargas-fuente .boton-texto {
+  display: inline-flex;
   align-items: center;
-  margin-top: auto;
+  gap: 0.35rem;
+  font-size: 0.84rem;
 }
 
 .subir-archivo {

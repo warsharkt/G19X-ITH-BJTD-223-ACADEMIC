@@ -60,7 +60,7 @@ def reporte(**cambios) -> dict:
                    "eNPS (8.0 puntos). Conviene vigilar la cobertura de capacitación <61.0 %> & seguir el mes.",
         "hallazgos": [
             {"titulo": f"Hallazgo largo {i}", "texto": LARGO * 3, "hechos": ["H01", "H02"], "confianza": "alta",
-             "fuentes": ["HRIS (empleados)", "Encuesta de clima (respuestas_clima)"]}
+             "fuentes": ["HRIS (empleados)", "Encuesta de ambiente laboral (respuestas_clima)"]}
             for i in range(1, 6)
         ],
         "recomendaciones": [

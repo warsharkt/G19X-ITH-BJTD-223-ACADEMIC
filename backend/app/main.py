@@ -819,7 +819,7 @@ def plantilla_de_carga(
     fuente: str, formato: Literal["csv", "xlsx"] = "xlsx", _u: Usuario = Depends(solo_analista)
 ):
     """Archivo vacio con las columnas que espera la fuente."""
-    return _archivo(_carga(cargas.plantilla, fuente, formato), f"plantilla-{fuente}.{formato}", _TIPOS[formato])
+    return _archivo(_carga(cargas.plantilla, fuente, formato), f"plantilla-{cargas.prefijo_de_archivo(fuente)}.{formato}", _TIPOS[formato])
 
 
 @app.get("/cargas/ejemplos/{fuente}", tags=["Carga de datos"], response_class=Response)
