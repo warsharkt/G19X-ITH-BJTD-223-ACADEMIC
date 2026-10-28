@@ -383,6 +383,7 @@ frontend/
     pruebas/         pruebas automáticas (Vitest) con una API simulada
   Dockerfile         imagen del tablero (compilado y servido por nginx)
   nginx/             sirve el tablero, reenvía /api a la API y elige HTTP o HTTPS al arrancar
+datos-de-prueba/     archivos de septiembre para probar Carga de datos: correctos, con errores y casos especiales (ver su LEEME.md)
 db/                  esquema y tablas (SQL)
 docs/GUIA.md         guía de funcionamiento para quien usa el sistema
 llaves/              llave que cifra los secretos del MFA (se crea sola; no se sube a GitHub)

@@ -1,0 +1,2 @@
+codigo,area
+E0001,Ventas

@@ -121,6 +121,18 @@ def test_desempeno_de_un_empleado_que_no_existe(client):
     assert "carga primero la plantilla de personal" in carga["errores"][0]["mensaje"]
 
 
+@pytest.mark.parametrize("fuente", ["hris", "ats", "capacitacion"])
+def test_csv_con_celdas_opcionales_vacias(client, fuente):
+    # Activos sin fecha_baja, vacantes abiertas, cursos para toda la empresa
+    contenido, nombre = ejemplo(client, fuente, formato="csv")
+    carga = subir(client, fuente, contenido, nombre).json()
+    if fuente == "capacitacion":  # solo faltan las altas del mes: su HRIS no se aplica aqui
+        assert carga["errores"] and all("carga primero la plantilla" in e["mensaje"] for e in carga["errores"])
+    else:
+        assert carga["estado"] == "validada", carga["errores"][:3]
+    client.post(f"/cargas/{carga['id']}/descartar")
+
+
 def test_los_datos_personales_se_descartan_y_nunca_se_muestran(client):
     contenido, nombre = ejemplo(client, "hris")
     assert "nombre_completo" in pd.read_excel(io.BytesIO(contenido)).columns  # como lo exporta un HRIS real

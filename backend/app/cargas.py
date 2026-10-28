@@ -352,7 +352,9 @@ def _contexto(conn, fuente: Fuente) -> dict:
 def _validar_filas(fuente: Fuente, df: pd.DataFrame, ctx: dict) -> tuple[list[dict], list[dict], list[dict]]:
     """(filas convertidas, errores, muestra legible)."""
     filas, errores, vistas = [], [], set()
-    for i, original in df.iterrows():
+    # to_dict y no iterrows: si toda la fila es texto (siempre en un CSV),
+    # pandas 3 la convierte a tipo str y las celdas vacias llegan como NaN.
+    for i, original in zip(df.index, df.to_dict("records")):
         numero = int(i) + 2  # fila 1 = encabezados, como en Excel
         fila, ok = {}, True
         for c in fuente.columnas:

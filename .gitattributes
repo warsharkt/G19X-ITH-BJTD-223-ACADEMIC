@@ -1,3 +1,6 @@
 # Los scripts que corren dentro de los contenedores (Linux) siempre con LF:
 # con CRLF, /bin/sh no los puede ejecutar
 *.sh text eol=lf
+# Archivos de prueba de Carga de datos: tal cual (codificacion y saltos de linea son parte de la prueba)
+datos-de-prueba/** -text
+datos-de-prueba/LEEME.md text
