@@ -8,14 +8,16 @@
 
 El sistema viene instalado para **Nordika Logística**, operador logístico en Guadalajara con unas 350 personas en Operaciones, Ventas, Transporte, Finanzas, Almacén y Jurídico. Arranca con 24 meses de historia (septiembre de 2024 a agosto de 2026), y la Analista de RRHH carga cada mes nuevo desde **Carga de datos**.
 
-- **Carga de datos:** RRHH sube el Excel o CSV que exporta cada sistema. Se valida completo (todo o nada), se descartan los datos personales, se concilia contra la base y queda en bitácora con la huella del archivo.
+- **Carga de datos:** la Analista de RRHH sube el Excel o CSV que exporta cada sistema. Se valida completo (todo o nada), se descartan los datos personales, se concilia contra la base y queda en bitácora con la huella del archivo.
 - **Motor analítico (sin IA):** calcula los indicadores con SQL y pandas, de forma reproducible y verificada con pruebas.
 - **Motor de narrativa (con IA):** el modelo redacta **solo** a partir de los indicadores ya calculados. Unos guardarrailes rechazan cifras inventadas, causas no demostradas y alertas omitidas.
 - **Seguridad:** verificación en dos pasos obligatoria para Dirección, TI y RRHH; acceso por rol y área; contraseñas temporales; bloqueo por intentos; bitácoras de cuentas, umbrales, reportes y cargas; IA local que no saca los datos del servidor.
 - **Quien prepara no firma:** la Analista de RRHH carga los datos y genera los reportes; la Responsable de RRHH los firma (con suplente si no está y una Nota de RRHH opcional). Dirección y los gerentes los piden a RRHH. Cada reporte dice quién lo firmará, y los firmados se descargan en PDF y presentación.
-- **Avisos y programación mensual:** alertas de indicadores en rojo y de reportes por revisar; los reportes del mes se pueden generar solos.
+- **Avisos y programación mensual:** alertas de indicadores en rojo, pedidos y reportes por firmar; los reportes del mes se pueden generar solos.
 
 > Nordika Logística y sus datos son ficticios (`scripts/seed.py`) y no corresponden a personas reales. Dentro del sistema se tratan como los datos de la empresa: para usarlo en otra, se cambian todos (ver [Usarlo con los datos de otra empresa](#usarlo-con-los-datos-de-otra-empresa)).
+
+**Para quien lo usa:** la [Guía de funcionamiento](docs/GUIA.md) explica cada pantalla, qué archivos se suben, cómo se calcula cada indicador y por qué, y quién prepara y firma los reportes.
 
 ## Cuentas de Nordika
 
@@ -175,9 +177,9 @@ Abre http://localhost:5173 e inicia sesión con tu usuario. Si la API no está e
 | Sección | Qué hace |
 |---|---|
 | **Tablero** | Indicadores del mes con semáforo (siempre con icono y texto), variación contra el mes y el año anterior, y la tendencia del indicador elegido con sus umbrales. Filtros por área, mes e indicador; quedan en la dirección de la página, así que se pueden compartir |
-| **Narrativas** | Solicita el reporte con IA de un área y mes, muestra el avance mientras se redacta, permite aprobarlo o rechazarlo, descargar los aprobados en PDF o presentación, y guarda el historial consultable por área, mes y revisión |
-| **Avisos** | Indicadores en rojo, reportes por revisar y reportes aprobados o rechazados de tus áreas. El menú muestra cuántos faltan por leer |
-| **Carga de datos** (solo RRHH) | Subir el Excel o CSV de cada sistema, revisar la validación y lo que se descarta, aplicar y ver la conciliación. Plantillas y archivos del mes pendiente (hoy, septiembre 2026). Bitácora de cargas con la huella SHA-256 de cada archivo |
+| **Reportes** | La Analista prepara el reporte con IA de un área y mes y ve el avance mientras se redacta; Dirección y los gerentes se lo piden a RRHH. La Responsable lo aprueba (con Nota de RRHH opcional) o lo rechaza. Descarga de los aprobados en PDF o presentación e historial consultable por área, mes y firma |
+| **Avisos** | Indicadores en rojo, pedidos de reportes, reportes por firmar y reportes aprobados o rechazados de tus áreas. El menú muestra cuántos faltan por leer |
+| **Carga de datos** (solo la Analista de RRHH) | Subir el Excel o CSV de cada sistema, revisar la validación y lo que se descarta, aplicar y ver la conciliación. Plantillas y archivos del mes pendiente (hoy, septiembre 2026). Bitácora de cargas con la huella SHA-256 de cada archivo |
 | **Configuración** | Umbrales del semáforo con su bitácora de cambios, y programación mensual. Todos la ven. Los umbrales los cambia solo la Responsable de RRHH; la programación, cualquiera de RRHH |
 | **Usuarios** | Cuentas y su bitácora. TI las crea, modifica, desactiva y les restablece la contraseña o la verificación en dos pasos; RRHH solo las consulta |
 | **Mi cuenta** (tu nombre, arriba a la derecha) | Cambiar tu contraseña y activar la verificación en dos pasos |
@@ -364,6 +366,7 @@ frontend/
   Dockerfile         imagen del tablero (compilado y servido por nginx)
   nginx.conf         sirve el tablero y reenvía /api a la API
 db/                  esquema y tablas (SQL)
+docs/GUIA.md         guía de funcionamiento para quien usa el sistema
 llaves/              llave que cifra los secretos del MFA (se crea sola; no se sube a GitHub)
 respaldos/           respaldos de la base (python -m scripts.respaldo; no se suben a GitHub)
 docker-compose.yml   base de datos, API y tablero
