@@ -83,7 +83,7 @@ def listar():
             text(
                 "SELECT u.usuario, u.nombre, u.rol, a.nombre AS area, u.activo, u.ultimo_acceso, u.correo, u.mfa_activo, "
                 "(COALESCE(u.bloqueado_hasta > now(), false) OR EXISTS (SELECT 1 FROM bloqueos_acceso b "
-                "  WHERE b.usuario_id = u.id AND b.bloqueado_hasta > now())) AS bloqueado, u.firma_reportes "
+                "  WHERE b.usuario = u.usuario AND b.bloqueado_hasta > now())) AS bloqueado, u.firma_reportes "
                 "FROM usuarios u LEFT JOIN areas a ON a.id = u.area_id ORDER BY u.usuario"
             )
         ).mappings().all()

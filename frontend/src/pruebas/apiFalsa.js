@@ -455,7 +455,8 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
     if (pathname === '/narrativas/5') return respuesta(200, paraAudiencia(usuario, trabajo(5, 'lista')))
     if (pathname === '/narrativas/7') {
       estado.consultas += 1
-      if (estado.consultas <= consultasHastaLista) return respuesta(200, trabajo(7, 'en_proceso'))
+      if (estado.consultas <= consultasHastaLista)
+        return respuesta(200, trabajo(7, 'en_proceso', { antes_en_cola: estado.antesEnCola ?? 0 }))
       if (fallaNarrativa)
         return respuesta(200, paraAudiencia(usuario, trabajo(7, 'error', { error: 'El modelo no pasó los guardarrailes', detalle_error: ['Cifra 4.2 no está en los hechos'] })))
       return respuesta(200, paraAudiencia(usuario, trabajo(7, 'lista')))

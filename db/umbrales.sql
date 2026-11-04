@@ -50,3 +50,6 @@ CREATE TABLE IF NOT EXISTS umbrales_cambios (
     usuario         TEXT NOT NULL,
     cambiado_en     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Desde donde (IP) se cambio cada umbral (bitacora).
+ALTER TABLE umbrales_cambios ADD COLUMN IF NOT EXISTS origen TEXT;

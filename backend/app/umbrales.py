@@ -10,6 +10,7 @@ import math
 from sqlalchemy import text
 
 from app.database import engine
+from app.origen import actual as origen_de_la_peticion
 from app.kpis import inicializar_umbrales
 
 # Rango razonable de cada unidad: atrapa errores de dedo (75 en vez de 7.5
@@ -75,11 +76,11 @@ def actualizar(indicador: str, atencion: float, critico: float, usuario: str) ->
         conn.execute(
             text(
                 "INSERT INTO umbrales_cambios "
-                "(indicador, atencion_antes, critico_antes, atencion_nuevo, critico_nuevo, usuario) "
-                "VALUES (:i, :aa, :ca, :a, :c, :u)"
+                "(indicador, atencion_antes, critico_antes, atencion_nuevo, critico_nuevo, usuario, origen) "
+                "VALUES (:i, :aa, :ca, :a, :c, :u, :o)"
             ),
             {"i": indicador, "aa": actual["umbral_atencion"], "ca": actual["umbral_critico"],
-             "a": atencion, "c": critico, "u": usuario},
+             "a": atencion, "c": critico, "u": usuario, "o": origen_de_la_peticion.get()},
         )
     return {**actual, "umbral_atencion": atencion, "umbral_critico": critico}
 

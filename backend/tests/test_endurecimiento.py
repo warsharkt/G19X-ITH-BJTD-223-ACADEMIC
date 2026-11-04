@@ -9,9 +9,18 @@ Cada bloque reproduce un hallazgo: con el codigo de antes la prueba fallaba.
      otra persona desde fuera).
   5. Cerrar sesion invalida el token.
   7. La API se conecta a PostgreSQL sin privilegios de superusuario.
+  8. Aplicar una carga es una sola sentencia, no una por fila.
+  9. Las dependencias de las pruebas no entran a la imagen de la API.
+ 10. openpyxl lee los Excel con defusedxml.
+ 12. Las respuestas de la API no se guardan en la cache del navegador.
+ 13. Un usuario que no existe se bloquea igual que uno real.
+ 14. Las bitacoras guardan desde que IP se hizo cada cosa.
+ 16. El modo demostracion rechaza una contrasena que estuvo publicada.
+ 17. Un reporte en espera dice cuantos van antes que el.
 
-El 6 (Content-Security-Policy) y el limite por IP del 4 viven en nginx
-(frontend/nginx/); se revisan con el tablero en Docker.
+El 6 (Content-Security-Policy), el 11 (documentacion de la API fuera de la
+red) y el limite por IP del 4 viven en nginx (frontend/nginx/); se revisan con
+el tablero en Docker. El 15 es de las dependencias del frontend (npm audit).
 
 Usuarios reales con su contrasena (prefijo zz_end_), como test_cuentas.py.
 """
@@ -383,3 +392,149 @@ def test_las_variables_de_la_cuenta_de_la_api_cambian_la_conexion(monkeypatch):
     assert url.username == "talentia_api" and url.password == "x" * 40
     monkeypatch.delenv("DB_API_CONTRASENA")
     assert _url_desde_entorno().username == os.getenv("POSTGRES_USER")
+
+
+# ===================== 8. aplicar una carga: una sentencia, no una por fila
+def test_aplicar_inserta_todas_las_filas_en_una_sola_sentencia(cuentas):
+    from sqlalchemy import event
+
+    sentencias = []
+    filas = [{"area": cuentas["ventas"], "periodo": date(2019, 1, 1), "dimension": "enps", "puntaje": i % 11}
+             for i in range(500)]
+    with engine.connect() as conn:
+        transaccion = conn.begin()
+        event.listen(conn, "before_cursor_execute", lambda *a: sentencias.append(a[2]))
+        try:
+            nuevas, conciliacion = cargas._APLICAR["clima"](conn, filas)
+        finally:
+            transaccion.rollback()  # la prueba no deja datos
+    inserciones = [s for s in sentencias if s.startswith("INSERT INTO respuestas_clima")]
+    assert len(inserciones) == 1  # antes: 500
+    assert nuevas == 500 and conciliacion[0] == {"concepto": "Respuestas", "archivo": 500, "base": 500}
+
+
+def test_aplicar_por_lote_distingue_nuevas_de_actualizadas(cuentas):
+    with engine.connect() as conn:
+        transaccion = conn.begin()
+        try:
+            existente = conn.execute(text("SELECT area_id, periodo FROM productividad LIMIT 1")).one()
+            filas = [
+                {"area": existente.area_id, "periodo": existente.periodo, "horas_efectivas": 10.5,
+                 "horas_disponibles": 20.0, "entregables_planificados": 5, "entregables_completados": 4},
+                {"area": existente.area_id, "periodo": date(2019, 1, 1), "horas_efectivas": 1.0,
+                 "horas_disponibles": 2.0, "entregables_planificados": 1, "entregables_completados": 1},
+            ]
+            nuevas, conciliacion = cargas._APLICAR["productividad"](conn, filas)
+            guardada = conn.execute(
+                text("SELECT horas_efectivas FROM productividad WHERE area_id = :a AND periodo = :p"),
+                {"a": existente.area_id, "p": existente.periodo},
+            ).scalar()
+        finally:
+            transaccion.rollback()
+    assert nuevas == 1 and float(guardada) == 10.5
+    assert all(c["archivo"] == c["base"] for c in conciliacion)
+
+
+# =========== 9 y 10. dependencias: sin las de pruebas en la imagen; XML seguro
+def test_la_imagen_de_la_api_no_instala_las_dependencias_de_las_pruebas():
+    from pathlib import Path
+
+    backend = Path(__file__).resolve().parents[1]
+    produccion = (backend / "requirements.txt").read_text(encoding="utf-8").lower()
+    assert not any(p in produccion for p in ("pytest", "pypdf", "httpx"))
+    if (backend / "Dockerfile").exists():  # dentro de la imagen no esta: se construye con el
+        dockerfile = (backend / "Dockerfile").read_text(encoding="utf-8")
+        assert "pip install -r requirements.txt" in dockerfile and "pip install -r requirements-dev.txt" not in dockerfile
+
+
+def test_openpyxl_lee_los_excel_con_defusedxml():
+    import openpyxl.xml
+
+    assert openpyxl.xml.DEFUSEDXML is True
+
+
+# ========================================= 12. sin cache del navegador
+def test_las_respuestas_de_la_api_no_se_guardan_en_cache(client):
+    assert client.get("/health").headers["cache-control"] == "no-store"
+    r = client.get("/kpis", headers=como(client, "ger"))
+    assert r.status_code == 200 and r.headers["cache-control"] == "no-store"
+
+
+# ============== 13. el bloqueo no revela que cuentas existen
+def test_un_usuario_que_no_existe_se_bloquea_igual_que_uno_real():
+    equipo = TestClient(app, client=("10.0.4.1", 5000))
+    respuestas = {}
+    for nombre in ("resp", "no_existe"):
+        for _ in range(INTENTOS_MAXIMOS):
+            assert entrar(equipo, nombre, "no-es-la-clave").status_code == 401
+        respuestas[nombre] = entrar(equipo, nombre, "no-es-la-clave")
+    assert respuestas["resp"].status_code == respuestas["no_existe"].status_code == 429  # antes: 401 si no existia
+    assert respuestas["resp"].json() == respuestas["no_existe"].json()
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM bloqueos_acceso WHERE usuario LIKE :p"), {"p": PREFIJO + "%"})
+
+
+def test_crear_una_cuenta_borra_lo_que_se_intento_antes_con_ese_nombre():
+    equipo = TestClient(app, client=("10.0.4.2", 5000))
+    for _ in range(INTENTOS_MAXIMOS):
+        entrar(equipo, "despues", "no-es-la-clave")
+    crear_usuario(PREFIJO + "despues", "Cuenta Nueva", "direccion", CLAVE)
+    assert entrar(equipo, "despues").status_code == 200
+
+
+# ====================================== 14. desde que IP se hizo cada cosa
+def test_la_bitacora_de_cuentas_guarda_la_ip(cuentas):
+    ti = TestClient(app, client=("10.0.5.7", 5000))
+    r = ti.post("/usuarios", headers=como(ti, "ti"), json={"usuario": PREFIJO + "conip", "nombre": "Con IP", "rol": "direccion"})
+    assert r.status_code == 201
+    cambios = ti.get("/usuarios/cambios", headers=como(ti, "ti"), params={"usuario": PREFIJO + "conip"}).json()
+    assert cambios[0]["accion"] == "crear" and cambios[0]["origen"] == "10.0.5.7"
+    # lo que se hace desde la consola o el arranque no tiene IP
+    assert seguridad.cambios(1, PREFIJO + "ti")[0]["origen"] is None
+
+
+def test_la_firma_y_la_descarga_de_un_reporte_guardan_la_ip(cuentas, monkeypatch):
+    from app import exportar, trabajos
+
+    id_ = _narrativa("pendiente")
+    # narrativa minima: no pasa el esquema de respuesta, pero la firma ya quedo guardada
+    equipo = TestClient(app, client=("10.0.5.8", 5000), raise_server_exceptions=False)
+    equipo.post(f"/narrativas/{id_}/revision", headers=como(equipo, "resp"), json={"decision": "aprobada"})
+    monkeypatch.setattr(exportar, "generar", lambda trabajo, formato: b"%PDF-")
+    monkeypatch.setattr(exportar, "nombre_archivo", lambda trabajo, formato: "reporte.pdf")
+    assert equipo.get(f"/narrativas/{id_}/exportar", headers=como(equipo, "dir")).status_code == 200
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT revisada_desde FROM narrativas WHERE id = :i"), {"i": id_}).scalar() == "10.0.5.8"
+        assert conn.execute(text("SELECT origen FROM exportaciones WHERE narrativa_id = :i"), {"i": id_}).scalar() == "10.0.5.8"
+
+
+# ============== 16. una contrasena de demo que estuvo publicada no sirve
+def test_el_modo_demo_rechaza_una_contrasena_publicada(monkeypatch):
+    import hashlib
+
+    from app import demo
+
+    monkeypatch.setenv("MODO_DEMO", "si")
+    monkeypatch.setenv("MODO_DATOS", "sinteticos")
+    monkeypatch.setenv("DEMO_CONTRASENA", "Publicada-en-github-1")
+    assert demo.motivo_inactivo() is None
+    monkeypatch.setattr(demo, "CONTRASENAS_PUBLICADAS",
+                        demo.CONTRASENAS_PUBLICADAS | {hashlib.sha256(b"Publicada-en-github-1").hexdigest()})
+    assert "estuvo publicada" in demo.motivo_inactivo()
+    assert len(demo.CONTRASENAS_PUBLICADAS) >= 1  # la que estuvo en el repositorio hasta octubre
+
+
+# ============================ 17. un reporte en espera dice su lugar en la cola
+def test_un_reporte_en_espera_dice_cuantos_van_antes(cuentas):
+    with engine.begin() as conn:
+        ids = [conn.execute(
+            text("INSERT INTO narrativas (area_id, periodo, estado, solicitada_por) "
+                 "VALUES (0, '2026-08-01', 'en_proceso', :s) RETURNING id"),
+            {"s": PREFIJO + "ana"},
+        ).scalar_one() for _ in range(2)]
+    from app import trabajos
+
+    primero, segundo = (trabajos.obtener(i) for i in ids)
+    assert segundo["antes_en_cola"] == primero["antes_en_cola"] + 1
+    listo = trabajos.obtener(_narrativa("aprobada"))
+    assert listo["antes_en_cola"] is None

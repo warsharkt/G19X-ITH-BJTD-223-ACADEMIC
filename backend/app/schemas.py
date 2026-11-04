@@ -115,6 +115,7 @@ class CambioCuenta(BaseModel):
     detalle: dict
     hecho_por: str
     hecho_en: datetime
+    origen: str | None = Field(None, description="IP desde la que se hizo; vacio si fue desde la consola o el arranque")
 
 
 class Area(BaseModel):
@@ -305,6 +306,9 @@ class TrabajoNarrativa(BaseModel):
     revisada_en: datetime | None = None
     comentario_revision: str | None = None
     programada: bool = Field(False, description="La solicito la programacion mensual, no una persona")
+    antes_en_cola: int | None = Field(
+        None, description="Solo en_proceso: cuantos reportes se generan antes que este (uno a la vez)"
+    )
     firma: Firma | None = Field(
         None, description="Quien la firma (o la firmo). None si termino en error o no hay quien firme"
     )

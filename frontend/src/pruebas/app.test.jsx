@@ -821,6 +821,23 @@ describe('auditoría de seguridad', () => {
     expect(screen.queryByRole('heading', { name: 'Reporte ejecutivo de Recursos Humanos' })).not.toBeInTheDocument()
   })
 
+  it('un reporte en espera dice cuántos van antes que él', async () => {
+    const { contrasena, estado } = instalarApiFalsa({ consultasHastaLista: 99 })
+    estado.antesEnCola = 2
+    await entrar('ana', contrasena, '/narrativas/7')
+    expect(await screen.findByText(/En cola: hay 2 reportes antes que este/)).toBeInTheDocument()
+    expect(screen.getByRole('progressbar', { name: 'Avance del reporte' })).toHaveAttribute('aria-valuenow', '0')
+  })
+
+  it('la bitácora de cuentas dice desde qué IP se hizo cada cambio', async () => {
+    const { contrasena, estado } = instalarApiFalsa()
+    estado.bitacora.push({ id: 98, usuario: 'dir', accion: 'restablecer_contrasena', detalle: {}, hecho_por: 'ti', hecho_en: '2026-10-05T12:00:00Z', origen: '10.0.0.5' })
+    await entrar('ti', contrasena, '/usuarios')
+    const bitacora = await screen.findByRole('table', { name: 'Bitácora de cuentas' })
+    expect(within(bitacora).getByRole('columnheader', { name: 'Desde' })).toBeInTheDocument()
+    expect(bitacora).toHaveTextContent('Contraseña restablecida—ti10.0.0.5')
+  })
+
   it('cerrar sesión invalida el token en el servidor', async () => {
     const { contrasena, estado } = instalarApiFalsa()
     const persona = await entrar('dir', contrasena)

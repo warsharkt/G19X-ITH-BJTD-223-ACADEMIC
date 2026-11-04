@@ -380,6 +380,7 @@ export default function Usuarios() {
                   <th scope="col">Qué pasó</th>
                   <th scope="col">Detalle</th>
                   <th scope="col">Quién</th>
+                  <th scope="col">Desde</th>
                 </tr>
               </thead>
               <tbody>
@@ -390,6 +391,7 @@ export default function Usuarios() {
                     <td>{ACCIONES[c.accion] ?? c.accion}</td>
                     <td>{detalle(c, nombreArea) || '—'}</td>
                     <td>{quien(c.hecho_por)}</td>
+                    <td>{c.origen ?? '—'}</td>
                   </tr>
                 ))}
               </tbody>

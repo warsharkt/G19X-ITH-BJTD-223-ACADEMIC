@@ -112,16 +112,34 @@ CREATE TABLE IF NOT EXISTS pedidos_reporte (
     pedido_en   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Bloqueo por intentos fallidos, por cuenta Y por origen (IP). Antes el
--- bloqueo era de toda la cuenta: cualquiera podia dejar bloqueada a la
--- Responsable para siempre con un intento cada 15 minutos. Ahora quien se
--- equivoca solo bloquea su propio equipo; si se bloquean varios origenes
--- a la vez (ataque desde varios equipos), se bloquea la cuenta completa
--- (usuarios.bloqueado_hasta). Se borra al entrar bien desde ese origen.
+-- Bloqueo por intentos fallidos, por nombre de usuario Y por origen (IP).
+-- Antes el bloqueo era de toda la cuenta: cualquiera podia dejar bloqueada a
+-- la Responsable para siempre con un intento cada 15 minutos. Ahora quien se
+-- equivoca solo bloquea su propio equipo; si se bloquean varios origenes a
+-- la vez (ataque desde varios equipos), se bloquea el usuario completo.
+-- Va por el nombre escrito, exista o no la cuenta: asi un usuario inventado
+-- se bloquea igual que uno real y el 429 no revela que cuentas existen.
+-- Se borra al entrar bien desde ese origen; las filas viejas se purgan.
+DO $$
+BEGIN
+    -- la primera version (noviembre de 2026) iba por usuario_id: sus filas son
+    -- temporales, se puede recrear sin perder nada
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'bloqueos_acceso' AND column_name = 'usuario_id'
+    ) THEN
+        DROP TABLE bloqueos_acceso;
+    END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS bloqueos_acceso (
-    usuario_id       INTEGER NOT NULL REFERENCES usuarios (id) ON DELETE CASCADE,
+    usuario          TEXT NOT NULL,              -- como se escribio, en minusculas
     origen           TEXT NOT NULL,
     intentos         INTEGER NOT NULL DEFAULT 0,
     bloqueado_hasta  TIMESTAMPTZ,
-    PRIMARY KEY (usuario_id, origen)
+    actualizado_en   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (usuario, origen)
 );
+
+-- Desde donde (IP) se hizo cada cambio de cuenta. NULL: consola o arranque.
+ALTER TABLE usuarios_cambios ADD COLUMN IF NOT EXISTS origen TEXT;

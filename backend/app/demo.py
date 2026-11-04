@@ -14,6 +14,7 @@ telefono simulado que, al configurar el MFA o al entrar, muestra el codigo
 vigente que en produccion solo se veria en la app del telefono. Solo para las
 cuentas de CUENTAS: nunca revela el codigo de ninguna otra cuenta.
 """
+import hashlib
 import os
 import time
 
@@ -64,6 +65,14 @@ _REFERENCIAS = [
 ]
 
 
+# Contrasenas de demostracion que alguna vez estuvieron en el repositorio (que
+# es publico): siguen en su historial, asi que cualquiera las conoce. Solo se
+# guarda su SHA-256. Con una de ellas el modo demostracion no se activa.
+CONTRASENAS_PUBLICADAS = frozenset({
+    "25cbcfd130733a1abfdba9686ef72988cf0e5cde3b146021995d59a1cae42a7a",  # la de prueba hasta octubre de 2026
+})
+
+
 def motivo_inactivo() -> str | None:
     """None si el modo demo esta activo; si no, por que."""
     if os.getenv("MODO_DEMO", "no").strip().lower() != "si":
@@ -76,6 +85,9 @@ def motivo_inactivo() -> str | None:
     if len(contrasena()) < seguridad.LONGITUD_MINIMA:
         return (f"Falta DEMO_CONTRASENA en el .env: la contraseña de las cuentas de prueba, "
                 f"de al menos {seguridad.LONGITUD_MINIMA} caracteres")
+    if hashlib.sha256(contrasena().encode()).hexdigest() in CONTRASENAS_PUBLICADAS:
+        return ("DEMO_CONTRASENA es una contraseña que estuvo publicada en el repositorio y cualquiera puede "
+                "conocer: elige otra en el .env")
     return None
 
 

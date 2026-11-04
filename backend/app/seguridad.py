@@ -9,9 +9,10 @@
   contrasena o el MFA, los tokens anteriores dejan de servir.
 - Fuerza bruta: tras INTENTOS_MAXIMOS fallos seguidos (contrasena o codigo de
   MFA) desde un mismo origen (IP), ese origen queda bloqueado MINUTOS_BLOQUEO
-  minutos para esa cuenta; la persona puede seguir entrando desde su equipo.
-  Si se bloquean ORIGENES_PARA_BLOQUEO_TOTAL origenes, se bloquea la cuenta
-  completa. Ademas nginx limita los intentos por IP (frontend/nginx).
+  minutos para ese usuario; la persona puede seguir entrando desde su equipo.
+  Si se bloquean ORIGENES_PARA_BLOQUEO_TOTAL origenes, se bloquea el usuario
+  completo. Va por el nombre escrito, exista o no la cuenta: el bloqueo no
+  revela que cuentas existen. Ademas nginx limita los intentos por IP.
 - Cerrar sesion (POST /auth/salir) sube la version de sesion: el token deja
   de servir aunque alguien lo haya copiado.
 - Firma de reportes: el permiso (firma_reportes) solo lo da o lo quita una
@@ -49,6 +50,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import text
 
+from app.origen import actual as origen_de_la_peticion
 from app.database import engine, ejecutar_sql
 from app.kpis import CORPORATIVO
 
@@ -146,13 +148,15 @@ def generar_contrasena_temporal() -> str:
 
 # --------------------------------------------------------------- bitacora
 def registrar(conn, usuario: str, accion: str, hecho_por: str, detalle: dict | None = None):
-    """Agrega a la bitacora de cuentas. Nunca recibe contrasenas ni secretos."""
+    """Agrega a la bitacora de cuentas, con la IP de la peticion (None desde la
+    consola o el arranque). Nunca recibe contrasenas ni secretos."""
     conn.execute(
         text(
-            "INSERT INTO usuarios_cambios (usuario, accion, detalle, hecho_por) "
-            "VALUES (:u, :a, CAST(:d AS jsonb), :p)"
+            "INSERT INTO usuarios_cambios (usuario, accion, detalle, hecho_por, origen) "
+            "VALUES (:u, :a, CAST(:d AS jsonb), :p, :o)"
         ),
-        {"u": usuario, "a": accion, "d": json.dumps(detalle or {}, ensure_ascii=False, default=str), "p": hecho_por},
+        {"u": usuario, "a": accion, "d": json.dumps(detalle or {}, ensure_ascii=False, default=str), "p": hecho_por,
+         "o": origen_de_la_peticion.get()},
     )
 
 
@@ -165,7 +169,7 @@ def cambios(limite: int = 50, usuario: str | None = None) -> list[dict]:
     with engine.connect() as conn:
         filas = conn.execute(
             text(
-                f"SELECT id, usuario, accion, detalle, hecho_por, hecho_en FROM usuarios_cambios {filtro} "
+                f"SELECT id, usuario, accion, detalle, hecho_por, hecho_en, origen FROM usuarios_cambios {filtro} "
                 "ORDER BY id DESC LIMIT :limite"
             ),
             params,
@@ -178,7 +182,7 @@ _PATRON_CORREO = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _COLUMNAS_CUENTA = (
     "id, usuario, nombre, rol, area_id, correo, activo, debe_cambiar_contrasena, mfa_activo, firma_reportes, "
     "creado_en, ultimo_acceso, (COALESCE(bloqueado_hasta > now(), false) OR EXISTS ("
-    "  SELECT 1 FROM bloqueos_acceso b WHERE b.usuario_id = usuarios.id AND b.bloqueado_hasta > now()"
+    "  SELECT 1 FROM bloqueos_acceso b WHERE b.usuario = usuarios.usuario AND b.bloqueado_hasta > now()"
     ")) AS bloqueado"
 )
 
@@ -240,6 +244,8 @@ def crear_usuario(
             {"u": usuario, "n": nombre.strip(), "r": rol, "a": area_id, "h": hash_contrasena(contrasena),
              "c": correo, "t": temporal, "f": firma_reportes},
         ).scalar_one()
+        # el bloqueo va por nombre: lo que alguien intento antes con ese nombre no aplica
+        conn.execute(text("DELETE FROM bloqueos_acceso WHERE usuario = :u"), {"u": usuario})
         registrar(conn, usuario, "crear", por,
                   {"nombre": nombre.strip(), "rol": rol, "area_id": area_id, "correo": correo,
                    "firma_reportes": firma_reportes})
@@ -321,7 +327,10 @@ def modificar_usuario(usuario_id: int, cambios_pedidos: dict, por: str) -> dict:
 
 
 def _desbloquear(conn, usuario_id: int):
-    conn.execute(text("DELETE FROM bloqueos_acceso WHERE usuario_id = :i"), {"i": usuario_id})
+    conn.execute(
+        text("DELETE FROM bloqueos_acceso WHERE usuario = (SELECT usuario FROM usuarios WHERE id = :i)"),
+        {"i": usuario_id},
+    )
 
 
 def suspender_firma(conn, cuenta: dict, por: str, motivo: str) -> bool:
@@ -417,7 +426,7 @@ def cambiar_contrasena(usuario: str, contrasena: str, por: str = "consola"):
         if not filas:
             raise ErrorDeUsuario(f"El usuario '{usuario}' no existe")
         conn.execute(
-            text("DELETE FROM bloqueos_acceso WHERE usuario_id = (SELECT id FROM usuarios WHERE usuario = :u)"),
+            text("DELETE FROM bloqueos_acceso WHERE usuario = :u"),
             {"u": usuario},
         )
         registrar(conn, usuario, "restablecer_contrasena", por)
@@ -490,49 +499,49 @@ def _leer_usuario(usuario_id: int) -> Usuario | None:
     return _a_usuario(fila) if fila else None
 
 
-def registrar_fallo(conn, usuario_id: int, origen: str):
-    """Un fallo mas (contrasena o codigo) desde ese origen. Tras un bloqueo el
-    contador no se reinicia: un nuevo fallo desde ahi vuelve a bloquear. Si
-    quedan bloqueados ORIGENES_PARA_BLOQUEO_TOTAL origenes, se bloquea la
-    cuenta completa (ataque desde varios equipos)."""
-    params = {"id": usuario_id, "o": origen, "max": INTENTOS_MAXIMOS, "min": MINUTOS_BLOQUEO}
+def registrar_fallo(conn, usuario: str, origen: str):
+    """Un fallo mas (contrasena o codigo) de ese nombre de usuario desde ese
+    origen, exista o no la cuenta. Tras un bloqueo el contador no se reinicia:
+    un nuevo fallo desde ahi vuelve a bloquear. Purga lo que ya no sirve."""
     conn.execute(
         text(
-            "INSERT INTO bloqueos_acceso (usuario_id, origen, intentos, bloqueado_hasta) "
-            "VALUES (:id, :o, 1, CASE WHEN 1 >= :max THEN now() + make_interval(mins => :min) END) "
-            "ON CONFLICT (usuario_id, origen) DO UPDATE SET intentos = bloqueos_acceso.intentos + 1, "
-            "bloqueado_hasta = CASE WHEN bloqueos_acceso.intentos + 1 >= :max "
+            "INSERT INTO bloqueos_acceso (usuario, origen, intentos, bloqueado_hasta) "
+            "VALUES (:u, :o, 1, CASE WHEN 1 >= :max THEN now() + make_interval(mins => :min) END) "
+            "ON CONFLICT (usuario, origen) DO UPDATE SET intentos = bloqueos_acceso.intentos + 1, "
+            "actualizado_en = now(), bloqueado_hasta = CASE WHEN bloqueos_acceso.intentos + 1 >= :max "
             "  THEN now() + make_interval(mins => :min) ELSE NULL END"
         ),
-        params,
+        {"u": usuario, "o": origen, "max": INTENTOS_MAXIMOS, "min": MINUTOS_BLOQUEO},
     )
-    conn.execute(
-        text(
-            "UPDATE usuarios SET bloqueado_hasta = now() + make_interval(mins => :min) WHERE id = :id AND ("
-            "  SELECT COUNT(*) FROM bloqueos_acceso WHERE usuario_id = :id AND bloqueado_hasta > now()) >= :origenes"
-        ),
-        {**params, "origenes": ORIGENES_PARA_BLOQUEO_TOTAL},
-    )
+    conn.execute(text(
+        "DELETE FROM bloqueos_acceso WHERE actualizado_en < now() - make_interval(days => 1) "
+        "AND (bloqueado_hasta IS NULL OR bloqueado_hasta < now())"
+    ))
 
 
-def registrar_entrada(conn, usuario_id: int, origen: str):
+def registrar_entrada(conn, usuario_id: int, usuario: str, origen: str):
     conn.execute(
-        text("DELETE FROM bloqueos_acceso WHERE usuario_id = :id AND origen = :o"), {"id": usuario_id, "o": origen}
+        text("DELETE FROM bloqueos_acceso WHERE usuario = :u AND origen = :o"), {"u": usuario, "o": origen}
     )
     conn.execute(
         text("UPDATE usuarios SET intentos_fallidos = 0, ultimo_acceso = now() WHERE id = :id"), {"id": usuario_id}
     )
 
 
-def error_si_bloqueada(conn, fila, origen: str) -> HTTPException | None:
-    """429 si la cuenta completa, o este origen para esta cuenta, esta bloqueado."""
+def error_si_bloqueada(conn, usuario: str, origen: str) -> HTTPException | None:
+    """429 si ese nombre de usuario esta bloqueado desde este origen, o desde
+    ORIGENES_PARA_BLOQUEO_TOTAL origenes a la vez (entonces, para todos).
+    Igual para una cuenta que no existe: el 429 no revela cuales existen."""
     ahora = datetime.now(timezone.utc)
-    del_origen = conn.execute(
-        text("SELECT bloqueado_hasta FROM bloqueos_acceso WHERE usuario_id = :id AND origen = :o"),
-        {"id": fila["id"], "o": origen},
-    ).scalar()
-    total = fila["bloqueado_hasta"] if fila["bloqueado_hasta"] and fila["bloqueado_hasta"] > ahora else None
-    hasta = max((h for h in (total, del_origen) if h and h > ahora), default=None)
+    del_origen, bloqueados, primero = conn.execute(
+        text(
+            "SELECT MAX(bloqueado_hasta) FILTER (WHERE origen = :o), COUNT(*), MIN(bloqueado_hasta) "
+            "FROM bloqueos_acceso WHERE usuario = :u AND bloqueado_hasta > now()"
+        ),
+        {"u": usuario, "o": origen},
+    ).one()
+    total = primero if bloqueados >= ORIGENES_PARA_BLOQUEO_TOTAL else None
+    hasta = max((h for h in (total, del_origen) if h), default=None)
     if hasta:
         minutos = int((hasta - ahora).total_seconds() // 60) + 1
         donde = "por intentos fallidos desde varios equipos" if total else "en este equipo por intentos fallidos"
@@ -545,37 +554,33 @@ def error_si_bloqueada(conn, fila, origen: str) -> HTTPException | None:
 
 def autenticar(usuario: str, contrasena: str, origen: str = "local") -> Usuario:
     """Usuario si la contrasena es correcta; HTTPException 401 si no.
-    origen: IP de quien intenta entrar (el bloqueo es por cuenta y origen).
+    origen: IP de quien intenta entrar (el bloqueo es por usuario y origen).
 
-    El mensaje es el mismo si el usuario no existe o la contrasena esta mal,
-    para no revelar que cuentas existen. La cuenta bloqueada si se avisa.
+    Una cuenta que no existe (o desactivada) se comporta igual que una con la
+    contrasena mal, tambien al bloquearse: no se revela que cuentas existen.
     Con MFA activo, el contador de fallos NO se reinicia aqui sino al acertar
     el codigo: si no, quien sabe la contrasena podria probar codigos sin fin
     alternandolos con entradas correctas.
     """
     asegurar_tabla()
     invalido = HTTPException(status.HTTP_401_UNAUTHORIZED, "Usuario o contraseña incorrectos")
+    nombre = usuario.strip().lower()
     # Los errores se lanzan FUERA de la transaccion: lanzarlos dentro la
     # desharia, y el conteo de intentos fallidos nunca se guardaria.
     error = None
     with engine.begin() as conn:
         fila = conn.execute(
-            text(
-                f"SELECT {_COLUMNAS_SESION}, contrasena_hash, activo, bloqueado_hasta "
-                "FROM usuarios WHERE usuario = :u FOR UPDATE"
-            ),
-            {"u": usuario.strip().lower()},
+            text(f"SELECT {_COLUMNAS_SESION}, contrasena_hash, activo FROM usuarios WHERE usuario = :u FOR UPDATE"),
+            {"u": nombre},
         ).mappings().first()
-        if fila is None or not fila["activo"]:
-            verificar_contrasena(contrasena, _HASH_SENUELO)
-            error = invalido
-        elif (bloqueo := error_si_bloqueada(conn, fila, origen)) is not None:
+        existe = fila is not None and fila["activo"]
+        if (bloqueo := error_si_bloqueada(conn, nombre, origen)) is not None:
             error = bloqueo
-        elif not verificar_contrasena(contrasena, fila["contrasena_hash"]):
-            registrar_fallo(conn, fila["id"], origen)
+        elif not verificar_contrasena(contrasena, fila["contrasena_hash"] if existe else _HASH_SENUELO) or not existe:
+            registrar_fallo(conn, nombre, origen)
             error = invalido
         elif not fila["mfa_activo"]:
-            registrar_entrada(conn, fila["id"], origen)
+            registrar_entrada(conn, fila["id"], nombre, origen)
     if error is not None:
         raise error
     return _a_usuario(fila)

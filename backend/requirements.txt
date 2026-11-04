@@ -1,6 +1,7 @@
 # Dependencias del backend (probado con Python 3.14).
 # Instalar, con el entorno virtual activo y desde la carpeta backend:
-#     pip install -r requirements.txt
+#     pip install -r requirements.txt        (solo la API)
+#     pip install -r requirements-dev.txt    (la API y las pruebas)
 
 # API
 fastapi==0.141.1
@@ -24,8 +25,7 @@ python-pptx==1.0.2        # presentacion ejecutiva
 
 # Carga de datos (hito 11)
 openpyxl==3.1.5           # leer y generar archivos de Excel
+defusedxml==0.7.1         # openpyxl lo usa solo: lee el XML de los Excel sin expandir entidades
 
-# Pruebas
-pytest==9.1.1
-httpx2==2.13.0             # lo usa el TestClient de FastAPI
-pypdf==6.19.0              # lee el texto de los PDF exportados
+# Las dependencias de las pruebas estan en requirements-dev.txt: no entran a
+# la imagen de produccion (menos paquetes, menos vulnerabilidades posibles).

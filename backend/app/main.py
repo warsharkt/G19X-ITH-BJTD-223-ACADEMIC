@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
-from app import avisos, cargas, mfa, programacion, seguridad, trabajos
+from app import avisos, cargas, mfa, origen, programacion, seguridad, trabajos
 from app.database import ejecutar_sql
 from app.kpis import inicializar_umbrales
 from app.rutas import (
@@ -73,6 +73,18 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["Content-Disposition"],  # nombre del archivo al exportar
 )
+
+
+@app.middleware("http")
+async def origen_y_sin_cache(request, siguiente):
+    """La IP de quien hace la peticion, para las bitacoras (app/origen.py), y
+    Cache-Control: no-store, porque las respuestas llevan datos de RRHH que
+    el navegador no debe guardar en disco (un equipo compartido los dejaria
+    a la vista)."""
+    origen.actual.set(request.client.host if request.client else None)
+    respuesta = await siguiente(request)
+    respuesta.headers.setdefault("Cache-Control", "no-store")
+    return respuesta
 
 
 @app.exception_handler(mfa.LlaveMfaInvalida)

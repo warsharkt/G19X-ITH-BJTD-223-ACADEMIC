@@ -87,7 +87,7 @@ La primera vez tarda unos minutos: arma la API y el tablero y carga los datos de
 - **Apagar y volver a encender:** `docker compose stop` y `docker compose up -d`. Los datos se conservan.
 - **Empezar de cero:** `docker compose down -v` borra la base; al volver a levantarlo se cargan otra vez los datos de Nordika.
 - **Solo desde este equipo:** el tablero (8080), la API (8000) y la base (5433) solo aceptan conexiones de la misma computadora. Para abrirlo a otras, ve [Red de la empresa](#red-de-la-empresa-https).
-- **Documentación de la API:** http://localhost:8000/docs.
+- **Documentación de la API:** http://localhost:8000/docs, solo desde este equipo (el tablero no la publica en la red).
 - **Si cambias el código:** vuelve a correr `docker compose up -d --build`.
 
 ## Cuentas de prueba
@@ -149,12 +149,14 @@ Nada de Nordika está fijo en el código: el nombre sale de `EMPRESA_NOMBRE`, y 
 |---|---|
 | Acceso | Rol y área en cada endpoint de la API; Dirección solo ve el consolidado, cada gerente solo su área y TI no ve datos de colaboradores. Dirección y los gerentes leen un reporte solo cuando RRHH ya lo firmó |
 | Firma | El permiso de firmar lo da una Responsable de RRHH, nunca TI. Si TI restablece la contraseña o la verificación de quien firma, el permiso se suspende, y todo lo que TI hace con una cuenta de RRHH le llega como aviso a RRHH |
-| Contraseñas | Mínimo 10 caracteres, guardadas con scrypt. TI genera temporales que la persona cambia al entrar. Tras 5 intentos fallidos se bloquea ese equipo para esa cuenta (no la cuenta entera, para que nadie pueda dejar fuera a otra persona); nginx además limita los intentos por IP |
+| Contraseñas | Mínimo 10 caracteres, guardadas con scrypt. TI genera temporales que la persona cambia al entrar. Tras 5 intentos fallidos se bloquea ese equipo para ese usuario (no la cuenta entera, para que nadie pueda dejar fuera a otra persona). Un usuario inventado se bloquea igual que uno real, así que el bloqueo no revela qué cuentas existen; nginx además limita los intentos por IP |
 | Verificación en dos pasos | Código de 6 dígitos (TOTP) obligatorio para Dirección, TI y RRHH, con 10 códigos de respaldo. El secreto se guarda cifrado (AES-256) con una llave que no está en la base |
 | Datos personales | La carga descarta nombres, CURP, RFC, correos y demás; el sistema solo conoce códigos de empleado |
 | IA | Con `MODO_DATOS=reales` solo se permite el modelo local: ningún dato sale del servidor |
 | Red | Por defecto solo acepta conexiones del mismo equipo; abierto a la red, HTTPS se activa solo |
-| Bitácoras | Cuentas, umbrales, cargas, reportes, firmas y descargas: quién, qué y cuándo. Nunca guardan contraseñas |
+| Bitácoras | Cuentas, umbrales, cargas, reportes, firmas y descargas: quién, qué, cuándo y desde qué IP. Nunca guardan contraseñas |
+| Navegador | Las respuestas de la API llevan `Cache-Control: no-store`: los datos de RRHH no quedan guardados en un equipo compartido |
+| Dependencias | La imagen de la API solo instala lo que usa (`requirements.txt`); las de las pruebas van aparte (`requirements-dev.txt`). Los Excel se leen con `defusedxml` |
 | Sesión | Token en `sessionStorage` de la pestaña, que vence solo; **Cerrar sesión** lo invalida en el servidor. El tablero envía una Content-Security-Policy que solo deja correr su propio código |
 | Base de datos | En Docker, la API se conecta con la cuenta `talentia_api`, sin privilegios de superusuario y con una contraseña nueva en cada arranque (`scripts/arranque.py`) |
 
@@ -284,7 +286,7 @@ docker compose up -d db
 cd backend
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+pip install -r requirements-dev.txt   # la API y lo que usan las pruebas
 python -m scripts.seed      # datos de Nordika
 python -m scripts.demo      # cuentas de prueba (o crea la tuya con scripts.crear_usuario)
 python -m uvicorn app.main:app --reload
@@ -323,10 +325,10 @@ python -m pytest -q
 docker compose build api            # la imagen con el código actual
 docker compose exec db sh -c 'createdb -U $POSTGRES_USER rrhh_pruebas'   # solo la primera vez
 docker compose run --rm --no-deps -e POSTGRES_DB=rrhh_pruebas api python -m scripts.seed
-docker compose run --rm --no-deps -e POSTGRES_DB=rrhh_pruebas -v "${PWD}/backend/tests:/app/backend/tests:ro" api python -m pytest -q -p no:cacheprovider
+docker compose run --rm --no-deps -e POSTGRES_DB=rrhh_pruebas -v "${PWD}/backend/tests:/app/backend/tests:ro" api sh -c "pip install --user -q -r requirements-dev.txt && python -m pytest -q -p no:cacheprovider"
 ```
 
-Dentro del contenedor se salta una prueba, la del respaldo, porque necesita el comando `docker`. Si corres las pruebas sin `POSTGRES_DB`, usan tu base de trabajo: sus datos vuelven a los de Nordika y se borran las cuentas de prueba. Después corre `python -m scripts.demo`.
+La imagen de la API no trae pytest (solo lo que usa la API), así que el último comando lo instala en ese contenedor de un solo uso: necesita internet. Dentro del contenedor se salta una prueba, la del respaldo, porque necesita el comando `docker`. Si corres las pruebas sin `POSTGRES_DB`, usan tu base de trabajo: sus datos vuelven a los de Nordika y se borran las cuentas de prueba. Después corre `python -m scripts.demo`.
 
 Las del frontend simulan la API, así que no necesitan el backend ni la base:
 
@@ -451,4 +453,4 @@ Este proyecto se programó con un asistente de IA. Esta sección dice qué hizo 
 - [Guía de funcionamiento](docs/GUIA.md): pantallas, roles, archivos que se suben, cómo se calcula cada indicador y por qué.
 - [Datos de prueba](datos-de-prueba/LEEME.md): archivos correctos y con errores para probar la carga, y qué debe pasar con cada uno.
 - [Evidencias](docs/evidencias/LEEME.md): evaluación del modelo de IA real, caso por caso.
-- Documentación de la API: http://localhost:8000/docs con el sistema encendido.
+- Documentación de la API: http://localhost:8000/docs con el sistema encendido, desde el propio servidor.

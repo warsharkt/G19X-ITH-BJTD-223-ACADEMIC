@@ -25,6 +25,7 @@ import pandas as pd
 from sqlalchemy import text
 
 from app import avisos, firmas, schemas
+from app.origen import actual as origen_de_la_peticion
 from app.database import engine, ejecutar_sql
 from app.narrativa import INTENTOS, NarrativaNoGenerada, generar_narrativa
 
@@ -37,7 +38,11 @@ _tabla_lista = False
 _COLUMNAS = (
     "id, area_id, to_char(periodo, 'YYYY-MM') AS periodo, estado, solicitada_en, terminada_en, "
     "proveedor, modelo, version_prompt, rondas, error, detalle_error, solicitada_por, "
-    "revision, revisada_por, revisada_en, comentario_revision, programada, nota_rrhh, firmada_como"
+    "revision, revisada_por, revisada_en, comentario_revision, programada, nota_rrhh, firmada_como, "
+    # Un solo hilo genera los reportes, en orden: los que estan en proceso con
+    # id menor van antes (incluido el que se esta generando).
+    "CASE WHEN estado = 'en_proceso' THEN (SELECT COUNT(*) FROM narrativas n2 "
+    "  WHERE n2.estado = 'en_proceso' AND n2.id < narrativas.id) END AS antes_en_cola"
 )
 
 
@@ -217,12 +222,12 @@ def revisar(
         actualizada = conn.execute(
             text(
                 "UPDATE narrativas SET revision = :d, revisada_por = :u, revisada_en = now(), "
-                "comentario_revision = :c, nota_rrhh = :n, firmada_como = :cargo "
+                "comentario_revision = :c, nota_rrhh = :n, firmada_como = :cargo, revisada_desde = :o "
                 "WHERE id = :id AND estado = 'lista' AND revision = 'pendiente' "
                 "AND solicitada_por IS DISTINCT FROM :u AND :u = ANY(:pueden) RETURNING id"
             ),
             {"id": id_, "d": decision, "u": revisor, "c": comentario, "n": nota, "cargo": cargo,
-             "pueden": list(pueden)},
+             "pueden": list(pueden), "o": origen_de_la_peticion.get()},
         ).first()
     if actualizada:
         avisos.avisar_revision(id_)
@@ -270,6 +275,6 @@ def registrar_exportacion(id_: int, formato: str, usuario: str) -> None:
     asegurar_tabla()
     with engine.begin() as conn:
         conn.execute(
-            text("INSERT INTO exportaciones (narrativa_id, formato, usuario) VALUES (:i, :f, :u)"),
-            {"i": id_, "f": formato, "u": usuario},
+            text("INSERT INTO exportaciones (narrativa_id, formato, usuario, origen) VALUES (:i, :f, :u, :o)"),
+            {"i": id_, "f": formato, "u": usuario, "o": origen_de_la_peticion.get()},
         )

@@ -9,7 +9,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Mismo acomodo que el repositorio: el codigo busca db/ dos niveles arriba de app/
 WORKDIR /app/backend
-COPY backend/requirements.txt .
+# Solo lo que usa la API. requirements-dev.txt (pytest y compania) se copia
+# pero no se instala: sirve para correr las pruebas en un contenedor aparte
+# (ver "Pruebas" en el README).
+COPY backend/requirements.txt backend/requirements-dev.txt ./
 RUN pip install -r requirements.txt
 
 COPY db /app/db

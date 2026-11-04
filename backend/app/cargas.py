@@ -38,6 +38,7 @@ from sqlalchemy import text
 
 from app.database import ejecutar_sql, engine
 from app.llm import modo_datos
+from app.origen import actual as origen_de_la_peticion
 from app.narrativa import MESES_ES
 
 BYTES_MAXIMOS = 5 * 1024 * 1024
@@ -539,8 +540,8 @@ def validar(clave_fuente: str, archivo: str, contenido: bytes, usuario: str) -> 
         id_ = conn.execute(
             text(
                 "INSERT INTO cargas (fuente, archivo, sha256, bytes, filas, estado, errores, descartadas, periodos, "
-                "datos, resultado, subida_por) VALUES (:f, :a, :h, :b, :n, :e, CAST(:err AS jsonb), "
-                "CAST(:d AS jsonb), CAST(:p AS jsonb), CAST(:datos AS jsonb), CAST(:r AS jsonb), :u) RETURNING id"
+                "datos, resultado, subida_por, subida_desde) VALUES (:f, :a, :h, :b, :n, :e, CAST(:err AS jsonb), "
+                "CAST(:d AS jsonb), CAST(:p AS jsonb), CAST(:datos AS jsonb), CAST(:r AS jsonb), :u, :o) RETURNING id"
             ),
             {
                 "f": fuente.clave, "a": archivo[:200], "h": hashlib.sha256(contenido).hexdigest(), "b": len(contenido),
@@ -549,25 +550,36 @@ def validar(clave_fuente: str, archivo: str, contenido: bytes, usuario: str) -> 
                 "p": json.dumps(_periodos(fuente, filas)),
                 "datos": None if errores else json.dumps(_a_json(filas), ensure_ascii=False),
                 "r": json.dumps({"previo": resumen, "errores_totales": len(errores), "muestra": muestra}, ensure_ascii=False),
-                "u": usuario,
+                "u": usuario, "o": origen_de_la_peticion.get(),
             },
         ).scalar_one()
     return obtener(id_)
 
 
 # ---------------------------------------------------------------- aplicar
+def _insertar(conn, tabla: str, columnas: list[tuple[str, str, str]], filas: list[dict], llave: tuple = ()) -> int:
+    """Inserta todas las filas en UNA sentencia (unnest de arreglos), no una
+    por fila: 30,000 filas tardaban 31 s. columnas: (columna de la tabla,
+    campo de la fila, tipo de PostgreSQL). Con llave (su restriccion UNIQUE)
+    actualiza las que ya existian; la validacion ya garantizo que el archivo
+    no repite la llave. Devuelve cuantas filas eran nuevas."""
+    nombres = ", ".join(c for c, _, _ in columnas)
+    arreglos = ", ".join(f"CAST(:{c} AS {tipo}[])" for c, _, tipo in columnas)
+    sql = f"INSERT INTO {tabla} ({nombres}) SELECT * FROM unnest({arreglos}) AS x({nombres})"
+    valores = {c: [f[campo] for f in filas] for c, campo, _ in columnas}
+    if not llave:
+        conn.execute(text(sql), valores)
+        return len(filas)
+    cambios = ", ".join(f"{c} = EXCLUDED.{c}" for c, _, _ in columnas if c not in llave)
+    sql += f" ON CONFLICT ({', '.join(llave)}) DO UPDATE SET {cambios} RETURNING (xmax = 0)"
+    return sum(conn.execute(text(sql), valores).scalars())
+
+
 def _aplicar_hris(conn, filas):
-    nuevas = 0
-    for f in filas:
-        nuevas += conn.execute(
-            text(
-                "INSERT INTO empleados (codigo, area_id, fecha_ingreso, fecha_baja, tipo_baja) "
-                "VALUES (:codigo, :area, :fecha_ingreso, :fecha_baja, :tipo_baja) "
-                "ON CONFLICT (codigo) DO UPDATE SET area_id = EXCLUDED.area_id, fecha_ingreso = EXCLUDED.fecha_ingreso, "
-                "fecha_baja = EXCLUDED.fecha_baja, tipo_baja = EXCLUDED.tipo_baja RETURNING (xmax = 0)"
-            ),
-            f,
-        ).scalar_one()
+    nuevas = _insertar(conn, "empleados", [
+        ("codigo", "codigo", "text"), ("area_id", "area", "int"), ("fecha_ingreso", "fecha_ingreso", "date"),
+        ("fecha_baja", "fecha_baja", "date"), ("tipo_baja", "tipo_baja", "text"),
+    ], filas, ("codigo",))
     codigos = [f["codigo"] for f in filas]
     base = conn.execute(
         text("SELECT COUNT(*), COUNT(*) FILTER (WHERE fecha_baja IS NOT NULL) FROM empleados WHERE codigo = ANY(:c)"),
@@ -581,18 +593,10 @@ def _aplicar_hris(conn, filas):
 
 
 def _aplicar_ats(conn, filas):
-    nuevas = 0
-    for f in filas:
-        nuevas += conn.execute(
-            text(
-                "INSERT INTO vacantes (folio, area_id, fecha_apertura, fecha_contratacion, costo_proceso) "
-                "VALUES (:folio, :area, :fecha_apertura, :fecha_contratacion, :costo_proceso) "
-                "ON CONFLICT (folio) DO UPDATE SET area_id = EXCLUDED.area_id, fecha_apertura = EXCLUDED.fecha_apertura, "
-                "fecha_contratacion = EXCLUDED.fecha_contratacion, costo_proceso = EXCLUDED.costo_proceso "
-                "RETURNING (xmax = 0)"
-            ),
-            f,
-        ).scalar_one()
+    nuevas = _insertar(conn, "vacantes", [
+        ("folio", "folio", "text"), ("area_id", "area", "int"), ("fecha_apertura", "fecha_apertura", "date"),
+        ("fecha_contratacion", "fecha_contratacion", "date"), ("costo_proceso", "costo_proceso", "numeric"),
+    ], filas, ("folio",))
     base = conn.execute(
         text("SELECT COUNT(*), COALESCE(SUM(costo_proceso), 0)::float8 FROM vacantes WHERE folio = ANY(:c)"),
         {"c": [f["folio"] for f in filas]},
@@ -605,17 +609,11 @@ def _aplicar_ats(conn, filas):
 
 
 def _aplicar_desempeno(conn, filas):
-    nuevas = 0
-    for f in filas:
-        nuevas += conn.execute(
-            text(
-                "INSERT INTO metas_desempeno (empleado_id, periodo, metas_asignadas, metas_logradas, calificacion) "
-                "VALUES (:codigo_empleado, :periodo, :metas_asignadas, :metas_logradas, :calificacion) "
-                "ON CONFLICT (empleado_id, periodo) DO UPDATE SET metas_asignadas = EXCLUDED.metas_asignadas, "
-                "metas_logradas = EXCLUDED.metas_logradas, calificacion = EXCLUDED.calificacion RETURNING (xmax = 0)"
-            ),
-            f,
-        ).scalar_one()
+    nuevas = _insertar(conn, "metas_desempeno", [
+        ("empleado_id", "codigo_empleado", "int"), ("periodo", "periodo", "date"),
+        ("metas_asignadas", "metas_asignadas", "int"), ("metas_logradas", "metas_logradas", "int"),
+        ("calificacion", "calificacion", "smallint"),
+    ], filas, ("empleado_id", "periodo"))
     base = conn.execute(
         text("SELECT COUNT(*), COALESCE(SUM(m.metas_logradas), 0) FROM metas_desempeno m "
              "JOIN unnest(CAST(:e AS int[]), CAST(:p AS date[])) AS x(e, p) ON m.empleado_id = x.e AND m.periodo = x.p"),
@@ -629,7 +627,7 @@ def _aplicar_desempeno(conn, filas):
 
 
 def _aplicar_capacitacion(conn, filas):
-    programas, nuevas = {}, 0
+    programas = {}  # pocos por archivo: se buscan o crean uno por uno
     for f in filas:
         llave = (f["programa"], f["periodo"], f["area_programa"])
         if llave not in programas:
@@ -648,14 +646,11 @@ def _aplicar_capacitacion(conn, filas):
                 conn.execute(text("UPDATE programas_capacitacion SET horas = :h WHERE id = :i"),
                              {"h": f["horas_programa"], "i": id_})
             programas[llave] = id_
-        nuevas += conn.execute(
-            text(
-                "INSERT INTO inscripciones_capacitacion (programa_id, empleado_id, completado, horas_cursadas) "
-                "VALUES (:p, :e, :c, :h) ON CONFLICT (programa_id, empleado_id) DO UPDATE SET "
-                "completado = EXCLUDED.completado, horas_cursadas = EXCLUDED.horas_cursadas RETURNING (xmax = 0)"
-            ),
-            {"p": programas[llave], "e": f["codigo_empleado"], "c": f["completado"], "h": f["horas_cursadas"]},
-        ).scalar_one()
+    inscripciones = [{**f, "programa_id": programas[(f["programa"], f["periodo"], f["area_programa"])]} for f in filas]
+    nuevas = _insertar(conn, "inscripciones_capacitacion", [
+        ("programa_id", "programa_id", "int"), ("empleado_id", "codigo_empleado", "int"),
+        ("completado", "completado", "boolean"), ("horas_cursadas", "horas_cursadas", "numeric"),
+    ], inscripciones, ("programa_id", "empleado_id"))
     base = conn.execute(
         text("SELECT COUNT(*), COUNT(*) FILTER (WHERE completado) FROM inscripciones_capacitacion "
              "WHERE programa_id = ANY(:p)"),
@@ -673,11 +668,10 @@ def _aplicar_clima(conn, filas):
     pares = sorted({(f["area"], f["periodo"]) for f in filas})
     for area, periodo in pares:
         conn.execute(text("DELETE FROM respuestas_clima WHERE area_id = :a AND periodo = :p"), {"a": area, "p": periodo})
-    for f in filas:
-        conn.execute(
-            text("INSERT INTO respuestas_clima (area_id, periodo, dimension, puntaje) VALUES (:area, :periodo, :dimension, :puntaje)"),
-            f,
-        )
+    _insertar(conn, "respuestas_clima", [
+        ("area_id", "area", "int"), ("periodo", "periodo", "date"), ("dimension", "dimension", "text"),
+        ("puntaje", "puntaje", "smallint"),
+    ], filas)
     base = conn.execute(
         text("SELECT COUNT(*), COALESCE(SUM(r.puntaje), 0) FROM respuestas_clima r "
              "JOIN unnest(CAST(:a AS int[]), CAST(:p AS date[])) AS x(a, p) ON r.area_id = x.a AND r.periodo = x.p"),
@@ -691,19 +685,12 @@ def _aplicar_clima(conn, filas):
 
 
 def _aplicar_productividad(conn, filas):
-    nuevas = 0
-    for f in filas:
-        nuevas += conn.execute(
-            text(
-                "INSERT INTO productividad (area_id, periodo, horas_efectivas, horas_disponibles, "
-                "entregables_planificados, entregables_completados) VALUES (:area, :periodo, :horas_efectivas, "
-                ":horas_disponibles, :entregables_planificados, :entregables_completados) "
-                "ON CONFLICT (area_id, periodo) DO UPDATE SET horas_efectivas = EXCLUDED.horas_efectivas, "
-                "horas_disponibles = EXCLUDED.horas_disponibles, entregables_planificados = EXCLUDED.entregables_planificados, "
-                "entregables_completados = EXCLUDED.entregables_completados RETURNING (xmax = 0)"
-            ),
-            f,
-        ).scalar_one()
+    nuevas = _insertar(conn, "productividad", [
+        ("area_id", "area", "int"), ("periodo", "periodo", "date"), ("horas_efectivas", "horas_efectivas", "numeric"),
+        ("horas_disponibles", "horas_disponibles", "numeric"),
+        ("entregables_planificados", "entregables_planificados", "int"),
+        ("entregables_completados", "entregables_completados", "int"),
+    ], filas, ("area_id", "periodo"))
     base = conn.execute(
         text("SELECT COUNT(*), COALESCE(SUM(t.horas_efectivas), 0)::float8 FROM productividad t "
              "JOIN unnest(CAST(:a AS int[]), CAST(:p AS date[])) AS x(a, p) ON t.area_id = x.a AND t.periodo = x.p"),

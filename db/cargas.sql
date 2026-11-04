@@ -33,3 +33,6 @@ CREATE INDEX IF NOT EXISTS cargas_fuente ON cargas (fuente, subida_en);
 -- mismo archivo sin duplicar vacantes. Las vacantes del seed no tienen folio.
 ALTER TABLE vacantes ADD COLUMN IF NOT EXISTS folio TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS vacantes_folio ON vacantes (folio);
+
+-- Desde donde (IP) se subio cada archivo (bitacora).
+ALTER TABLE cargas ADD COLUMN IF NOT EXISTS subida_desde TEXT;

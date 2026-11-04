@@ -286,13 +286,13 @@ def verificar_entrada(u: Usuario, codigo: str, origen: str = "local") -> Usuario
         ).mappings().first()
         if fila is None or not fila["mfa_activo"]:
             error = HTTPException(status.HTTP_401_UNAUTHORIZED, "Sesión no válida o vencida; vuelve a iniciar sesión")
-        elif (bloqueo := seguridad.error_si_bloqueada(conn, fila, origen)) is not None:
+        elif (bloqueo := seguridad.error_si_bloqueada(conn, fila["usuario"], origen)) is not None:
             error = bloqueo
         elif (secreto := descifrar_secreto(u.id, fila["mfa_secreto"])) is not None and (
             paso := _paso_valido(secreto, codigo, fila["mfa_ultimo_paso"])
         ) is not None:
             conn.execute(text("UPDATE usuarios SET mfa_ultimo_paso = :p WHERE id = :i"), {"p": paso, "i": u.id})
-            seguridad.registrar_entrada(conn, u.id, origen)
+            seguridad.registrar_entrada(conn, u.id, fila["usuario"], origen)
         elif conn.execute(
             text(
                 "UPDATE codigos_respaldo SET usado_en = now() "
@@ -300,10 +300,10 @@ def verificar_entrada(u: Usuario, codigo: str, origen: str = "local") -> Usuario
             ),
             {"i": u.id, "h": _hash_respaldo(codigo)},
         ).first():
-            seguridad.registrar_entrada(conn, u.id, origen)
+            seguridad.registrar_entrada(conn, u.id, fila["usuario"], origen)
             seguridad.registrar(conn, fila["usuario"], "usar_codigo_respaldo", fila["usuario"])
         else:
-            seguridad.registrar_fallo(conn, u.id, origen)
+            seguridad.registrar_fallo(conn, fila["usuario"], origen)
             # con la llave perdida o cambiada, solo sirven los codigos de respaldo
             error = _secreto_ilegible() if secreto is None else HTTPException(
                 status.HTTP_401_UNAUTHORIZED, "El código no es correcto"

@@ -30,13 +30,21 @@ function EsperaReporte({ trabajo, alcance }) {
     const t = setInterval(() => setAhora(Date.now()), 1000)
     return () => clearInterval(t)
   }, [])
-  const p = avance((ahora - new Date(trabajo.solicitada_en).getTime()) / 1000)
+  // Los reportes se generan de uno en uno: mientras espera turno no avanza
+  const enCola = trabajo.antes_en_cola ?? 0
+  const p = enCola > 0 ? 0 : avance((ahora - new Date(trabajo.solicitada_en).getTime()) / 1000)
   const actual = ETAPAS.findLastIndex(([desde]) => p >= desde)
   const firma = trabajo.firma
 
   return (
     <div className="en-proceso" role="status">
       <h1>Preparando el reporte de {alcance}</h1>
+      {enCola > 0 && (
+        <p className="nota-cola">
+          En cola: {enCola === 1 ? 'hay 1 reporte' : `hay ${enCola} reportes`} antes que este. Se generan de uno en uno
+          y, con la IA local, cada uno tarda de 2 a 5 minutos.
+        </p>
+      )}
       <div
         className="barra-avance"
         role="progressbar"

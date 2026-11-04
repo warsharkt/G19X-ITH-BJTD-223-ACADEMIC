@@ -64,3 +64,7 @@ ALTER TABLE narrativas ADD COLUMN IF NOT EXISTS nota_rrhh TEXT;
 -- Con que cargo firmo quien la reviso ("Responsable de RRHH" o "Suplente
 -- de ... hasta ..."): el cargo de ese dia, aunque despues cambie.
 ALTER TABLE narrativas ADD COLUMN IF NOT EXISTS firmada_como TEXT;
+
+-- Desde donde (IP) se firmo cada reporte y se descargo cada archivo (bitacora).
+ALTER TABLE narrativas ADD COLUMN IF NOT EXISTS revisada_desde TEXT;
+ALTER TABLE exportaciones ADD COLUMN IF NOT EXISTS origen TEXT;
