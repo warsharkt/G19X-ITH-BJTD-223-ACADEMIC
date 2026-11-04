@@ -561,7 +561,9 @@ describe('mi cuenta', () => {
 
 describe('cuentas (RF-11, RF-12)', () => {
   it('TI crea una cuenta y ve la contraseña temporal una sola vez', async () => {
-    const { contrasena } = instalarApiFalsa()
+    const { contrasena, estado } = instalarApiFalsa()
+    // una cuenta que creo el sistema al arrancar, no una persona
+    estado.bitacora.push({ id: 99, usuario: 'eva.munoz', accion: 'crear', detalle: {}, hecho_por: 'arranque:docker', hecho_en: '2026-10-05T12:00:00Z' })
     const persona = await entrar('ti', contrasena)
     await persona.click(await screen.findByRole('link', { name: 'Usuarios' }))
     await persona.click(await screen.findByRole('button', { name: 'Nueva cuenta' }))
@@ -574,7 +576,8 @@ describe('cuentas (RF-11, RF-12)', () => {
     expect(await screen.findByText('Tmp7-Kq3x-Pa9t')).toBeInTheDocument()
     expect(screen.getByRole('table', { name: 'Cuentas' })).toHaveTextContent('Luis Pérez')
     const bitacora = await screen.findByRole('table', { name: 'Bitácora de cuentas' })
-    expect(bitacora).toHaveTextContent('Creó la cuenta')
+    expect(bitacora).toHaveTextContent('Cuenta creada')
+    expect(bitacora).toHaveTextContent('eva.munozCuenta creada—El sistema, al arrancar')
     expect(bitacora).toHaveTextContent('área: Ventas')
     await persona.click(screen.getByRole('button', { name: 'Listo, ya la entregué' }))
     expect(screen.queryByText('Tmp7-Kq3x-Pa9t')).not.toBeInTheDocument()
@@ -591,7 +594,7 @@ describe('cuentas (RF-11, RF-12)', () => {
     await persona.click(screen.getByRole('button', { name: 'Desactivar dir' }))
     await waitFor(() => expect(fila()).toHaveTextContent('Desactivada'))
     expect(confirmar).toHaveBeenCalledTimes(2)
-    expect(await screen.findByRole('table', { name: 'Bitácora de cuentas' })).toHaveTextContent('Desactivó la cuenta')
+    expect(await screen.findByRole('table', { name: 'Bitácora de cuentas' })).toHaveTextContent('Cuenta desactivada')
   })
 
   it('TI restablece una contraseña y no puede tocar la suya desde aquí', async () => {

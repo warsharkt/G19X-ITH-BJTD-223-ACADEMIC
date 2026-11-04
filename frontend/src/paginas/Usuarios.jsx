@@ -5,18 +5,26 @@ import { fechaHora } from '../formato'
 import { cargoDe, NOMBRES_ROL, useSesion } from '../sesion'
 import { useConsulta } from '../useConsulta'
 
+// Lo que le paso a la cuenta; quien lo hizo va en su propia columna
 const ACCIONES = {
-  crear: 'Creó la cuenta',
-  modificar: 'Modificó la cuenta',
-  desactivar: 'Desactivó la cuenta',
-  reactivar: 'Reactivó la cuenta',
-  restablecer_contrasena: 'Restableció la contraseña',
-  cambiar_contrasena: 'Cambió su contraseña',
-  activar_mfa: 'Activó la verificación en dos pasos',
-  reiniciar_mfa: 'Reinició la verificación en dos pasos',
-  usar_codigo_respaldo: 'Entró con un código de respaldo',
-  designar_suplente: 'La designó suplente para firmar reportes',
-  terminar_suplencia: 'Terminó su suplencia',
+  crear: 'Cuenta creada',
+  modificar: 'Cuenta modificada',
+  desactivar: 'Cuenta desactivada',
+  reactivar: 'Cuenta reactivada',
+  restablecer_contrasena: 'Contraseña restablecida',
+  cambiar_contrasena: 'Contraseña cambiada',
+  activar_mfa: 'Verificación en dos pasos activada',
+  reiniciar_mfa: 'Verificación en dos pasos reiniciada',
+  usar_codigo_respaldo: 'Entrada con un código de respaldo',
+  designar_suplente: 'Designada suplente para firmar reportes',
+  terminar_suplencia: 'Suplencia terminada',
+}
+
+// Cambios que no hizo una persona desde el tablero
+function quien(hechoPor) {
+  if (hechoPor.startsWith('arranque:')) return 'El sistema, al arrancar'
+  if (hechoPor.startsWith('consola:')) return `Consola del servidor (${hechoPor.slice('consola:'.length)})`
+  return hechoPor
 }
 const CAMPOS = {
   nombre: 'nombre', rol: 'rol', area_id: 'área', correo: 'correo', activo: 'activa', firma_reportes: 'firma reportes',
@@ -348,7 +356,7 @@ export default function Usuarios() {
                     <td>{c.usuario}</td>
                     <td>{ACCIONES[c.accion] ?? c.accion}</td>
                     <td>{detalle(c, nombreArea) || '—'}</td>
-                    <td>{c.hecho_por}</td>
+                    <td>{quien(c.hecho_por)}</td>
                   </tr>
                 ))}
               </tbody>
