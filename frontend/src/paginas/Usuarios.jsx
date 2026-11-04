@@ -18,6 +18,9 @@ const ACCIONES = {
   usar_codigo_respaldo: 'Entrada con un código de respaldo',
   designar_suplente: 'Designada suplente para firmar reportes',
   terminar_suplencia: 'Suplencia terminada',
+  dar_firma: 'Permiso de firma dado',
+  quitar_firma: 'Permiso de firma quitado',
+  suspender_firma: 'Permiso de firma suspendido',
 }
 
 // Cambios que no hizo una persona desde el tablero
@@ -28,19 +31,19 @@ function quien(hechoPor) {
 }
 const CAMPOS = {
   nombre: 'nombre', rol: 'rol', area_id: 'área', correo: 'correo', activo: 'activa', firma_reportes: 'firma reportes',
-  desde: 'desde', hasta: 'hasta', motivo: 'motivo',
+  desde: 'desde', hasta: 'hasta', motivo: 'motivo', suplencias_canceladas: 'suplencias canceladas',
 }
 const VACIA = { usuario: '', nombre: '', rol: 'gerente', area_id: '', correo: '' }
 
-// En el formulario, RRHH se divide en Analista (prepara) y Responsable (firma)
+// TI no elige quien firma: el permiso lo da una Responsable de RRHH desde
+// esta misma pantalla (regla 10.3.9). Asi una sola persona de TI no puede
+// crearse una cuenta que firme reportes.
 const OPCIONES_ROL = [
-  ['rrhh', 'Analista de RRHH (prepara los reportes)'],
-  ['rrhh_firma', 'Responsable de RRHH (firma los reportes)'],
+  ['rrhh', NOMBRES_ROL.rrhh],
   ['direccion', NOMBRES_ROL.direccion],
   ['gerente', NOMBRES_ROL.gerente],
   ['admin_ti', NOMBRES_ROL.admin_ti],
 ]
-const rolDelFormulario = (c) => (c.rol === 'rrhh' && c.firma_reportes ? 'rrhh_firma' : c.rol)
 
 // Detalle de la bitacora en palabras: "rol: Gerencia de área → Recursos Humanos"
 function detalle(c, nombreArea) {
@@ -75,8 +78,7 @@ function FormularioCuenta({ inicial, areas, alGuardar, alCancelar, nueva }) {
       await alGuardar({
         ...(nueva ? { usuario: datos.usuario.trim() } : {}),
         nombre: datos.nombre.trim(),
-        rol: datos.rol === 'rrhh_firma' ? 'rrhh' : datos.rol,
-        firma_reportes: datos.rol === 'rrhh_firma',
+        rol: datos.rol,
         area_id: datos.rol === 'gerente' && datos.area_id !== '' ? Number(datos.area_id) : null,
         correo: datos.correo.trim() || null,
       })
@@ -110,6 +112,9 @@ function FormularioCuenta({ inicial, areas, alGuardar, alCancelar, nueva }) {
               </option>
             ))}
           </select>
+          {datos.rol === 'rrhh' && (
+            <span className="nota">Entra como Analista. El permiso de firmar se lo da una Responsable de RRHH.</span>
+          )}
         </label>
         {datos.rol === 'gerente' && (
           <label>
@@ -146,6 +151,7 @@ function FormularioCuenta({ inicial, areas, alGuardar, alCancelar, nueva }) {
 export default function Usuarios() {
   const { usuario } = useSesion()
   const esTi = usuario.rol === 'admin_ti'
+  const esResponsable = usuario.rol === 'rrhh' && usuario.firma_reportes
   const [version, setVersion] = useState(0)
   const cuentas = useConsulta(() => api.cuentas(), [version])
   const cambios = useConsulta(() => api.cambiosCuentas(), [version])
@@ -182,11 +188,15 @@ export default function Usuarios() {
     recargar()
   }
 
+  // Si TI toma el control del acceso de quien firma, deja de firmar
+  const yaNoFirma = (c) =>
+    c.firma_reportes ? ' Dejará de firmar reportes hasta que otra Responsable de RRHH le devuelva el permiso.' : ''
+
   const restablecer = (c) =>
     accion(async () => {
       const r = await api.restablecerContrasena(c.id)
       setTemporal({ nombre: c.nombre, contrasena: r.contrasena_temporal })
-    }, `¿Restablecer la contraseña de ${c.nombre}? Sus sesiones abiertas se cerrarán.`)
+    }, `¿Restablecer la contraseña de ${c.nombre}? Sus sesiones abiertas se cerrarán.${yaNoFirma(c)}`)
 
   return (
     <div>
@@ -195,8 +205,10 @@ export default function Usuarios() {
           <h1>Usuarios</h1>
           <p className="texto-secundario">
             {esTi
-              ? 'Las cuentas no se borran: se desactivan. Todo cambio queda registrado con tu usuario.'
-              : 'Solo Administración de TI administra las cuentas. Aquí puedes revisar quién hizo cada cambio.'}
+              ? 'Las cuentas no se borran: se desactivan. Todo cambio queda registrado con tu usuario, y lo que hagas con una cuenta de RRHH le llega como aviso a RRHH.'
+              : esResponsable
+                ? 'Administración de TI administra las cuentas. Tú decides quién de RRHH puede firmar los reportes.'
+                : 'Solo Administración de TI administra las cuentas. Aquí puedes revisar quién hizo cada cambio.'}
           </p>
         </div>
         {esTi && !formulario && (
@@ -231,7 +243,7 @@ export default function Usuarios() {
             inicial={
               formulario === 'nueva'
                 ? VACIA
-                : { ...formulario, rol: rolDelFormulario(formulario), area_id: formulario.area_id ?? '' }
+                : { ...formulario, area_id: formulario.area_id ?? '' }
             }
             areas={areas}
             alGuardar={(datos) => (formulario === 'nueva' ? crear(datos) : guardar(formulario, datos))}
@@ -252,7 +264,7 @@ export default function Usuarios() {
                 <th scope="col">Estado</th>
                 <th scope="col">Dos pasos</th>
                 <th scope="col">Último acceso</th>
-                {esTi && <th scope="col"><span className="oculto-visual">Acciones</span></th>}
+                {(esTi || esResponsable) && <th scope="col"><span className="oculto-visual">Acciones</span></th>}
               </tr>
             </thead>
             <tbody>
@@ -314,7 +326,7 @@ export default function Usuarios() {
                                 onClick={() =>
                                   accion(
                                     () => api.reiniciarMfa(c.id),
-                                    `¿Reiniciar la verificación en dos pasos de ${c.nombre}? Deberá configurarla de nuevo al entrar.`,
+                                    `¿Reiniciar la verificación en dos pasos de ${c.nombre}? Deberá configurarla de nuevo al entrar.${yaNoFirma(c)}`,
                                   )
                                 }
                               >
@@ -322,6 +334,27 @@ export default function Usuarios() {
                               </button>
                             )}
                           </>
+                        )}
+                      </td>
+                    )}
+                    {esResponsable && (
+                      <td className="acciones">
+                        {c.rol === 'rrhh' && c.activo && !propia && (
+                          <button
+                            type="button"
+                            className="boton-texto"
+                            aria-label={`${c.firma_reportes ? 'Quitar' : 'Dar'} permiso de firma a ${c.usuario}`}
+                            onClick={() =>
+                              accion(
+                                () => api.cambiarFirma(c.id, !c.firma_reportes),
+                                c.firma_reportes
+                                  ? `¿Quitar a ${c.nombre} el permiso de firmar reportes?`
+                                  : `¿Dar a ${c.nombre} el permiso de firmar reportes? Podrá aprobar los reportes que van a Dirección.`,
+                              )
+                            }
+                          >
+                            {c.firma_reportes ? 'Quitar firma' : 'Dar firma'}
+                          </button>
                         )}
                       </td>
                     )}

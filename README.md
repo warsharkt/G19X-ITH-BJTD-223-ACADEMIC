@@ -139,7 +139,7 @@ Nada de Nordika está fijo en el código: el nombre sale de `EMPRESA_NOMBRE`, y 
 
 1. En el `.env`, pon `EMPRESA_NOMBRE`, `MODO_DATOS=reales` y `MODO_DEMO=no`. Así se apagan las cuentas de prueba, el teléfono simulado y la IA en la nube; los reportes los redacta Ollama en el propio servidor. Fija también `MFA_LLAVE` y guárdala aparte de los respaldos.
 2. Parte de una base vacía: `docker compose down -v` y luego `docker compose up -d --build`. Con `MODO_DATOS=reales` no se siembra nada.
-3. Crea la primera cuenta de TI con `python -m scripts.crear_usuario` ([Cuentas desde la consola](#cuentas-desde-la-consola)). Desde el tablero, TI crea las demás con contraseña temporal y asigna quién firma.
+3. Crea con `python -m scripts.crear_usuario` ([Cuentas desde la consola](#cuentas-desde-la-consola)) la primera cuenta de TI y la de la Responsable de RRHH (con `--firma`). Desde el tablero, TI crea las demás con contraseña temporal; quién más firma lo decide la Responsable, no TI.
 4. La Analista de RRHH sube desde **Carga de datos** lo que exporta cada sistema: plantilla de personal, vacantes, metas, capacitación, ambiente laboral y productividad. Cada fuente dice qué reporte exportar y trae su formato vacío.
 5. La Responsable de RRHH revisa los umbrales en **Configuración** antes del primer reporte.
 
@@ -147,14 +147,16 @@ Nada de Nordika está fijo en el código: el nombre sale de `EMPRESA_NOMBRE`, y 
 
 | Medida | Cómo |
 |---|---|
-| Acceso | Rol y área en cada endpoint de la API; Dirección solo ve el consolidado, cada gerente solo su área y TI no ve datos de colaboradores |
-| Contraseñas | Mínimo 10 caracteres, guardadas con scrypt. TI genera temporales que la persona cambia al entrar. Bloqueo tras 5 intentos fallidos |
+| Acceso | Rol y área en cada endpoint de la API; Dirección solo ve el consolidado, cada gerente solo su área y TI no ve datos de colaboradores. Dirección y los gerentes leen un reporte solo cuando RRHH ya lo firmó |
+| Firma | El permiso de firmar lo da una Responsable de RRHH, nunca TI. Si TI restablece la contraseña o la verificación de quien firma, el permiso se suspende, y todo lo que TI hace con una cuenta de RRHH le llega como aviso a RRHH |
+| Contraseñas | Mínimo 10 caracteres, guardadas con scrypt. TI genera temporales que la persona cambia al entrar. Tras 5 intentos fallidos se bloquea ese equipo para esa cuenta (no la cuenta entera, para que nadie pueda dejar fuera a otra persona); nginx además limita los intentos por IP |
 | Verificación en dos pasos | Código de 6 dígitos (TOTP) obligatorio para Dirección, TI y RRHH, con 10 códigos de respaldo. El secreto se guarda cifrado (AES-256) con una llave que no está en la base |
 | Datos personales | La carga descarta nombres, CURP, RFC, correos y demás; el sistema solo conoce códigos de empleado |
 | IA | Con `MODO_DATOS=reales` solo se permite el modelo local: ningún dato sale del servidor |
 | Red | Por defecto solo acepta conexiones del mismo equipo; abierto a la red, HTTPS se activa solo |
 | Bitácoras | Cuentas, umbrales, cargas, reportes, firmas y descargas: quién, qué y cuándo. Nunca guardan contraseñas |
-| Sesión | Token en `sessionStorage` de la pestaña, que se cierra solo al vencer |
+| Sesión | Token en `sessionStorage` de la pestaña, que vence solo; **Cerrar sesión** lo invalida en el servidor. El tablero envía una Content-Security-Policy que solo deja correr su propio código |
+| Base de datos | En Docker, la API se conecta con la cuenta `talentia_api`, sin privilegios de superusuario y con una contraseña nueva en cada arranque (`scripts/arranque.py`) |
 
 **Nunca se suben a GitHub** (están en `.gitignore`): el `.env` con contraseñas y llaves, `llaves/` (llave del MFA), `certs/` (certificado HTTPS) y `respaldos/`. Este repositorio no contiene usuarios ni contraseñas: cada instalación pone los suyos en su `.env`. Si alguna vez subes un secreto por error, cámbialo de inmediato; borrarlo del repositorio no basta, porque queda en el historial.
 
@@ -250,6 +252,8 @@ python -m scripts.crear_usuario --listar
 python -m scripts.crear_usuario --usuario <usuario> --cambiar-contrasena   # también desbloquea la cuenta
 python -m scripts.crear_usuario --usuario <usuario> --cambiar-correo <correo>   # "" lo quita
 python -m scripts.crear_usuario --usuario <usuario> --reiniciar-mfa        # si perdió su teléfono
+python -m scripts.crear_usuario --usuario <usuario> --nombre "<Nombre>" --rol rrhh --firma   # la primera Responsable
+python -m scripts.crear_usuario --usuario <usuario> --dar-firma            # o --quitar-firma, si no queda ninguna Responsable
 ```
 
 Escribe la contraseña a mano: en la entrada oculta de PowerShell, Ctrl+V no pega el texto sino un carácter invisible.
@@ -257,7 +261,7 @@ Escribe la contraseña a mano: en la entrada oculta de PowerShell, Ctrl+V no peg
 | Rol | Ve |
 |---|---|
 | `direccion` | Solo el consolidado corporativo |
-| `rrhh` | Todo. La Analista carga y genera; la Responsable (la marca TI) firma, nunca lo que pidió, y es la única que cambia los umbrales |
+| `rrhh` | Todo. La Analista carga y genera; la Responsable firma, nunca lo que pidió, es la única que cambia los umbrales y decide quién más firma (TI no puede) |
 | `gerente` | Solo su área |
 | `admin_ti` | Administra las cuentas; ve la configuración sin cambiarla; sin datos de colaboradores ni avisos |
 
@@ -355,6 +359,8 @@ Para volver a la base local, comenta `DATABASE_URL`. El plan gratuito se pausa t
 | El navegador dice que la conexión no es privada | Es el certificado autofirmado. Pon el de la empresa en `certs/` o pide a TI que instale `certs/talentia.crt` como confiable. |
 | `rrhh_web` se reinicia y el log dice "lo dejaria sin cifrar" | Abriste el tablero a la red con `WEB_HTTPS=no`. Quita esa línea (o pon `auto`). |
 | Una cuenta de prueba dice "Usuario o contraseña incorrectos" | Revisa que el `.env` tenga `MODO_DATOS=sinteticos`, `MODO_DEMO=si` y `DEMO_CONTRASENA`, y corre `docker compose up -d` (o `python -m scripts.demo`). El motivo aparece en `docker compose logs api`. Si corriste `pytest` sin `POSTGRES_DB=rrhh_pruebas`, también hay que correr `python -m scripts.demo`. |
+| "Cuenta bloqueada en este equipo" o un error 429 al entrar | Hubo 5 intentos fallidos desde ese equipo, o más de 10 por minuto. Espera 15 minutos o entra desde otro equipo; TI la desbloquea al restablecer la contraseña. |
+| Una Responsable ya no aparece como quien firma | TI le restableció la contraseña o la verificación en dos pasos, y el permiso se suspendió a propósito. Otra Responsable se lo devuelve en **Usuarios** (**Dar firma**); si no hay otra, `python -m scripts.crear_usuario --usuario <usuario> --dar-firma`. |
 | `pytest` dice que no hay datos | Siembra la base de pruebas: `python -m scripts.seed` con `POSTGRES_DB=rrhh_pruebas` ([Pruebas](#pruebas)). |
 | "No se pudo leer la verificación en dos pasos de tu cuenta" | Cambió o se perdió la llave del MFA (`MFA_LLAVE` o `llaves/mfa.key`). Vuelve a poner la anterior, entra con un código de respaldo o pide a TI que reinicie la verificación. |
 | El reporte queda en **error** porque el modelo no está disponible | Abre Ollama y corre `ollama pull qwen3:8b` (o usa Groq con datos sintéticos) y vuelve a solicitarlo. |

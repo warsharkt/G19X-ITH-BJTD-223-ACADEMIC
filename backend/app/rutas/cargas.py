@@ -41,10 +41,13 @@ def historial_de_cargas(limite: int = Query(50, ge=1, le=200), _u: Usuario = Dep
 
 
 @router.post("/{fuente}", status_code=201, response_model=schemas.Carga)
-async def subir_archivo(fuente: str, archivo: UploadFile = File(...), u: Usuario = Depends(solo_analista)):
+def subir_archivo(fuente: str, archivo: UploadFile = File(...), u: Usuario = Depends(solo_analista)):
     """Sube y VALIDA un archivo (CSV o Excel) de una fuente. No cambia nada:
-    queda 'validada' (lista para aplicar) o 'con_errores'. Solo la Analista de RRHH."""
-    contenido = await archivo.read(cargas.BYTES_MAXIMOS + 1)
+    queda 'validada' (lista para aplicar) o 'con_errores'. Solo la Analista de RRHH.
+
+    Es `def` y no `async def` a proposito: validar un archivo tarda segundos y,
+    dentro de una funcion async, dejaria a toda la API sin responder mientras."""
+    contenido = archivo.file.read(cargas.BYTES_MAXIMOS + 1)
     return _carga(cargas.validar, fuente, archivo.filename or "archivo", contenido, u.usuario)
 
 

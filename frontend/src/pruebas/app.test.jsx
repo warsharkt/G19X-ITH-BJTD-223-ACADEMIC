@@ -785,3 +785,48 @@ describe('carga de datos (RF-01)', () => {
     expect(screen.queryByRole('link', { name: 'Carga de datos' })).not.toBeInTheDocument()
   })
 })
+
+describe('auditoría de seguridad', () => {
+  it('TI no puede dar el permiso de firmar: el formulario no ofrece Responsable', async () => {
+    const { contrasena } = instalarApiFalsa()
+    const persona = await entrar('ti', contrasena, '/usuarios')
+    await persona.click(await screen.findByRole('button', { name: 'Nueva cuenta' }))
+    const rol = screen.getByLabelText('Rol')
+    expect(within(rol).queryByRole('option', { name: /Responsable/ })).not.toBeInTheDocument()
+    await persona.selectOptions(rol, 'rrhh')
+    expect(screen.getByText(/El permiso de firmar se lo da una Responsable de RRHH/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /permiso de firma/ })).not.toBeInTheDocument()
+  })
+
+  it('la Responsable da el permiso de firmar a quien ya activó su verificación en dos pasos', async () => {
+    const { contrasena } = instalarApiFalsa()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const persona = await entrar('eva', contrasena, '/usuarios')
+    // sin verificación en dos pasos, no: TI podría conocer su acceso
+    await persona.click(await screen.findByRole('button', { name: 'Dar permiso de firma a ana' }))
+    expect(await screen.findByText(/debe entrar primero/)).toBeInTheDocument()
+    await persona.click(screen.getByRole('button', { name: 'Dar permiso de firma a lia' }))
+    expect(await screen.findByRole('button', { name: 'Quitar permiso de firma a lia' })).toBeInTheDocument()
+    expect(await screen.findByRole('table', { name: 'Bitácora de cuentas' })).toHaveTextContent('Permiso de firma dado')
+    // nadie cambia su propio permiso
+    expect(screen.queryByRole('button', { name: /permiso de firma a eva/ })).not.toBeInTheDocument()
+  })
+
+  it('Dirección no lee un reporte que RRHH todavía no firma', async () => {
+    const { contrasena } = instalarApiFalsa()
+    await entrar('dir', contrasena, '/narrativas/5')
+    expect(await screen.findByText(/Pendiente de firma de Eva Ruiz/)).toBeInTheDocument()
+    expect(screen.getByText(/Lo podrás leer y descargar en cuanto RRHH lo firme/)).toBeInTheDocument()
+    expect(screen.queryByText(/la rotación mensual \(3.9 %\)/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Reporte ejecutivo de Recursos Humanos' })).not.toBeInTheDocument()
+  })
+
+  it('cerrar sesión invalida el token en el servidor', async () => {
+    const { contrasena, estado } = instalarApiFalsa()
+    const persona = await entrar('dir', contrasena)
+    await screen.findByRole('heading', { name: 'Indicadores de Corporativo' })
+    await persona.click(screen.getByRole('button', { name: 'Cerrar sesión' }))
+    expect(await screen.findByRole('button', { name: 'Entrar' })).toBeInTheDocument()
+    await waitFor(() => expect(estado.salidas).toEqual(['dir']))
+  })
+})

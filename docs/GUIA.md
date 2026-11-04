@@ -92,12 +92,13 @@ Cada persona entra con su propia cuenta y solo ve lo que le corresponde por su p
 | **Analista de RRHH** | Operar el sistema cada mes. | Todas las áreas y el consolidado. | Cargar los archivos, preparar los reportes, atender los pedidos y cambiar la programación mensual. No firma reportes ni cambia umbrales. |
 | **Responsable de RRHH** | Controlar lo que sale de RRHH. | Todas las áreas y el consolidado. | Firmar (aprobar o rechazar) los reportes, designar suplente y cambiar los umbrales del semáforo. No prepara reportes. |
 | **Gerente de área** | Seguir los indicadores de su propio equipo. | Solo su área. | Ver el tablero, pedir reportes de su área a RRHH y descargar los firmados. |
-| **Soporte TI** | Administrar cuentas y accesos. | Ningún dato de colaboradores: solo la configuración y las cuentas. | Crear cuentas, desactivarlas, restablecer contraseñas y la verificación en dos pasos, y marcar quién es la Responsable. |
+| **Soporte TI** | Administrar cuentas y accesos. | Ningún dato de colaboradores: solo la configuración y las cuentas. | Crear cuentas, desactivarlas y restablecer contraseñas y la verificación en dos pasos. **No** decide quién firma: eso lo hace una Responsable de RRHH. |
 
 > **Por qué se calcula así**
 > - **Mínimo privilegio:** cada quien ve lo indispensable para su trabajo. Un gerente no necesita ver la rotación de otra área, y TI no necesita ver datos de personas para administrar cuentas.
 > - **Quien prepara no firma:** la Analista prepara y la Responsable firma, así que cada reporte pasa por dos personas. Por la misma razón, solo la Responsable cambia los umbrales: un umbral decide qué sale en rojo en los reportes que prepara la Analista.
-> - **Quien administra cuentas no aprueba contenido:** TI no firma reportes. Así nadie puede crearse una segunda cuenta para aprobarse a sí mismo.
+> - **Quien administra cuentas no aprueba contenido:** TI no firma reportes ni decide quién los firma. El permiso de firmar lo da una Responsable de RRHH, y solo a una cuenta que ya entró con su propia contraseña y su verificación en dos pasos. Si TI restablece la contraseña o la verificación de alguien que firma, ese permiso se suspende hasta que otra Responsable lo devuelva, y todo lo que TI hace con una cuenta de RRHH le llega como aviso a RRHH. Así una sola persona de TI no puede crearse, ni apropiarse de, una cuenta que firma.
+> - **El reporte llega firmado:** Dirección y los gerentes ven en qué va un reporte y quién lo firmará, pero su texto solo cuando RRHH ya lo aprobó.
 
 ### Cuentas de prueba
 
@@ -126,14 +127,14 @@ El menú de la izquierda solo muestra las secciones que el rol puede usar. Arrib
 | **Avisos** | Todos menos TI | La bandeja de avisos: indicadores en rojo, pedidos, reportes por firmar, aprobados o rechazados. El menú muestra cuántos faltan por leer. Cada aviso lleva directo a donde se atiende. |
 | **Carga de datos** | Solo la Analista | Subir los archivos de cada sistema, ver la validación fila por fila y lo que se descarta, aplicar la carga y ver la conciliación. Cada tarjeta dice qué reporte exportar de su sistema, se importa con **Importar datos** y muestra cómo quedó su última importación. Incluye el **Formato vacío** de cada fuente (Excel con las columnas), los archivos del mes pendiente y la bitácora de todas las cargas. |
 | **Configuración** | Todos | Quién firma los reportes y la suplencia; los umbrales del semáforo, con la bitácora de quién los cambió y de qué valor a qué valor; y la programación mensual. Los umbrales los cambia solo la Responsable; la programación, cualquiera de RRHH. |
-| **Usuarios** | TI administra, RRHH consulta | Las cuentas y su bitácora. TI crea cuentas con contraseña temporal, cambia rol o área, marca a la Responsable, desactiva y reinicia la verificación en dos pasos. RRHH puede consultar todo para auditar a TI. |
+| **Usuarios** | TI administra, RRHH consulta | Las cuentas y su bitácora. TI crea cuentas con contraseña temporal, cambia rol o área, desactiva y reinicia la verificación en dos pasos. La Responsable da o quita aquí el permiso de firmar (**Dar firma** / **Quitar firma**). RRHH puede consultar todo para auditar a TI. |
 | **Mi cuenta** | Todos | Cambiar la propia contraseña y activar la verificación en dos pasos. |
 
 > **Accesibilidad.** El color del semáforo nunca va solo: siempre lo acompañan un icono y un texto (Crítico, Atención, En rango, Por vigilar), para que lo entiendan también personas con daltonismo o en una impresión en blanco y negro. Cada gráfica tiene además una vista de tabla.
 
 ## 5. Qué archivos se suben
 
-La Analista de RRHH sube el archivo que ya exporta cada sistema, en Excel (.xlsx) o CSV, de hasta 5 MB. Los nombres de columna no distinguen mayúsculas, acentos ni espacios: "Fecha de Ingreso" se lee igual que "fecha_de_ingreso". Solo la Analista carga datos: TI no ve información de colaboradores, y la Responsable firma lo que se prepara con esos datos.
+La Analista de RRHH sube el archivo que ya exporta cada sistema, en Excel (.xlsx) o CSV, de hasta 5 MB y 50,000 filas. Los nombres de columna no distinguen mayúsculas, acentos ni espacios: "Fecha de Ingreso" se lee igual que "fecha_de_ingreso". Solo la Analista carga datos: TI no ve información de colaboradores, y la Responsable firma lo que se prepara con esos datos.
 
 ### Las seis fuentes y el orden de carga
 
@@ -475,14 +476,15 @@ Todas las medidas funcionan igual con los datos de Nordika que con los de cualqu
 | Verificación en dos pasos | Además de la contraseña, un código de 6 dígitos de una app de autenticación (Google o Microsoft Authenticator). Obligatoria para Dirección, RRHH y TI; opcional para gerentes. Al activarla se entregan 10 códigos de respaldo de un solo uso. |
 | Secreto del código cifrado | El secreto de la app de cada cuenta se guarda cifrado (AES-256) con una llave que no está en la base. Quien obtenga una copia de la base no puede generar códigos, y copiar el secreto de una cuenta a otra no sirve. |
 | Contraseñas | Mínimo 10 caracteres. Se guardan solo cifradas de forma irreversible (scrypt con sal): nadie, ni TI, puede leerlas. |
-| Bloqueo por intentos | Tras 5 intentos fallidos seguidos (de contraseña o de código), la cuenta se bloquea unos minutos. |
+| Bloqueo por intentos | Tras 5 intentos fallidos seguidos (de contraseña o de código) desde un mismo equipo, ese equipo queda bloqueado 15 minutos para esa cuenta; la persona puede seguir entrando desde el suyo, así que nadie puede dejar fuera a otra persona equivocándose a propósito. Si se bloquean 3 equipos a la vez, se bloquea la cuenta completa. Además, el tablero acepta como máximo unos 10 intentos de inicio de sesión por minuto desde una misma dirección. |
 | Contraseña temporal | Cuando TI crea una cuenta o restablece una contraseña, el sistema genera una temporal. Al entrar, la persona elige la suya antes de hacer cualquier otra cosa: TI nunca conoce la definitiva. |
-| Sesiones | Caducan solas (60 minutos por defecto) y se guardan solo en la pestaña del navegador. Desactivar una cuenta o cambiarle el rol surte efecto de inmediato. |
+| Sesiones | Caducan solas (60 minutos por defecto) y se guardan solo en la pestaña del navegador. **Cerrar sesión** las invalida en el servidor: aunque alguien haya copiado la sesión, deja de servirle. Desactivar una cuenta o cambiarle el rol surte efecto de inmediato. |
 | Cuentas personales | Nunca compartidas. No se borran, se desactivan, para que las bitácoras siempre digan de quién se trata. |
 | Bitácoras | De cuentas, umbrales, cargas, reportes, firmas y descargas: quién, qué y cuándo, con valores de antes y después. Nunca guardan contraseñas. |
 | Datos mínimos | Solo códigos de empleado; nombres y datos personales se descartan al cargar. |
 | IA local | Con datos reales la IA corre en el servidor propio. Un candado impide usar la IA en la nube si los datos son reales. |
-| Base de datos protegida | Solo acepta conexiones del mismo equipo, y todas las tablas tienen seguridad por fila: nadie puede leerlas desde fuera aunque conozca la dirección de la base. |
+| Base de datos protegida | Solo acepta conexiones del mismo equipo, y todas las tablas tienen seguridad por fila: nadie puede leerlas desde fuera aunque conozca la dirección de la base. El sistema se conecta con una cuenta sin privilegios de administrador de la base, así que una falla en él no da control de la base ni del servidor. |
+| Navegador | El tablero solo ejecuta su propio código (política de seguridad de contenido): si alguna vez se colara un script ajeno, el navegador no lo corre. |
 
 > **El teléfono simulado.** Para que cualquiera pueda recorrer el sistema sin instalar una app en su celular, junto al formulario aparece un teléfono con la app de autenticación y el código vigente. La pantalla aclara que **no es parte del sistema**: es una simulación de la app que cada persona tendría en su propio celular. La verificación es real: el código se pide, se valida y cuenta como intento. El teléfono simulado solo funciona con los datos ficticios de Nordika y con sus cinco cuentas; con datos reales se apaga y el código aparece únicamente en el celular de cada persona.
 

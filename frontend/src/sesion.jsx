@@ -49,7 +49,10 @@ export function ProveedorSesion({ children }) {
     api.marca().then(setMarca).catch(() => {})
   }, [])
 
+  // motivo null: la persona sale a proposito y el servidor invalida su token
+  // (si alguien lo copio, deja de servirle). Si ya vencio no hay que avisar.
   const cerrarSesion = useCallback((motivo = null) => {
+    if (!motivo && leerToken()) api.salir().catch(() => {})
     guardarToken(null)
     setUsuario(null)
     setAviso(motivo)

@@ -13,6 +13,7 @@ const TIPOS = {
   aprobado: { texto: 'Aprobado', clase: 'verde', icono: '✓' },
   rechazado: { texto: 'Rechazado', clase: 'neutro', icono: '✕' },
   error: { texto: 'Error', clase: 'rojo', icono: '✕' },
+  cuenta: { texto: 'Cuentas', clase: 'amarillo', icono: '⚿' },
 }
 
 const avisarCambio = () => window.dispatchEvent(new Event(AVISOS_CAMBIARON))

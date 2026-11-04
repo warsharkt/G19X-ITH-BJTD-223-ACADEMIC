@@ -8,7 +8,17 @@
   El token lleva la version de sesion de la cuenta: al restablecer la
   contrasena o el MFA, los tokens anteriores dejan de servir.
 - Fuerza bruta: tras INTENTOS_MAXIMOS fallos seguidos (contrasena o codigo de
-  MFA) la cuenta se bloquea MINUTOS_BLOQUEO minutos.
+  MFA) desde un mismo origen (IP), ese origen queda bloqueado MINUTOS_BLOQUEO
+  minutos para esa cuenta; la persona puede seguir entrando desde su equipo.
+  Si se bloquean ORIGENES_PARA_BLOQUEO_TOTAL origenes, se bloquea la cuenta
+  completa. Ademas nginx limita los intentos por IP (frontend/nginx).
+- Cerrar sesion (POST /auth/salir) sube la version de sesion: el token deja
+  de servir aunque alguien lo haya copiado.
+- Firma de reportes: el permiso (firma_reportes) solo lo da o lo quita una
+  Responsable de RRHH, o la consola del servidor. TI no: si TI restablece la
+  contrasena o la verificacion en dos pasos de alguien que firma, ese
+  permiso se suspende y se cancela su suplencia, hasta que otra Responsable
+  lo devuelva. Asi una sola persona de TI no puede firmar reportes.
 - Pendientes: con una contrasena temporal, o sin MFA en un rol que lo exige
   (app/mfa.py), la sesion solo sirve para resolverlo; todo lo demas da 403.
 - Cuentas: solo admin_ti las administra (lo exige la API) y nadie cambia su
@@ -45,8 +55,9 @@ from app.kpis import CORPORATIVO
 ROLES = ("direccion", "rrhh", "gerente", "admin_ti")
 ROLES_CON_DATOS = ("direccion", "rrhh", "gerente")
 LONGITUD_MINIMA = 10
-INTENTOS_MAXIMOS = 5
+INTENTOS_MAXIMOS = 5             # por cuenta y origen
 MINUTOS_BLOQUEO = 15
+ORIGENES_PARA_BLOQUEO_TOTAL = 3  # origenes bloqueados a la vez -> toda la cuenta
 MINUTOS_PASO_MFA = 5  # para escribir el codigo tras la contrasena
 _SCRYPT = {"n": 2**14, "r": 8, "p": 1}
 _ALGORITMO = "HS256"
@@ -166,7 +177,9 @@ def cambios(limite: int = 50, usuario: str | None = None) -> list[dict]:
 _PATRON_CORREO = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _COLUMNAS_CUENTA = (
     "id, usuario, nombre, rol, area_id, correo, activo, debe_cambiar_contrasena, mfa_activo, firma_reportes, "
-    "creado_en, ultimo_acceso, COALESCE(bloqueado_hasta > now(), false) AS bloqueado"
+    "creado_en, ultimo_acceso, (COALESCE(bloqueado_hasta > now(), false) OR EXISTS ("
+    "  SELECT 1 FROM bloqueos_acceso b WHERE b.usuario_id = usuarios.id AND b.bloqueado_hasta > now()"
+    ")) AS bloqueado"
 )
 
 
@@ -307,9 +320,37 @@ def modificar_usuario(usuario_id: int, cambios_pedidos: dict, por: str) -> dict:
     return obtener_cuenta(usuario_id)
 
 
-def restablecer_contrasena(usuario_id: int, por: str) -> str:
+def _desbloquear(conn, usuario_id: int):
+    conn.execute(text("DELETE FROM bloqueos_acceso WHERE usuario_id = :i"), {"i": usuario_id})
+
+
+def suspender_firma(conn, cuenta: dict, por: str, motivo: str) -> bool:
+    """Quita el permiso de firmar y cancela la suplencia abierta de la cuenta.
+    Se usa cuando TI toma el control de su acceso (contrasena o MFA): quien
+    restablece el acceso no debe poder firmar con esa cuenta. Devuelve si
+    la cuenta firmaba (como Responsable o como suplente)."""
+    suplencias = conn.execute(
+        text(
+            "UPDATE suplencias SET cancelada_por = :p, cancelada_en = now() "
+            "WHERE cancelada_en IS NULL AND suplente = :u RETURNING id"
+        ),
+        {"p": por, "u": cuenta["usuario"]},
+    ).all()
+    if cuenta["firma_reportes"]:
+        conn.execute(text("UPDATE usuarios SET firma_reportes = false WHERE id = :i"), {"i": cuenta["id"]})
+    if cuenta["firma_reportes"] or suplencias:
+        registrar(conn, cuenta["usuario"], "suspender_firma", por,
+                  {"firma_reportes": [cuenta["firma_reportes"], False], "motivo": motivo,
+                   "suplencias_canceladas": len(suplencias)})
+        return True
+    return False
+
+
+def restablecer_contrasena(usuario_id: int, por: str) -> tuple[str, bool]:
     """Pone una contrasena temporal (que se devuelve UNA vez para entregarla),
-    obliga a cambiarla al entrar, desbloquea la cuenta y cierra sus sesiones."""
+    obliga a cambiarla al entrar, desbloquea la cuenta y cierra sus sesiones.
+    Si la cuenta firmaba reportes, el permiso se suspende (lo devuelve otra
+    Responsable). Devuelve la temporal y si se suspendio la firma."""
     asegurar_tabla()
     temporal = generar_contrasena_temporal()
     with engine.begin() as conn:
@@ -323,8 +364,40 @@ def restablecer_contrasena(usuario_id: int, por: str) -> str:
             ),
             {"i": usuario_id, "h": hash_contrasena(temporal)},
         )
+        _desbloquear(conn, usuario_id)
         registrar(conn, actual["usuario"], "restablecer_contrasena", por)
-    return temporal
+        suspendida = suspender_firma(conn, actual, por, "se restableció su contraseña")
+    return temporal, suspendida
+
+
+def cambiar_firma(usuario_id: int, firma: bool, por: str) -> dict:
+    """Da o quita el permiso de firmar reportes. Lo llama una Responsable de
+    RRHH desde la API (nunca TI) o la consola del servidor.
+
+    Para darlo, la cuenta debe ser de RRHH, estar activa y haber entrado ya
+    con su propia contrasena y su verificacion en dos pasos: asi el permiso
+    no llega a una cuenta cuya contrasena temporal conoce TI."""
+    asegurar_tabla()
+    with engine.begin() as conn:
+        actual = _cuenta_para_cambiar(conn, usuario_id)
+        if actual["usuario"] == por:
+            raise ErrorDeUsuario("Tu propio permiso de firma lo cambia otra Responsable de RRHH")
+        if firma:
+            estado = conn.execute(
+                text("SELECT debe_cambiar_contrasena, mfa_activo FROM usuarios WHERE id = :i"), {"i": usuario_id}
+            ).mappings().one()
+            if actual["rol"] != "rrhh" or not actual["activo"]:
+                raise ErrorDeUsuario("Solo una cuenta activa de RRHH puede firmar los reportes")
+            if estado["debe_cambiar_contrasena"] or not estado["mfa_activo"]:
+                raise ErrorDeUsuario(
+                    "Esa persona debe entrar primero, cambiar su contraseña temporal y activar su verificación "
+                    "en dos pasos: así nadie más conoce su acceso"
+                )
+        if actual["firma_reportes"] != firma:
+            conn.execute(text("UPDATE usuarios SET firma_reportes = :f WHERE id = :i"), {"f": firma, "i": usuario_id})
+            registrar(conn, actual["usuario"], "dar_firma" if firma else "quitar_firma", por,
+                      {"firma_reportes": [actual["firma_reportes"], firma]})
+    return obtener_cuenta(usuario_id)
 
 
 def cambiar_contrasena(usuario: str, contrasena: str, por: str = "consola"):
@@ -343,6 +416,10 @@ def cambiar_contrasena(usuario: str, contrasena: str, por: str = "consola"):
         ).rowcount
         if not filas:
             raise ErrorDeUsuario(f"El usuario '{usuario}' no existe")
+        conn.execute(
+            text("DELETE FROM bloqueos_acceso WHERE usuario_id = (SELECT id FROM usuarios WHERE usuario = :u)"),
+            {"u": usuario},
+        )
         registrar(conn, usuario, "restablecer_contrasena", por)
 
 
@@ -413,40 +490,62 @@ def _leer_usuario(usuario_id: int) -> Usuario | None:
     return _a_usuario(fila) if fila else None
 
 
-def registrar_fallo(conn, usuario_id: int):
-    """Un fallo mas (contrasena o codigo). Tras un bloqueo el contador no se
-    reinicia: un nuevo fallo vuelve a bloquear de inmediato."""
+def registrar_fallo(conn, usuario_id: int, origen: str):
+    """Un fallo mas (contrasena o codigo) desde ese origen. Tras un bloqueo el
+    contador no se reinicia: un nuevo fallo desde ahi vuelve a bloquear. Si
+    quedan bloqueados ORIGENES_PARA_BLOQUEO_TOTAL origenes, se bloquea la
+    cuenta completa (ataque desde varios equipos)."""
+    params = {"id": usuario_id, "o": origen, "max": INTENTOS_MAXIMOS, "min": MINUTOS_BLOQUEO}
     conn.execute(
         text(
-            "UPDATE usuarios SET intentos_fallidos = intentos_fallidos + 1, "
-            "bloqueado_hasta = CASE WHEN intentos_fallidos + 1 >= :max "
-            "  THEN now() + make_interval(mins => :min) ELSE NULL END "
-            "WHERE id = :id"
+            "INSERT INTO bloqueos_acceso (usuario_id, origen, intentos, bloqueado_hasta) "
+            "VALUES (:id, :o, 1, CASE WHEN 1 >= :max THEN now() + make_interval(mins => :min) END) "
+            "ON CONFLICT (usuario_id, origen) DO UPDATE SET intentos = bloqueos_acceso.intentos + 1, "
+            "bloqueado_hasta = CASE WHEN bloqueos_acceso.intentos + 1 >= :max "
+            "  THEN now() + make_interval(mins => :min) ELSE NULL END"
         ),
-        {"id": usuario_id, "max": INTENTOS_MAXIMOS, "min": MINUTOS_BLOQUEO},
+        params,
     )
-
-
-def registrar_entrada(conn, usuario_id: int):
     conn.execute(
-        text("UPDATE usuarios SET intentos_fallidos = 0, bloqueado_hasta = NULL, ultimo_acceso = now() WHERE id = :id"),
-        {"id": usuario_id},
+        text(
+            "UPDATE usuarios SET bloqueado_hasta = now() + make_interval(mins => :min) WHERE id = :id AND ("
+            "  SELECT COUNT(*) FROM bloqueos_acceso WHERE usuario_id = :id AND bloqueado_hasta > now()) >= :origenes"
+        ),
+        {**params, "origenes": ORIGENES_PARA_BLOQUEO_TOTAL},
     )
 
 
-def error_si_bloqueada(fila) -> HTTPException | None:
+def registrar_entrada(conn, usuario_id: int, origen: str):
+    conn.execute(
+        text("DELETE FROM bloqueos_acceso WHERE usuario_id = :id AND origen = :o"), {"id": usuario_id, "o": origen}
+    )
+    conn.execute(
+        text("UPDATE usuarios SET intentos_fallidos = 0, ultimo_acceso = now() WHERE id = :id"), {"id": usuario_id}
+    )
+
+
+def error_si_bloqueada(conn, fila, origen: str) -> HTTPException | None:
+    """429 si la cuenta completa, o este origen para esta cuenta, esta bloqueado."""
     ahora = datetime.now(timezone.utc)
-    if fila["bloqueado_hasta"] and fila["bloqueado_hasta"] > ahora:
-        minutos = int((fila["bloqueado_hasta"] - ahora).total_seconds() // 60) + 1
+    del_origen = conn.execute(
+        text("SELECT bloqueado_hasta FROM bloqueos_acceso WHERE usuario_id = :id AND origen = :o"),
+        {"id": fila["id"], "o": origen},
+    ).scalar()
+    total = fila["bloqueado_hasta"] if fila["bloqueado_hasta"] and fila["bloqueado_hasta"] > ahora else None
+    hasta = max((h for h in (total, del_origen) if h and h > ahora), default=None)
+    if hasta:
+        minutos = int((hasta - ahora).total_seconds() // 60) + 1
+        donde = "por intentos fallidos desde varios equipos" if total else "en este equipo por intentos fallidos"
         return HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS,
-            f"Cuenta bloqueada por intentos fallidos. Intenta de nuevo en {minutos} minuto(s).",
+            f"Cuenta bloqueada {donde}. Intenta de nuevo en {minutos} minuto(s) o pide a TI que la desbloquee.",
         )
     return None
 
 
-def autenticar(usuario: str, contrasena: str) -> Usuario:
+def autenticar(usuario: str, contrasena: str, origen: str = "local") -> Usuario:
     """Usuario si la contrasena es correcta; HTTPException 401 si no.
+    origen: IP de quien intenta entrar (el bloqueo es por cuenta y origen).
 
     El mensaje es el mismo si el usuario no existe o la contrasena esta mal,
     para no revelar que cuentas existen. La cuenta bloqueada si se avisa.
@@ -470,13 +569,13 @@ def autenticar(usuario: str, contrasena: str) -> Usuario:
         if fila is None or not fila["activo"]:
             verificar_contrasena(contrasena, _HASH_SENUELO)
             error = invalido
-        elif (bloqueo := error_si_bloqueada(fila)) is not None:
+        elif (bloqueo := error_si_bloqueada(conn, fila, origen)) is not None:
             error = bloqueo
         elif not verificar_contrasena(contrasena, fila["contrasena_hash"]):
-            registrar_fallo(conn, fila["id"])
+            registrar_fallo(conn, fila["id"], origen)
             error = invalido
         elif not fila["mfa_activo"]:
-            registrar_entrada(conn, fila["id"])
+            registrar_entrada(conn, fila["id"], origen)
     if error is not None:
         raise error
     return _a_usuario(fila)
@@ -506,6 +605,13 @@ def crear_token(u: Usuario, proposito: str = "sesion") -> str:
     datos = {"sub": str(u.id), "ver": u.version_sesion, "tipo": proposito, "iat": ahora,
              "exp": ahora + timedelta(minutes=minutos)}
     return jwt.encode(datos, _secreto(), algorithm=_ALGORITMO)
+
+
+def cerrar_sesion(u: Usuario):
+    """Invalida los tokens de la cuenta (todos sus dispositivos): sin esto, un
+    token copiado seguiria sirviendo hasta caducar aunque la persona salga."""
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE usuarios SET version_sesion = version_sesion + 1 WHERE id = :i"), {"i": u.id})
 
 
 def usuario_del_token(token: str, proposito: str = "sesion") -> Usuario | None:

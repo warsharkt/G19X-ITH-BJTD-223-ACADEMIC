@@ -29,6 +29,7 @@ import json
 import math
 import random
 import unicodedata
+import zipfile
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
@@ -40,6 +41,11 @@ from app.llm import modo_datos
 from app.narrativa import MESES_ES
 
 BYTES_MAXIMOS = 5 * 1024 * 1024
+# Un .xlsx es un zip: 5 MB comprimidos pueden ser cientos de MB de XML que
+# tardan minutos en leerse. Se revisa lo que pesa descomprimido y cuantas
+# filas trae antes de validar (un mes real de Nordika: ~1,100 filas).
+BYTES_DESCOMPRIMIDOS_MAXIMOS = 60 * 1024 * 1024
+FILAS_MAXIMAS = 50_000
 EXTENSIONES = (".csv", ".xlsx")
 ERRORES_MOSTRADOS = 100
 FILAS_DE_MUESTRA = 8
@@ -233,6 +239,20 @@ def _clave(texto: str) -> str:
     return "_".join(sin_acentos.strip().lower().replace("-", " ").split())
 
 
+def _revisar_zip(contenido: bytes):
+    """Rechaza el .xlsx que descomprimido pesaria demasiado (bomba de zip)."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(contenido)) as z:
+            total = sum(i.file_size for i in z.infolist())
+    except zipfile.BadZipFile:
+        raise ErrorDeCarga("El archivo no es un Excel (.xlsx) válido")
+    if total > BYTES_DESCOMPRIMIDOS_MAXIMOS:
+        raise ErrorDeCarga(
+            f"El Excel descomprimido pesa más de {BYTES_DESCOMPRIMIDOS_MAXIMOS // (1024 * 1024)} MB: "
+            "divídelo en varios archivos o súbelo como .csv"
+        )
+
+
 def leer_archivo(nombre: str, contenido: bytes) -> pd.DataFrame:
     extension = ("." + nombre.rsplit(".", 1)[-1].lower()) if "." in nombre else ""
     if extension not in EXTENSIONES:
@@ -243,17 +263,21 @@ def leer_archivo(nombre: str, contenido: bytes) -> pd.DataFrame:
         raise ErrorDeCarga("El archivo está vacío")
     try:
         if extension == ".xlsx":
-            df = pd.read_excel(io.BytesIO(contenido), dtype=object, engine="openpyxl")
+            _revisar_zip(contenido)
+            df = pd.read_excel(io.BytesIO(contenido), dtype=object, engine="openpyxl", nrows=FILAS_MAXIMAS + 1)
         else:
             try:
                 texto = contenido.decode("utf-8-sig")
             except UnicodeDecodeError:
                 texto = contenido.decode("latin-1")
-            df = pd.read_csv(io.StringIO(texto), dtype=str, sep=None, engine="python", keep_default_na=False)
+            df = pd.read_csv(io.StringIO(texto), dtype=str, sep=None, engine="python", keep_default_na=False,
+                             nrows=FILAS_MAXIMAS + 1)
     except ErrorDeCarga:
         raise
     except Exception as exc:
         raise ErrorDeCarga(f"No se pudo leer el archivo: {exc}")
+    if len(df) > FILAS_MAXIMAS:
+        raise ErrorDeCarga(f"El archivo tiene más de {FILAS_MAXIMAS:,} filas: divídelo en varios archivos")
     columnas = [_clave(c) for c in df.columns]
     # vacio, NaN o NaT (fecha vacia en Excel) -> None. dtype=object: si no,
     # pandas vuelve a inferir fechas y convierte los None otra vez en NaT.

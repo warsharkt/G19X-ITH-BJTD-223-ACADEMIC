@@ -79,7 +79,9 @@ class CuentaNueva(BaseModel):
     rol: str
     area_id: int | None = None
     correo: str | None = None
-    firma_reportes: bool = Field(False, description="Solo RRHH: Responsable que firma los reportes")
+    firma_reportes: bool = Field(
+        False, description="Siempre false desde TI: el permiso de firmar lo da una Responsable (PUT /firmas/responsables)"
+    )
 
 
 class CuentaCambio(BaseModel):
@@ -90,6 +92,10 @@ class CuentaCambio(BaseModel):
     correo: str | None = None
     activo: bool | None = None
     firma_reportes: bool | None = None
+
+
+class FirmaCambio(BaseModel):
+    firma: bool = Field(description="true da el permiso de firmar reportes; false lo quita")
 
 
 class CuentaCreada(BaseModel):

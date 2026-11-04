@@ -28,6 +28,7 @@ import functools
 import logging
 import os
 import smtplib
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from email.message import EmailMessage
 
@@ -244,6 +245,20 @@ def avisar_pedido(id_pedido: int) -> int:
             titulo += f": «{comentario}»"
         enlace = f"/narrativas?nuevo=1&area={p['area_id']}&periodo={pd.Timestamp(p['periodo']):%Y-%m}"
         creados = _crear(conn, _analistas(conn), "pedido", p["area_id"], titulo, enlace, f"pedido:{id_pedido}")
+    if creados:
+        programar_envio()
+    return creados
+
+
+@_tolerante
+def avisar_cuenta(titulo: str) -> int:
+    """Algo cambio en el acceso de RRHH: TI creo, modifico o restablecio una
+    cuenta de RRHH, o cambio quien firma. Le llega a todo RRHH (incluida la
+    persona afectada), para que nadie tome el control de una cuenta que firma
+    sin que se note. TI no recibe avisos."""
+    asegurar_tabla()
+    with engine.begin() as conn:
+        creados = _crear(conn, _rrhh(conn), "cuenta", CORPORATIVO, titulo, "/usuarios", f"cuenta:{uuid.uuid4().hex}")
     if creados:
         programar_envio()
     return creados

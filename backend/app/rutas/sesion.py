@@ -1,5 +1,5 @@
 """Inicio de sesion, verificacion en dos pasos y cambio de contrasena."""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -8,6 +8,12 @@ from app.rutas.comun import ids_de_areas
 from app.seguridad import ErrorDeUsuario, Usuario, areas_visibles, sesion_actual
 
 router = APIRouter(prefix="/auth", tags=["Sesión"])
+
+
+def _origen(request: Request) -> str:
+    """IP de quien intenta entrar. Detras de nginx, uvicorn la toma de
+    X-Forwarded-For (scripts/arranque.py usa --proxy-headers)."""
+    return request.client.host if request.client else "desconocido"
 
 
 def _token_de_sesion(u: Usuario) -> dict:
@@ -19,16 +25,17 @@ def _token_de_sesion(u: Usuario) -> dict:
 
 
 @router.post("/login", response_model=schemas.Token)
-def login(formulario: OAuth2PasswordRequestForm = Depends()):
+def login(request: Request, formulario: OAuth2PasswordRequestForm = Depends()):
     """Inicia sesion con usuario y contrasena; devuelve un token que caduca.
 
     Con verificacion en dos pasos activa, no devuelve el token: devuelve
     `mfa_requerido` y un `mfa_token` para mandar con el codigo a POST
     /auth/mfa. En /docs, el boton "Authorize" solo sirve para cuentas sin MFA.
-    Tras varios intentos fallidos seguidos la cuenta se bloquea unos minutos.
+    Tras varios intentos fallidos seguidos desde un mismo equipo, ese equipo
+    queda bloqueado unos minutos para esa cuenta.
     """
     try:
-        u = seguridad.autenticar(formulario.username, formulario.password)
+        u = seguridad.autenticar(formulario.username, formulario.password, _origen(request))
         if u.mfa_activo:
             return {
                 "mfa_requerido": True,
@@ -41,7 +48,7 @@ def login(formulario: OAuth2PasswordRequestForm = Depends()):
 
 
 @router.post("/mfa", response_model=schemas.Token)
-def segundo_paso(paso: schemas.MfaPaso):
+def segundo_paso(request: Request, paso: schemas.MfaPaso):
     """Segundo paso: el codigo de 6 digitos de la app o un codigo de respaldo."""
     try:
         u = seguridad.usuario_del_token(paso.mfa_token, "mfa")
@@ -49,10 +56,21 @@ def segundo_paso(paso: schemas.MfaPaso):
             raise HTTPException(
                 status_code=401, detail="La verificación venció; vuelve a escribir tu usuario y contraseña"
             )
-        mfa.verificar_entrada(u, paso.codigo)
+        mfa.verificar_entrada(u, paso.codigo, _origen(request))
         return _token_de_sesion(u)
     except SQLAlchemyError:
         raise HTTPException(status_code=503, detail="Base de datos no disponible")
+
+
+@router.post("/salir", status_code=204)
+def salir(u: Usuario = Depends(sesion_actual)):
+    """Cierra la sesion: el token (y los de tus otros dispositivos) deja de
+    servir de inmediato, aunque alguien lo haya copiado."""
+    try:
+        seguridad.cerrar_sesion(u)
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
+    return Response(status_code=204)
 
 
 @router.get("/yo", response_model=schemas.UsuarioOut)

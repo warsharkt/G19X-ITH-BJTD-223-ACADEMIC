@@ -5,6 +5,10 @@ Dos formas de configurarla en el .env:
     Tiene prioridad si existe.
   - POSTGRES_USER/PASSWORD/DB + DB_HOST/DB_PORT: el PostgreSQL local de
     Docker (docker-compose.yml). Es lo que se usa si no hay DATABASE_URL.
+
+En Docker, la API no usa POSTGRES_USER (superusuario): scripts/arranque.py
+crea la cuenta DB_API_USUARIO, sin privilegios, y le pasa DB_API_USUARIO y
+DB_API_CONTRASENA solo al proceso de la API.
 """
 import os
 from pathlib import Path
@@ -21,10 +25,11 @@ load_dotenv(RAIZ / ".env")
 def _url_desde_entorno() -> URL:
     cadena = os.getenv("DATABASE_URL", "").strip()
     if not cadena:
+        cuenta_api = os.getenv("DB_API_USUARIO") and os.getenv("DB_API_CONTRASENA")
         return URL.create(
             "postgresql+psycopg",
-            username=os.getenv("POSTGRES_USER"),
-            password=os.getenv("POSTGRES_PASSWORD"),
+            username=os.getenv("DB_API_USUARIO") if cuenta_api else os.getenv("POSTGRES_USER"),
+            password=os.getenv("DB_API_CONTRASENA") if cuenta_api else os.getenv("POSTGRES_PASSWORD"),
             host=os.getenv("DB_HOST", "localhost"),
             port=int(os.getenv("DB_PORT", "5433")),
             database=os.getenv("POSTGRES_DB"),

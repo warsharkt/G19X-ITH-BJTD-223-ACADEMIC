@@ -90,6 +90,13 @@ function trabajo(id, estado, extra = {}) {
   return t
 }
 
+// Como la API real: Direccion y los gerentes leen el texto cuando RRHH ya lo
+// firmo; antes solo ven en que va y quien lo firmara
+function paraAudiencia(usuario, t) {
+  if (usuario.rol === 'rrhh' || (t.estado === 'lista' && t.revision === 'aprobada')) return t
+  return { ...t, narrativa: null, error: null, detalle_error: null, comentario_revision: null }
+}
+
 // Mismas reglas que POST /narrativas/{id}/revision de la API real
 function revisar(usuario, id, { decision, comentario, nota }) {
   const actual = trabajo(id, 'lista')
@@ -189,9 +196,11 @@ function cuentas(usuario, pathname, metodo, cuerpo, estado) {
     return respuesta(200, pathname === '/usuarios/cambios' ? estado.bitacora : estado.cuentas)
   }
   if (usuario.rol !== 'admin_ti') return soloTi()
+  if (cuerpo && 'firma_reportes' in cuerpo && (metodo === 'PATCH' || cuerpo.firma_reportes))
+    return respuesta(403, { detail: 'El permiso de firmar reportes lo da una Responsable de RRHH, no Administración de TI' })
   if (pathname === '/usuarios' && metodo === 'POST') {
     if (estado.cuentas.some((c) => c.usuario === cuerpo.usuario)) return respuesta(422, { detail: `El usuario '${cuerpo.usuario}' ya existe` })
-    const cuenta = { ...cuerpo, id: 100 + estado.cuentas.length, activo: true, bloqueado: false, debe_cambiar_contrasena: true, mfa_activo: false, creado_en: '2026-10-06T12:00:00Z', ultimo_acceso: null }
+    const cuenta = { firma_reportes: false, ...cuerpo, id: 100 + estado.cuentas.length, activo: true, bloqueado: false, debe_cambiar_contrasena: true, mfa_activo: false, creado_en: '2026-10-06T12:00:00Z', ultimo_acceso: null }
     estado.cuentas.push(cuenta)
     anotar(cuenta.usuario, 'crear', { nombre: cuenta.nombre, rol: cuenta.rol, area_id: cuenta.area_id, correo: cuenta.correo })
     return respuesta(201, { cuenta, contrasena_temporal: 'Tmp7-Kq3x-Pa9t' })
@@ -264,6 +273,7 @@ function cargasFalsas(usuario, pathname, metodo, cuerpo, estado, datosReales) {
 }
 
 function respuesta(estado, cuerpo) {
+  if (estado === 204) return Promise.resolve(new Response(null, { status: 204 }))
   return Promise.resolve(new Response(JSON.stringify(cuerpo), { status: estado, headers: { 'Content-Type': 'application/json' } }))
 }
 
@@ -277,6 +287,7 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
     pendientes: Object.fromEntries(Object.values(USUARIOS).map((u) => [u.usuario, u.pendiente ?? null])),
     contrasenasCambiadas: [],
     subidas: [],
+    salidas: [], // quien cerro sesion (POST /auth/salir)
     cargas: [],
     mesPendiente: '2026-09', // null: ya estan cargados todos los meses cerrados
     cuentas: cuentasIniciales(),
@@ -328,6 +339,10 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
     const sinPermiso = () => respuesta(403, { detail: 'Tu rol no tiene acceso a datos de colaboradores' })
 
     const pendiente = estado.pendientes[usuario.usuario]
+    if (pathname === '/auth/salir' && metodo === 'POST') {
+      estado.salidas.push(usuario.usuario)
+      return respuesta(204, null)
+    }
     if (pathname === '/auth/yo')
       return respuesta(200, { mfa_activo: false, mfa_obligatorio: false, codigos_respaldo_restantes: 0, firma_reportes: false, ...usuario, pendiente })
     if (pathname === '/auth/contrasena') {
@@ -375,6 +390,17 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
         desde: '2026-10-06', hasta, motivo: motivo || null,
       }
       return respuesta(200, firmas(usuario, estado))
+    }
+    const responsable = pathname.match(/^\/firmas\/responsables\/(\d+)$/)
+    if (responsable && metodo === 'PUT') {
+      if (!usuario.firma_reportes) return respuesta(403, { detail: 'Solo una Responsable de RRHH da o quita el permiso de firmar reportes' })
+      const cuenta = estado.cuentas.find((c) => c.id === Number(responsable[1]))
+      const { firma } = JSON.parse(opciones.body)
+      if (firma && !cuenta.mfa_activo)
+        return respuesta(422, { detail: 'Esa persona debe entrar primero, cambiar su contraseña temporal y activar su verificación en dos pasos: así nadie más conoce su acceso' })
+      cuenta.firma_reportes = firma
+      estado.bitacora.unshift({ id: estado.bitacora.length + 1, usuario: cuenta.usuario, accion: firma ? 'dar_firma' : 'quitar_firma', detalle: { firma_reportes: [!firma, firma] }, hecho_por: usuario.usuario, hecho_en: '2026-10-06T12:00:00Z' })
+      return respuesta(200, cuenta)
     }
     if (pathname === '/firmas/suplencia/terminar' && metodo === 'POST') {
       estado.suplencia = null
@@ -426,15 +452,16 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
     if (enRevision && metodo === 'POST') return revisar(usuario, Number(enRevision[1]), JSON.parse(opciones.body))
     const enExportar = pathname.match(/^\/narrativas\/(\d+)\/exportar$/)
     if (enExportar) return exportar(Number(enExportar[1]), searchParams.get('formato'), estado)
-    if (pathname === '/narrativas/5') return respuesta(200, trabajo(5, 'lista'))
+    if (pathname === '/narrativas/5') return respuesta(200, paraAudiencia(usuario, trabajo(5, 'lista')))
     if (pathname === '/narrativas/7') {
       estado.consultas += 1
       if (estado.consultas <= consultasHastaLista) return respuesta(200, trabajo(7, 'en_proceso'))
       if (fallaNarrativa)
-        return respuesta(200, trabajo(7, 'error', { error: 'El modelo no pasó los guardarrailes', detalle_error: ['Cifra 4.2 no está en los hechos'] }))
-      return respuesta(200, trabajo(7, 'lista'))
+        return respuesta(200, paraAudiencia(usuario, trabajo(7, 'error', { error: 'El modelo no pasó los guardarrailes', detalle_error: ['Cifra 4.2 no está en los hechos'] })))
+      return respuesta(200, paraAudiencia(usuario, trabajo(7, 'lista')))
     }
-    if (pathname === '/narrativas') return respuesta(200, [trabajo(5, 'lista'), trabajo(6, 'error', { area_id: 1, error: 'Ollama no respondió' })])
+    if (pathname === '/narrativas')
+      return respuesta(200, [trabajo(5, 'lista'), trabajo(6, 'error', { area_id: 1, error: 'Ollama no respondió' })].map((t) => paraAudiencia(usuario, t)))
     return respuesta(404, { detail: 'No existe' })
   })
 

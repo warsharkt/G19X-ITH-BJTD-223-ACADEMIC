@@ -13,7 +13,7 @@ pueden activarlo.
 - Si se pierde todo, TI reinicia el MFA de la cuenta (queda en la bitacora) y
   la persona lo vuelve a configurar al entrar.
 - Los codigos equivocados cuentan como intentos fallidos: tras
-  INTENTOS_MAXIMOS la cuenta se bloquea, igual que con la contrasena.
+  INTENTOS_MAXIMOS se bloquea ese origen, igual que con la contrasena.
 - El secreto se guarda cifrado (AES-256-GCM) con una llave que no vive en la
   base: MFA_LLAVE en el .env o, si no esta, el archivo llaves/mfa.key, que se
   genera solo la primera vez. Quien copie la base no puede generar codigos.
@@ -238,16 +238,21 @@ def respaldos_restantes(usuario_id: int) -> int:
         ).scalar_one()
 
 
-def reiniciar(usuario_id: int, por: str):
+def reiniciar(usuario_id: int, por: str, suspender_firma: bool = False) -> bool:
     """TI borra el MFA de una cuenta (telefono perdido): al entrar lo vuelve a
-    configurar. Cierra sus sesiones. Nadie reinicia el suyo."""
+    configurar. Cierra sus sesiones. Nadie reinicia el suyo.
+
+    suspender_firma=True (desde el panel de TI): si la cuenta firmaba
+    reportes, pierde el permiso hasta que otra Responsable se lo devuelva.
+    Devuelve si se suspendio la firma."""
     seguridad.asegurar_tabla()
     with engine.begin() as conn:
-        actual = conn.execute(
-            text("SELECT usuario FROM usuarios WHERE id = :i FOR UPDATE"), {"i": usuario_id}
-        ).scalar()
-        if actual is None:
+        cuenta = conn.execute(
+            text("SELECT id, usuario, firma_reportes FROM usuarios WHERE id = :i FOR UPDATE"), {"i": usuario_id}
+        ).mappings().first()
+        if cuenta is None:
             raise LookupError(f"El usuario {usuario_id} no existe")
+        actual = cuenta["usuario"]
         if actual == por:
             raise ErrorDeUsuario("No puedes reiniciar tu propia verificación en dos pasos: pídeselo a otra persona de TI")
         conn.execute(
@@ -259,10 +264,13 @@ def reiniciar(usuario_id: int, por: str):
         )
         conn.execute(text("DELETE FROM codigos_respaldo WHERE usuario_id = :i"), {"i": usuario_id})
         seguridad.registrar(conn, actual, "reiniciar_mfa", por)
+        if suspender_firma:
+            return seguridad.suspender_firma(conn, dict(cuenta), por, "se reinició su verificación en dos pasos")
+    return False
 
 
 # ---------------------------------------------------------- al entrar
-def verificar_entrada(u: Usuario, codigo: str) -> Usuario:
+def verificar_entrada(u: Usuario, codigo: str, origen: str = "local") -> Usuario:
     """Segundo paso del inicio de sesion: codigo de la app o de respaldo.
 
     401 si no es correcto (y cuenta como intento fallido), 429 si la cuenta
@@ -278,13 +286,13 @@ def verificar_entrada(u: Usuario, codigo: str) -> Usuario:
         ).mappings().first()
         if fila is None or not fila["mfa_activo"]:
             error = HTTPException(status.HTTP_401_UNAUTHORIZED, "Sesión no válida o vencida; vuelve a iniciar sesión")
-        elif (bloqueo := seguridad.error_si_bloqueada(fila)) is not None:
+        elif (bloqueo := seguridad.error_si_bloqueada(conn, fila, origen)) is not None:
             error = bloqueo
         elif (secreto := descifrar_secreto(u.id, fila["mfa_secreto"])) is not None and (
             paso := _paso_valido(secreto, codigo, fila["mfa_ultimo_paso"])
         ) is not None:
             conn.execute(text("UPDATE usuarios SET mfa_ultimo_paso = :p WHERE id = :i"), {"p": paso, "i": u.id})
-            seguridad.registrar_entrada(conn, u.id)
+            seguridad.registrar_entrada(conn, u.id, origen)
         elif conn.execute(
             text(
                 "UPDATE codigos_respaldo SET usado_en = now() "
@@ -292,10 +300,10 @@ def verificar_entrada(u: Usuario, codigo: str) -> Usuario:
             ),
             {"i": u.id, "h": _hash_respaldo(codigo)},
         ).first():
-            seguridad.registrar_entrada(conn, u.id)
+            seguridad.registrar_entrada(conn, u.id, origen)
             seguridad.registrar(conn, fila["usuario"], "usar_codigo_respaldo", fila["usuario"])
         else:
-            seguridad.registrar_fallo(conn, u.id)
+            seguridad.registrar_fallo(conn, u.id, origen)
             # con la llave perdida o cambiada, solo sirven los codigos de respaldo
             error = _secreto_ilegible() if secreto is None else HTTPException(
                 status.HTTP_401_UNAUTHORIZED, "El código no es correcto"

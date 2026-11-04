@@ -131,7 +131,7 @@ export default function DetalleNarrativa() {
       <>
         {volver}
         <Mensaje titulo={`El reporte #${trabajo.id} (${alcance}) no se pudo generar`}>
-          <p>{trabajo.error}</p>
+          <p>{trabajo.error ?? 'RRHH ya tiene el detalle y lo volverá a preparar.'}</p>
           {trabajo.detalle_error?.length > 0 && (
             <ul>
               {trabajo.detalle_error.map((d, i) => (
@@ -144,6 +144,22 @@ export default function DetalleNarrativa() {
             rellena el reporte con texto que no haya redactado la IA; puedes volver a solicitarlo.
           </p>
         </Mensaje>
+      </>
+    )
+
+  // Direccion y los gerentes leen el reporte cuando RRHH ya lo firmo: antes la
+  // API no manda el texto, solo en que va y quien lo firmara
+  if (!trabajo.narrativa)
+    return (
+      <>
+        {volver}
+        <section className="panel">
+          <h1>Reporte de {alcance}</h1>
+          <PanelRevision trabajo={trabajo} alRevisar={setTrabajo} />
+          {trabajo.revision === 'pendiente' && (
+            <p className="texto-secundario">Lo podrás leer y descargar en cuanto RRHH lo firme. Te llegará un aviso.</p>
+          )}
+        </section>
       </>
     )
 

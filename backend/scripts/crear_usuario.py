@@ -11,10 +11,17 @@ Uso (desde la carpeta backend, con el entorno virtual activo):
     python -m scripts.crear_usuario --usuario ana --cambiar-contrasena
     python -m scripts.crear_usuario --usuario ana --cambiar-correo ana@empresa.com   ("" lo quita)
     python -m scripts.crear_usuario --usuario ana --reiniciar-mfa   (telefono perdido)
+    python -m scripts.crear_usuario --usuario eva --nombre "Eva Ruiz" --rol rrhh --firma   (Responsable)
+    python -m scripts.crear_usuario --usuario eva --dar-firma      (o --quitar-firma)
     python -m scripts.crear_usuario --listar
 
 Roles: direccion (solo consolidado), rrhh (todo), gerente (solo su area),
 admin_ti (configuracion, sin datos de colaboradores).
+
+Firma de reportes: la primera Responsable de RRHH se crea aqui con --firma.
+Despues, el permiso lo da o lo quita una Responsable desde el panel
+(Usuarios); TI no puede darlo. --dar-firma y --quitar-firma sirven de
+respaldo si no queda ninguna Responsable con acceso.
 
 El correo es opcional: si el .env tiene SMTP, se usa para avisar que hay
 avisos nuevos en el sistema (sin datos, solo la liga).
@@ -37,6 +44,7 @@ from app.seguridad import (
     asegurar_tabla,
     cambiar_contrasena,
     cambiar_correo,
+    cambiar_firma,
     crear_usuario,
 )
 
@@ -74,7 +82,8 @@ def listar():
         filas = conn.execute(
             text(
                 "SELECT u.usuario, u.nombre, u.rol, a.nombre AS area, u.activo, u.ultimo_acceso, u.correo, u.mfa_activo, "
-                "u.bloqueado_hasta > now() AS bloqueado "
+                "(COALESCE(u.bloqueado_hasta > now(), false) OR EXISTS (SELECT 1 FROM bloqueos_acceso b "
+                "  WHERE b.usuario_id = u.id AND b.bloqueado_hasta > now())) AS bloqueado, u.firma_reportes "
                 "FROM usuarios u LEFT JOIN areas a ON a.id = u.area_id ORDER BY u.usuario"
             )
         ).mappings().all()
@@ -86,6 +95,8 @@ def listar():
             estado += ", BLOQUEADO"
         if f["mfa_activo"]:
             estado += ", MFA"
+        if f["firma_reportes"]:
+            estado += ", FIRMA"
         acceso = f["ultimo_acceso"].strftime("%Y-%m-%d %H:%M") if f["ultimo_acceso"] else "nunca"
         print(
             f"{f['usuario']:<16}{f['rol']:<11}{(f['area'] or '-'):<13}{estado:<20}ultimo acceso: {acceso}  "
@@ -103,6 +114,9 @@ def main():
     ap.add_argument("--cambiar-contrasena", action="store_true", help="cambia la contraseña y desbloquea la cuenta")
     ap.add_argument("--cambiar-correo", metavar="CORREO", help='pone el correo de un usuario ("" lo quita)')
     ap.add_argument("--reiniciar-mfa", action="store_true", help="borra su verificacion en dos pasos (telefono perdido)")
+    ap.add_argument("--firma", action="store_true", help="al crear (rol rrhh): Responsable que firma los reportes")
+    ap.add_argument("--dar-firma", action="store_true", help="da el permiso de firmar reportes a una cuenta de RRHH")
+    ap.add_argument("--quitar-firma", action="store_true", help="quita el permiso de firmar reportes")
     ap.add_argument("--listar", action="store_true", help="muestra los usuarios existentes")
     args = ap.parse_args()
 
@@ -119,6 +133,11 @@ def main():
                 raise SystemExit("Indica --usuario")
             cambiar_correo(args.usuario, args.cambiar_correo, por=POR)
             print(f"Correo de '{args.usuario}' {'actualizado' if args.cambiar_correo.strip() else 'eliminado'}.")
+        elif args.dar_firma or args.quitar_firma:
+            if not args.usuario:
+                raise SystemExit("Indica --usuario")
+            cambiar_firma(id_de_usuario(args.usuario), args.dar_firma, POR)
+            print(f"'{args.usuario}' {'ya puede' if args.dar_firma else 'ya no puede'} firmar reportes.")
         elif args.reiniciar_mfa:
             if not args.usuario:
                 raise SystemExit("Indica --usuario")
@@ -128,8 +147,9 @@ def main():
             if not (args.usuario and args.nombre and args.rol):
                 ap.error("para crear un usuario indica --usuario, --nombre y --rol")
             area_id = id_de_area(args.area) if args.area else None
-            crear_usuario(args.usuario, args.nombre, args.rol, pedir_contrasena(), area_id, args.correo, por=POR)
-            print(f"Usuario '{args.usuario.lower()}' creado con rol {args.rol}.")
+            crear_usuario(args.usuario, args.nombre, args.rol, pedir_contrasena(), area_id, args.correo, por=POR,
+                          firma_reportes=args.firma)
+            print(f"Usuario '{args.usuario.lower()}' creado con rol {args.rol}{' (firma los reportes)' if args.firma else ''}.")
     except ErrorDeUsuario as exc:
         raise SystemExit(f"No se pudo: {exc}")
 

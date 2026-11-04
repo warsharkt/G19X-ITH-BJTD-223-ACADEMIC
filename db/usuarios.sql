@@ -75,7 +75,8 @@ CREATE INDEX IF NOT EXISTS usuarios_cambios_usuario ON usuarios_cambios (usuario
 -- Firma de reportes (regla 10.3.9): dentro de RRHH, la Analista prepara
 -- (carga los datos y genera los reportes) y la Responsable los firma
 -- (aprueba o rechaza). firma_reportes = true marca a la Responsable.
--- Solo una cuenta de RRHH puede tenerlo.
+-- Solo una cuenta de RRHH puede tenerlo, y solo lo da o lo quita una
+-- Responsable (o la consola del servidor): TI, nunca (app/seguridad.py).
 ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS firma_reportes BOOLEAN NOT NULL DEFAULT false;
 DO $$
 BEGIN
@@ -109,4 +110,18 @@ CREATE TABLE IF NOT EXISTS pedidos_reporte (
     comentario  TEXT,
     pedido_por  TEXT NOT NULL,
     pedido_en   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Bloqueo por intentos fallidos, por cuenta Y por origen (IP). Antes el
+-- bloqueo era de toda la cuenta: cualquiera podia dejar bloqueada a la
+-- Responsable para siempre con un intento cada 15 minutos. Ahora quien se
+-- equivoca solo bloquea su propio equipo; si se bloquean varios origenes
+-- a la vez (ataque desde varios equipos), se bloquea la cuenta completa
+-- (usuarios.bloqueado_hasta). Se borra al entrar bien desde ese origen.
+CREATE TABLE IF NOT EXISTS bloqueos_acceso (
+    usuario_id       INTEGER NOT NULL REFERENCES usuarios (id) ON DELETE CASCADE,
+    origen           TEXT NOT NULL,
+    intentos         INTEGER NOT NULL DEFAULT 0,
+    bloqueado_hasta  TIMESTAMPTZ,
+    PRIMARY KEY (usuario_id, origen)
 );

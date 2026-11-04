@@ -12,7 +12,7 @@ RUN npm run build
 FROM nginx:1.28-alpine
 # openssl: genera un certificado autofirmado si la empresa no pone el suyo
 RUN apk add --no-cache openssl && rm -f /etc/nginx/conf.d/default.conf
-COPY nginx/comun.conf nginx/http.conf nginx/https.conf /etc/nginx/talentia/
+COPY nginx/comun.conf nginx/http.conf nginx/https.conf nginx/limites.conf nginx/proxy-api.conf /etc/nginx/talentia/
 # Al arrancar elige HTTP o HTTPS segun WEB_HTTPS y WEB_ESCUCHA
 COPY nginx/talentia-https.sh /docker-entrypoint.d/40-talentia-https.sh
 # sin CR por si el repositorio se clono en Windows con finales de linea CRLF

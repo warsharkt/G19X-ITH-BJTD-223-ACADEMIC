@@ -5,17 +5,24 @@ Deja todo listo para entrar sin correr scripts a mano:
      de Nordika (scripts/seed.py). Con datos reales nunca siembra nada.
   2. Si el modo demostracion esta activo, crea o restablece las cuentas
      del personal de Nordika (app/demo.py).
-  3. Si no hay JWT_SECRETO, genera uno al azar para esta ejecucion (las
+  3. Prepara la cuenta de PostgreSQL con la que se conecta la API
+     (talentia_api): sin privilegios de superusuario, duena solo de las tablas
+     del sistema y con una contrasena nueva al azar en cada arranque. Asi una
+     falla en la API no da control de la base ni del contenedor. Los pasos 1 y
+     2, los scripts y las pruebas siguen usando POSTGRES_USER.
+  4. Si no hay JWT_SECRETO, genera uno al azar para esta ejecucion (las
      sesiones se cierran al reiniciar el contenedor; nada se guarda en disco).
-  4. Arranca la API (uvicorn) en el puerto 8000 del contenedor.
+  5. Arranca la API (uvicorn) en el puerto 8000 del contenedor.
 
 Uso (lo llama el Dockerfile; no hace falta correrlo a mano):
     python -m scripts.arranque
 """
 import os
+import re
 import secrets
 import sys
 
+from psycopg import sql
 from sqlalchemy import text
 
 from app import demo
@@ -62,15 +69,64 @@ def preparar_demo():
         print(f"  {usuario:<16}{nombre}, {cargo}")
 
 
+def preparar_cuenta_de_la_api() -> dict[str, str]:
+    """Crea o actualiza la cuenta de la API y le pasa las tablas. Devuelve las
+    variables de entorno que usa app/database.py (vacio si no aplica)."""
+    if os.getenv("DATABASE_URL", "").strip():
+        print("DATABASE_URL configurada: la API usa esa cuenta tal cual.")
+        return {}
+    usuario = os.getenv("DB_API_USUARIO", "talentia_api").strip()
+    if not re.fullmatch(r"[a-z_][a-z0-9_]{0,40}", usuario):
+        sys.exit(f"DB_API_USUARIO no es un nombre de rol valido: {usuario!r}")
+    contrasena = secrets.token_urlsafe(32)
+    with engine.begin() as conn:
+        driver = conn.connection.driver_connection
+
+        def ejecutar(plantilla: str, **partes):
+            conn.exec_driver_sql(sql.SQL(plantilla).format(**partes).as_string(driver))
+
+        ident = sql.Identifier(usuario)
+        existe = conn.execute(text("SELECT 1 FROM pg_roles WHERE rolname = :u"), {"u": usuario}).first()
+        ejecutar(
+            ("ALTER ROLE {u} WITH" if existe else "CREATE ROLE {u}")
+            + " LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD {p}",
+            u=ident, p=sql.Literal(contrasena),
+        )
+        ejecutar("GRANT CONNECT, TEMPORARY ON DATABASE {d} TO {u}", d=sql.Identifier(engine.url.database), u=ident)
+        ejecutar("GRANT USAGE, CREATE ON SCHEMA public TO {u}", u=ident)
+        # Duena de las tablas: las crea y modifica al arrancar (asegurar_tabla, RLS).
+        # Las secuencias de columnas SERIAL cambian de dueno junto con su tabla.
+        objetos = conn.execute(text(
+            "SELECT c.relname, c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'v', 'm', 'S') "
+            "AND pg_get_userbyid(c.relowner) <> :u "
+            "AND NOT (c.relkind = 'S' AND EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = c.oid AND d.deptype IN ('a', 'i'))) "
+            "ORDER BY c.relkind = 'S'"
+        ), {"u": usuario}).all()
+        tipos = {"r": "TABLE", "p": "TABLE", "v": "VIEW", "m": "MATERIALIZED VIEW", "S": "SEQUENCE"}
+        for nombre, tipo in objetos:
+            ejecutar(f"ALTER {tipos[tipo]} {{t}} OWNER TO {{u}}", t=sql.Identifier("public", nombre), u=ident)
+        # Lo que creen despues POSTGRES_USER (seed, respaldo) tambien lo puede usar
+        for clase in ("TABLES", "SEQUENCES"):
+            ejecutar(f"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON {clase} TO {{u}}", u=ident)
+    print(f"La API se conecta como '{usuario}' (sin privilegios de superusuario).")
+    return {"DB_API_USUARIO": usuario, "DB_API_CONTRASENA": contrasena}
+
+
 def main():
     sembrar_si_hace_falta()
     preparar_demo()
+    os.environ.update(preparar_cuenta_de_la_api())
     if len(os.getenv("JWT_SECRETO", "")) < 32:
         os.environ["JWT_SECRETO"] = secrets.token_urlsafe(48)
         print("JWT_SECRETO no configurado: se genero uno temporal para esta ejecucion.")
     os.execvp(
         sys.executable,
-        [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"],
+        # --proxy-headers: la IP real de quien entra llega de nginx en
+        # X-Forwarded-For (el bloqueo por intentos fallidos es por IP). La API
+        # solo se publica en 127.0.0.1 y en la red interna de Docker.
+        [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000",
+         "--proxy-headers", "--forwarded-allow-ips", "*"],
     )
 
 

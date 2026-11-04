@@ -40,7 +40,8 @@ export const AVISOS_CAMBIARON = 'rrhh:avisos-cambiaron'
 
 // archivo: true devuelve { blob, nombre } en lugar de JSON (exportaciones).
 // datos: FormData para subir archivos (el navegador pone el Content-Type).
-async function pedir(ruta, { metodo = 'GET', cuerpo, formulario, datos, archivo = false } = {}) {
+// silencioso: un 401 no avisa que la sesion vencio (al cerrar sesion a proposito).
+async function pedir(ruta, { metodo = 'GET', cuerpo, formulario, datos, archivo = false, silencioso = false } = {}) {
   const encabezados = {}
   const token = leerToken()
   if (token) encabezados.Authorization = `Bearer ${token}`
@@ -77,7 +78,7 @@ async function pedir(ruta, { metodo = 'GET', cuerpo, formulario, datos, archivo 
   // FastAPI devuelve una lista cuando falla la validacion (422)
   const deValidacion = Array.isArray(detalle) ? detalle[0]?.msg?.replace(/^Value error, /, '') : null
   const mensaje = typeof detalle === 'string' ? detalle : deValidacion || `Error ${respuesta.status} de la API`
-  if (respuesta.status === 401 && token) {
+  if (respuesta.status === 401 && token && !silencioso) {
     window.dispatchEvent(new CustomEvent(SESION_VENCIDA, { detail: mensaje }))
   }
   throw new ErrorDeApi(mensaje, respuesta.status)
@@ -95,6 +96,8 @@ export const api = {
   verificarMfa: (mfaToken, codigo) =>
     pedir('/auth/mfa', { metodo: 'POST', cuerpo: { mfa_token: mfaToken, codigo } }),
   yo: () => pedir('/auth/yo'),
+  // Cerrar sesion invalida el token en el servidor, no solo en el navegador
+  salir: () => pedir('/auth/salir', { metodo: 'POST', silencioso: true }),
   // Devuelve un token nuevo: las demas sesiones de la persona se cierran
   cambiarContrasena: (actual, nueva) => pedir('/auth/contrasena', { metodo: 'POST', cuerpo: { actual, nueva } }),
   configurarMfa: () => pedir('/auth/mfa/configurar', { metodo: 'POST' }),
@@ -142,6 +145,7 @@ export const api = {
   designarSuplente: (suplente, hasta, motivo) =>
     pedir('/firmas/suplencia', { metodo: 'POST', cuerpo: { suplente, hasta, motivo } }),
   terminarSuplencia: () => pedir('/firmas/suplencia/terminar', { metodo: 'POST' }),
+  cambiarFirma: (usuarioId, firma) => pedir(`/firmas/responsables/${usuarioId}`, { metodo: 'PUT', cuerpo: { firma } }),
   // Direccion o un gerente pide un reporte a RRHH
   pedirReporte: (periodo, areaId, comentario) =>
     pedir('/pedidos', { metodo: 'POST', cuerpo: { periodo, area_id: areaId, comentario } }),

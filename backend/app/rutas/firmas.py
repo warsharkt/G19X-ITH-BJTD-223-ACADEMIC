@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 
-from app import firmas, narrativa, schemas, trabajos
+from app import avisos, firmas, narrativa, schemas, seguridad, trabajos
 from app.rutas.comun import kpis_df, mes
 from app.seguridad import (
     ErrorDeUsuario,
@@ -19,6 +19,8 @@ router = APIRouter(tags=["Firma de reportes"])
 def _firmas(funcion, *args):
     try:
         return funcion(*args)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc.args[0]))
     except ErrorDeUsuario as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except SQLAlchemyError:
@@ -46,6 +48,20 @@ def terminar_suplencia(u: Usuario = Depends(usuario_actual)):
     if not u.es_responsable:
         raise HTTPException(status_code=403, detail="Solo la Responsable de RRHH termina la suplencia")
     return _firmas(firmas.terminar_suplencia, u)
+
+
+@router.put("/firmas/responsables/{usuario_id}", response_model=schemas.Cuenta)
+def cambiar_responsable(usuario_id: int, cambio: schemas.FirmaCambio, u: Usuario = Depends(usuario_actual)):
+    """Una Responsable de RRHH da o quita el permiso de firmar reportes a otra
+    persona de RRHH. TI no puede (regla 10.3.9). Para darlo, la persona ya
+    debe haber entrado con su propia contrasena y su verificacion en dos
+    pasos. Queda en la bitacora de cuentas y se avisa a todo RRHH."""
+    if not u.es_responsable:
+        raise HTTPException(status_code=403, detail="Solo una Responsable de RRHH da o quita el permiso de firmar reportes")
+    cuenta = _firmas(seguridad.cambiar_firma, usuario_id, cambio.firma, u.usuario)
+    que = "le dio" if cambio.firma else "le quitó"
+    avisos.avisar_cuenta(f"{u.nombre} (Responsable de RRHH) {que} el permiso de firmar reportes a {cuenta['nombre']}")
+    return cuenta
 
 
 @router.post("/pedidos", status_code=201, response_model=schemas.PedidoCreado)

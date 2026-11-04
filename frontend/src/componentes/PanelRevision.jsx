@@ -86,7 +86,7 @@ export default function PanelRevision({ trabajo, alRevisar }) {
         <strong>
           Rechazado por {quien(trabajo.firma)} el {fechaHora(trabajo.revisada_en)}
         </strong>
-        <span>Motivo: {trabajo.comentario_revision}</span>
+        {trabajo.comentario_revision && <span>Motivo: {trabajo.comentario_revision}</span>}
         <span>No se debe distribuir. Si hace falta, se prepara un reporte nuevo.</span>
       </div>
     )

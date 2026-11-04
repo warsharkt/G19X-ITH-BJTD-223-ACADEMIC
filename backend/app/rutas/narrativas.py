@@ -19,6 +19,15 @@ from app.seguridad import (
 router = APIRouter(prefix="/narrativas", tags=["Narrativa"])
 
 
+def _para(u: Usuario, trabajo: dict) -> dict:
+    """Direccion y los gerentes reciben el reporte cuando RRHH ya lo firmo
+    (regla 10.3.9). Antes pueden ver en que va y quien lo firmara, pero no el
+    texto de la IA, el motivo de un rechazo ni los errores de la generacion."""
+    if u.rol == "rrhh" or (trabajo["estado"] == "lista" and trabajo["revision"] == "aprobada"):
+        return trabajo
+    return {**trabajo, "narrativa": None, "error": None, "detalle_error": None, "comentario_revision": None}
+
+
 def proveedor_configurado():
     """Proveedor del .env; 503 con el motivo si la configuracion no es valida o segura."""
     try:
@@ -72,7 +81,7 @@ def ver_narrativa(id_narrativa: int, u: Usuario = Depends(con_acceso_a_datos)):
     if trabajo is None:
         raise HTTPException(status_code=404, detail=f"La narrativa {id_narrativa} no existe")
     exigir_acceso_a_datos(u, trabajo["area_id"])
-    return trabajo
+    return _para(u, trabajo)
 
 
 @router.post("/{id_narrativa}/revision", response_model=schemas.TrabajoNarrativa)
@@ -163,6 +172,6 @@ def historial_narrativas(
     else:
         area_ids = None if u.rol == "rrhh" else areas_visibles(u, [])
     try:
-        return trabajos.listar(area_ids, mes(periodo) if periodo else None, limite, revision)
+        return [_para(u, t) for t in trabajos.listar(area_ids, mes(periodo) if periodo else None, limite, revision)]
     except SQLAlchemyError:
         raise HTTPException(status_code=503, detail="Base de datos no disponible")
