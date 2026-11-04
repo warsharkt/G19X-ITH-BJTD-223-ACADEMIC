@@ -584,6 +584,37 @@ def con_acceso_a_datos(u: Usuario = Depends(usuario_actual)) -> Usuario:
     return u
 
 
+def solo_rrhh(u: Usuario = Depends(usuario_actual)) -> Usuario:
+    """Dependencia: la programacion mensual la cambia solo RRHH (regla 10.3.10)."""
+    if u.rol != "rrhh":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo Recursos Humanos puede cambiar esta configuración")
+    return u
+
+
+def solo_responsable(u: Usuario = Depends(usuario_actual)) -> Usuario:
+    """Dependencia: los umbrales los cambia solo la Responsable de RRHH (regla
+    10.3.3). Un umbral decide que sale en rojo en los reportes, asi que quien
+    los prepara (la Analista) no lo mueve."""
+    if not u.es_responsable:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo la Responsable de RRHH puede cambiar los umbrales")
+    return u
+
+
+def solo_ti(u: Usuario = Depends(usuario_actual)) -> Usuario:
+    """Dependencia: las cuentas las administra solo TI. Quien administra cuentas
+    no aprueba reportes, y RRHH no puede crearse una segunda cuenta (regla 10.3.9)."""
+    if u.rol != "admin_ti":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo Administración de TI puede administrar cuentas")
+    return u
+
+
+def ti_o_rrhh(u: Usuario = Depends(usuario_actual)) -> Usuario:
+    """Dependencia: ver las cuentas y su bitacora, TI y RRHH (para auditar a TI)."""
+    if u.rol not in ("admin_ti", "rrhh"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo TI y Recursos Humanos pueden ver las cuentas")
+    return u
+
+
 def solo_analista(u: Usuario = Depends(usuario_actual)) -> Usuario:
     """Dependencia: cargar datos y generar reportes es trabajo de la Analista
     de RRHH. La Responsable los firma: quien prepara no firma (regla 10.3.9)."""

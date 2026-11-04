@@ -393,7 +393,9 @@ Antes de mostrarse, el código revisa la respuesta de la IA y la rechaza si:
 
 - Contiene una cifra que no está en los datos que cita (cifras inventadas).
 - Cita un dato que no se le entregó.
-- Atribuye causas ("causó", "debido a", "se debe a"). Puede decir que dos cosas coinciden, pero no que una provocó la otra, porque los datos no lo demuestran.
+- Atribuye causas ("causó", "debido a", "se debe a", "porque", "por eso", "a raíz de"). Puede decir que dos cosas coinciden, pero no que una provocó la otra, porque los datos no lo demuestran.
+- Dice que un indicador "mejoró" cuando el sistema calculó que empeoró, o al revés. Si mejoró o empeoró lo decide el código según el indicador (en rotación, subir es peor; en eNPS, bajar es peor), no la IA.
+- Escribe un número con forma de año que no es el del reporte ni el anterior (por ejemplo "2031 MXN"): se revisa como cualquier otra cifra.
 - Omite algún indicador en alerta o por vigilar, o deja un indicador en rojo sin recomendación.
 - Compara cifras contra los umbrales por su cuenta en lugar de usar la frase que le da el sistema.
 - Habla del nivel de confianza (lo calcula y lo muestra el sistema).
@@ -404,6 +406,8 @@ Además, la IA nunca propone acciones sobre personas concretas (despidos, sancio
 ### Si la IA se equivoca
 
 Se le devuelven los errores para que corrija (hasta 3 intentos). Si no lo logra, empieza de cero (hasta 2 rondas). Si aun así falla, el reporte queda en **error** con el motivo y se puede preparar de nuevo. Nunca se rellena con un texto de plantilla.
+
+Cuando el reporte sale tras corregir, la Responsable lo ve antes de firmar: bajo la portada, **Lo que el sistema rechazó** lista cada respuesta descartada y sus motivos (por ejemplo "atribuye causalidad ('porque')"). Así sabe en qué se equivocó la IA y puede revisar con más cuidado esa parte del texto.
 
 > **Por qué se calcula así.** Un reporte de plantilla que parezca escrito para ese mes sería engañoso. Es preferible que el sistema diga "no pude" a que entregue algo que nadie redactó con los datos reales.
 

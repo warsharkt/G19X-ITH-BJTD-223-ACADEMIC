@@ -32,6 +32,14 @@ Reglas anadidas tras la tercera prueba real (prompt v3):
  12. Cada hallazgo incluye el VALOR de cada hecho que cita, no solo su cambio
      (los hallazgos de Ventas decian "empeoro 1.1 puntos" sin decir en cuanto quedo).
 
+Huecos cerrados tras una revision del codigo (noviembre de 2026):
+
+ 13. Causalidad tambien con "por eso", "porque", "a raiz de", "derivado de".
+ 14. Un hallazgo no puede decir "mejoro" si el codigo calculo que empeoro
+     (ni al reves): la direccion la decide el sistema, no el modelo.
+ 15. Solo se ignoran los anios del reporte (el del periodo y el anterior, para
+     la comparacion anual): "2031 MXN" ya no pasa como si fuera un anio.
+
 Limite conocido: no puede comprobar que una frase sea semanticamente
 correcta. Por eso la revision humana (10.3.9) sigue siendo obligatoria.
 """
@@ -41,8 +49,8 @@ TOLERANCIA = 0.051  # las cifras se muestran con 1 decimal
 MAX_ORACIONES = {"resumen": 3, "texto": 3, "accion": 2}
 
 _ID = re.compile(r"\bH\d{2}\b")
-_PERIODO = re.compile(r"\b20\d{2}-\d{2}\b")
-_ANIO = re.compile(r"\b20\d{2}\b")
+# Anio suelto (2026) o periodo (2026-04); solo se ignoran los del reporte
+_ANIO = re.compile(r"\b(20\d{2})(?:-\d{2})?\b")
 _NUMERO = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:[.,]\d+)?")
 _MILES = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?")
 _ORACION = re.compile(r"(?<=[.!?])\s+(?=[A-ZÁÉÍÓÚÑ¿¡\"“])")
@@ -54,10 +62,21 @@ _CAUSAL = re.compile(
     r"caus[óo]|causaron|causando|causad[oa]s?|"
     r"provoc\w+|ocasion\w+|"
     r"debido a|a causa de|por culpa de|se debe(?:n)?\s+a|se debi[óo]\s+a|se debieron\s+a|"
-    r"gracias a|consecuencia de|producto de|resultado de|origin[óo]|originaron"
+    r"gracias a|consecuencia de|producto de|resultado de|origin[óo]|originaron|"
+    r"por eso|por ello|porque|a ra[íi]z de|derivad[oa]s? de"
     r")(?!\w)",
     re.IGNORECASE,
 )
+# Palabras que afirman una evolucion. Se comparan con evolucion_mes_ant y
+# evolucion_anio_ant, que calcula el codigo segun el sentido del indicador.
+_EVOLUCION = {
+    "mejoró": re.compile(r"(?<!\w)(mejor[óo]|mejoraron|mejorad[oa]s?|mejor[íi]a)(?!\w)", re.IGNORECASE),
+    "empeoró": re.compile(
+        r"(?<!\w)(empeor[óo]|empeoraron|empeorad[oa]s?|deterior[óo]|deterioraron|deteriorad[oa]s?|deterioro)(?!\w)",
+        re.IGNORECASE,
+    ),
+}
+_NEGACION = re.compile(r"(?<!\w)(no|ni|sin)\W*$", re.IGNORECASE)
 _CONFIANZA = re.compile(r"(?<!\w)(confian\w*|confiabl\w*|fiabilidad)(?!\w)", re.IGNORECASE)
 _COMPARA_UMBRAL = re.compile(
     r"(?<!\w)(supera\w*|excede\w*|rebasa\w*|sobrepasa\w*|por encima|por debajo|"
@@ -66,11 +85,11 @@ _COMPARA_UMBRAL = re.compile(
 )
 
 
-def extraer_numeros(texto: str) -> list[float]:
-    """Numeros de un texto, ignorando ids de hecho (H01), anios y periodos (2026-04)."""
+def extraer_numeros(texto: str, anios=frozenset()) -> list[float]:
+    """Numeros de un texto, ignorando ids de hecho (H01) y los anios y periodos
+    (2026, 2026-04) cuyo anio este en `anios`. Cualquier otro 20xx es una cifra."""
     limpio = _ID.sub(" ", texto)
-    limpio = _PERIODO.sub(" ", limpio)
-    limpio = _ANIO.sub(" ", limpio)
+    limpio = _ANIO.sub(lambda m: " " if int(m.group(1)) in anios else m.group(0), limpio)
     numeros = []
     for m in _NUMERO.findall(limpio):
         if _MILES.fullmatch(m):
@@ -122,9 +141,15 @@ def incluye_valor(texto: str, hecho: dict) -> bool:
     return any(abs(x - c) <= TOLERANCIA for x in con_signo for c in objetivo)
 
 
-def _numeros_no_permitidos(texto: str, permitidas: set[float]) -> list[float]:
+def anios_del_reporte(hechos: list[dict]) -> frozenset[int]:
+    """Anios que el texto puede mencionar: el del periodo y el anterior."""
+    anios = {int(h["periodo"][:4]) for h in hechos if h.get("periodo")}
+    return frozenset(anios | {a - 1 for a in anios})
+
+
+def _numeros_no_permitidos(texto: str, permitidas: set[float], anios) -> list[float]:
     return [
-        x for x in extraer_numeros(texto)
+        x for x in extraer_numeros(texto, anios)
         if not any(abs(abs(x) - p) <= TOLERANCIA for p in permitidas)
     ]
 
@@ -133,9 +158,28 @@ def _oraciones(texto: str) -> list[str]:
     return [o for o in _ORACION.split(texto.strip()) if o.strip()]
 
 
-def _revisar_texto(etiqueta: str, campo: str, texto: str, permitidas: set[float]) -> list[str]:
+def _contradice_evolucion(etiqueta: str, texto: str, citados: list[dict]) -> list[str]:
+    """El texto dice "mejoro" (o "empeoro") y ningun hecho citado lo hizo."""
     errores = []
-    extra = _numeros_no_permitidos(texto, permitidas)
+    for evolucion, patron in _EVOLUCION.items():
+        palabras = [m.group(0) for m in patron.finditer(texto) if not _NEGACION.search(texto[: m.start()])]
+        if not palabras or any(evolucion in (h.get("evolucion_mes_ant"), h.get("evolucion_anio_ant")) for h in citados):
+            continue
+        calculado = "; ".join(
+            f"{h['nombre']} ({h['id']}): {h.get('evolucion_mes_ant') or 'sin dato'} frente al mes anterior"
+            + (f", {h['evolucion_anio_ant']} frente al año anterior" if h.get("evolucion_anio_ant") else "")
+            for h in citados
+        )
+        errores.append(
+            f"{etiqueta}: dice '{palabras[0]}', pero el sistema calculó otra cosa ({calculado}); "
+            "usa lo que dice entre paréntesis el campo 'cambio'"
+        )
+    return errores
+
+
+def _revisar_texto(etiqueta: str, campo: str, texto: str, permitidas: set[float], anios=frozenset()) -> list[str]:
+    errores = []
+    extra = _numeros_no_permitidos(texto, permitidas, anios)
     if extra:
         cifras = ", ".join(f"{x:g}" for x in extra)
         errores.append(f"{etiqueta}: contiene cifras que no estan en los hechos citados ({cifras})")
@@ -172,14 +216,15 @@ def validar_narrativa(salida, hechos: list[dict], cifras_extra_resumen: set[floa
 
     por_id = {h["id"]: h for h in hechos}
     todas = set().union(*(cifras_permitidas(h) for h in hechos)) if hechos else set()
+    anios = anios_del_reporte(hechos)
     errores = []
 
     resumen = salida.get("resumen")
     if not isinstance(resumen, str) or not resumen.strip():
         errores.append("Falta el resumen")
     else:
-        errores += _revisar_texto("resumen", "resumen", resumen, todas | cifras_extra_resumen)
-        if not extraer_numeros(resumen):
+        errores += _revisar_texto("resumen", "resumen", resumen, todas | cifras_extra_resumen, anios)
+        if not extraer_numeros(resumen, anios):
             errores.append(
                 "resumen: no incluye ninguna cifra; menciona cuantos indicadores estan en rojo "
                 "y en amarillo, o el valor de los mas graves"
@@ -226,7 +271,9 @@ def validar_narrativa(salida, hechos: list[dict], cifras_extra_resumen: set[floa
             if not isinstance(valor, str) or not valor.strip():
                 errores.append(f"{etiqueta}: falta '{campo}'")
             else:
-                errores += _revisar_texto(f"{etiqueta} ({campo})", campo, valor, permitidas)
+                errores += _revisar_texto(f"{etiqueta} ({campo})", campo, valor, permitidas, anios)
+                if tipo == "hallazgo":
+                    errores += _contradice_evolucion(f"{etiqueta} ({campo})", valor, [por_id[x] for x in ids])
                 if tipo == "hallazgo" and campo == "texto":
                     for x in ids:
                         if not incluye_valor(valor, por_id[x]):

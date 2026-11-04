@@ -252,6 +252,32 @@ describe('firma de reportes (RF-05)', () => {
     expect(screen.getByText(/aprobada por Eva Ruiz/)).toBeInTheDocument() // bitacora al pie
   })
 
+  it('la Responsable ve lo que el sistema le rechazó al modelo antes de firmar', async () => {
+    const { contrasena } = instalarApiFalsa({
+      advertencias: [
+        "Ronda 1: Intento 1: la respuesta del modelo no pasó la validación: hallazgo 1 (texto): atribuye causalidad ('porque') | resumen: no incluye ninguna cifra",
+        "Ronda 1: Intento 2: la respuesta del modelo no pasó la validación: hallazgo 1 (texto): dice 'mejoró', pero el sistema calculó otra cosa",
+      ],
+    })
+    const persona = await entrar('eva', contrasena, '/narrativas/5')
+    await screen.findByRole('heading', { name: 'Reporte ejecutivo de Recursos Humanos' })
+    expect(screen.getByText(/3 intentos/)).toBeInTheDocument()
+    await persona.click(screen.getByText('Lo que el sistema rechazó: 2 respuestas del modelo'))
+    const lista = screen.getByRole('list', { name: 'Respuestas rechazadas' })
+    expect(lista).toHaveTextContent('Ronda 1: Intento 1')
+    expect(lista).toHaveTextContent("atribuye causalidad ('porque')")
+    expect(lista).toHaveTextContent('resumen: no incluye ninguna cifra')
+    expect(lista).toHaveTextContent("dice 'mejoró', pero el sistema calculó otra cosa")
+    expect(screen.getByRole('button', { name: 'Aprobar y firmar' })).toBeInTheDocument()
+  })
+
+  it('sin rechazos no aparece el apartado', async () => {
+    const { contrasena } = instalarApiFalsa()
+    await entrar('eva', contrasena, '/narrativas/5')
+    await screen.findByRole('heading', { name: 'Reporte ejecutivo de Recursos Humanos' })
+    expect(screen.queryByText(/Lo que el sistema rechazó/)).not.toBeInTheDocument()
+  })
+
   it('la Responsable designa a su suplente mientras no está', async () => {
     const { contrasena, estado } = instalarApiFalsa()
     const persona = await entrar('eva', contrasena, '/configuracion')
@@ -711,6 +737,22 @@ describe('carga de datos (RF-01)', () => {
     // cada tarjeta muestra como quedo su ultima importacion
     await waitFor(() => expect(screen.getByRole('article', { name: 'Plantilla de personal' })).toHaveTextContent('Aplicada'))
     expect(screen.getByRole('article', { name: 'Productividad' })).toHaveTextContent('Sin importar')
+  })
+
+  it('al aplicar la ultima fuente del mes el aviso de mes pendiente se actualiza', async () => {
+    const { contrasena, estado } = instalarApiFalsa()
+    const persona = await entrar('ana', contrasena, '/carga')
+    expect(await screen.findByText('Mes pendiente: septiembre 2026')).toBeInTheDocument()
+    await persona.upload(
+      await screen.findByLabelText('Importar datos de Plantilla de personal'),
+      new File(['codigo,area'], 'hris-2026-09.xlsx'),
+    )
+    const revision = await screen.findByRole('region', { name: 'Revisión del archivo' })
+    estado.mesPendiente = null // con este archivo septiembre queda completo
+    await persona.click(within(revision).getByRole('button', { name: 'Aplicar a la base de datos' }))
+    expect(await screen.findByText('Sin meses pendientes')).toBeInTheDocument()
+    expect(screen.queryByText('Mes pendiente: septiembre 2026')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Exportar septiembre 2026/ })).not.toBeInTheDocument()
   })
 
   it('un archivo con errores dice fila y motivo y no se puede aplicar', async () => {

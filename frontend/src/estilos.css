@@ -790,7 +790,7 @@ textarea:focus {
 
 @media (max-width: 760px) {
   .configurar-con-telefono {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -1505,6 +1505,43 @@ textarea {
   margin-bottom: 1rem;
 }
 
+/* respuestas del modelo que no pasaron los guardarrailes */
+.rechazos {
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.85rem;
+  border-radius: 10px;
+  border-left: 3px solid var(--estado-atencion);
+  background: var(--fondo-atencion);
+  font-size: 0.88rem;
+}
+
+.rechazos summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.rechazos[open] summary {
+  margin-bottom: 0.4rem;
+}
+
+.rechazos > p {
+  margin: 0 0 0.5rem;
+}
+
+.rechazos ol {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.rechazos ul {
+  margin: 0.2rem 0 0;
+  padding-left: 1.1rem;
+  overflow-wrap: anywhere;
+}
+
 .reporte-resumen {
   font-size: 1.05rem;
   margin-top: 0;
@@ -1953,7 +1990,7 @@ a.cuenta-enlace.active {
 /* ------------------------------------------------------------ pantallas chicas */
 @media (max-width: 900px) {
   .marco {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .lateral {
     position: static;
@@ -1978,7 +2015,7 @@ a.cuenta-enlace.active {
     display: none;
   }
   .pagina-login {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .login-marca {
     position: relative;
@@ -1988,7 +2025,7 @@ a.cuenta-enlace.active {
     padding: 2rem 16px;
   }
   .login-seguridad {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -2013,7 +2050,7 @@ a.cuenta-enlace.active {
     gap: 0.35rem;
   }
   .aviso {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 0.35rem;
   }
 }

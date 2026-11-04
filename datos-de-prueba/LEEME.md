@@ -24,7 +24,7 @@ El mes completo, como lo exportaría cada sistema. **Súbelos en este orden**, a
 | 5 | `5-ambiente-2026-09.xlsx` | Encuesta de ambiente laboral | Validado: 1,108 respuestas anónimas. |
 | 6 | `6-productividad-2026-09.xlsx` | Productividad | Validado: 6 áreas. |
 
-Con los seis aplicados, septiembre aparece en el **Tablero** y ya se puede generar su reporte. El aviso de "Mes pendiente" desaparece, porque octubre todavía no termina.
+Con los seis aplicados, septiembre aparece en el **Tablero** y ya se puede generar su reporte.
 
 **Prueba extra:** sube el 3 (Metas) **antes** que el 1. Las altas de septiembre salen con error ("carga primero la plantilla de personal") porque esos empleados aún no existen.
 

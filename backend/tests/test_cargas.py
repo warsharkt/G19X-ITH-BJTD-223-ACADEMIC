@@ -5,6 +5,7 @@ vuelven a generar los datos sinteticos (scripts/seed.py) para que las demas
 pruebas encuentren lo de siempre.
 """
 import io
+from datetime import date
 
 import pandas as pd
 import pytest
@@ -13,7 +14,8 @@ from sqlalchemy import text
 
 from app import cargas
 from app.database import engine
-from app.main import _cache, app
+from app.main import app
+from app.rutas.comun import olvidar_kpis
 from app.seguridad import Usuario, usuario_actual
 
 
@@ -29,13 +31,15 @@ def datos_originales():
     cargas.asegurar_tabla()
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM cargas WHERE id > :u"), {"u": ultima})
-    _cache["df"] = None
+    olvidar_kpis()
 
 
 @pytest.fixture(autouse=True)
 def datos_de_prueba(monkeypatch):
     # Los archivos del mes de ejemplo solo existen con datos sinteticos
     monkeypatch.setenv("MODO_DATOS", "sinteticos")
+    # Fecha fija: lo que es "mes en curso" no debe depender del dia en que corre
+    monkeypatch.setattr(cargas, "_hoy", lambda: date(2026, 10, 15))
 
 
 @pytest.fixture()

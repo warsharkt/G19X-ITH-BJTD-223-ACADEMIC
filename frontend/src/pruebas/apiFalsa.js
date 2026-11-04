@@ -73,6 +73,8 @@ export const NARRATIVA = {
 
 // Revisiones hechas durante la prueba: id -> campos de revision
 let revisiones = {}
+// Respuestas del modelo que los guardarrailes rechazaron (advertencias de la narrativa)
+let rechazos = []
 
 const RESPONSABLE = { usuario: 'eva', nombre: 'Eva Ruiz', cargo: 'Responsable de RRHH' }
 
@@ -82,7 +84,7 @@ function trabajo(id, estado, extra = {}) {
     terminada_en: estado === 'en_proceso' ? null : '2026-10-03T18:00:00Z', proveedor: 'ollama',
     modelo: 'qwen3:8b', version_prompt: 'v5', rondas: 1, error: null, detalle_error: null,
     solicitada_por: 'ana', revision: 'pendiente', revisada_por: null, revisada_en: null,
-    comentario_revision: null, nota_rrhh: null, narrativa: estado === 'lista' ? NARRATIVA : null,
+    comentario_revision: null, nota_rrhh: null, narrativa: estado === 'lista' ? { ...NARRATIVA, intentos: rechazos.length + 1, advertencias: rechazos } : null,
     firma: estado === 'error' ? null : RESPONSABLE, ...extra, ...revisiones[id],
   }
   return t
@@ -226,7 +228,9 @@ function cargasFalsas(usuario, pathname, metodo, cuerpo, estado, datosReales) {
   if (pathname === '/cargas/fuentes')
     return respuesta(200, {
       fuentes: FUENTES_DATOS,
-      ejemplos: { mes: '2026-09', nombre_mes: 'septiembre 2026', descargables: !datosReales },
+      ejemplos: estado.mesPendiente
+        ? { mes: estado.mesPendiente, nombre_mes: 'septiembre 2026', descargables: !datosReales }
+        : { mes: null, nombre_mes: null, descargables: !datosReales },
     })
   if (pathname === '/cargas' && metodo === 'GET') return respuesta(200, estado.cargas)
   const aplicar = pathname.match(/^\/cargas\/(\d+)\/(aplicar|descartar)$/)
@@ -267,13 +271,14 @@ function respuesta(estado, cuerpo) {
 // consulta la narrativa nueva antes de que pase de en_proceso a lista.
 // `opciones.demo`: modo demostracion activo (el telefono simulado da el codigo).
 // faltantes: { 'AAAA-MM': { fuentes, sin_actualizar } } para simular un mes a medio cargar
-export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = false, demo = false, datosReales = false, faltantes = {} } = {}) {
+export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = false, demo = false, datosReales = false, faltantes = {}, advertencias = [] } = {}) {
   const estado = {
     tokenValido: null, consultas: 0, solicitudes: [], exportaciones: [], pedidos: [], suplencia: null,
     pendientes: Object.fromEntries(Object.values(USUARIOS).map((u) => [u.usuario, u.pendiente ?? null])),
     contrasenasCambiadas: [],
     subidas: [],
     cargas: [],
+    mesPendiente: '2026-09', // null: ya estan cargados todos los meses cerrados
     cuentas: cuentasIniciales(),
     bitacora: [],
     avisos: avisosIniciales(),
@@ -285,6 +290,7 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
     },
   }
   revisiones = {}
+  rechazos = advertencias
   const tokens = Object.fromEntries(Object.keys(USUARIOS).map((u) => [`token-${u}`, USUARIOS[u]]))
 
   const fetchFalso = vi.fn(async (url, opciones = {}) => {

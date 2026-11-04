@@ -239,7 +239,9 @@ function RevisionCarga({ carga, fuente, alCambiar }) {
 // Carga de datos (RF-01): lo que exporta cada sistema de RRHH entra al motor
 // analitico solo si pasa todas las validaciones. Solo RRHH.
 export default function CargaDatos() {
-  const catalogo = useConsulta(() => api.fuentesDeDatos(), [])
+  // aplicadas: al aplicar un archivo puede cambiar el mes pendiente
+  const [aplicadas, setAplicadas] = useState(0)
+  const catalogo = useConsulta(() => api.fuentesDeDatos(), [aplicadas])
   const [version, setVersion] = useState(0)
   const historial = useConsulta(() => api.cargas(), [version])
   const [revision, setRevision] = useState(null)
@@ -334,6 +336,7 @@ export default function CargaDatos() {
             alCambiar={(c) => {
               setRevision(c)
               setVersion((v) => v + 1)
+              if (c.estado === 'aplicada') setAplicadas((n) => n + 1)
             }}
           />
         )}

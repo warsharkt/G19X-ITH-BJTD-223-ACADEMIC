@@ -18,9 +18,11 @@ Uso (desde la carpeta backend, con el entorno virtual activo):
     python -m scripts.evaluar_narrativa --aleatorio 15         # 15 casos al azar (semilla fija)
     python -m scripts.evaluar_narrativa --casos "Operaciones:2026-04,Ventas:2026-06"
     python -m scripts.evaluar_narrativa --salida reportes/mi_evaluacion.csv
+    python -m scripts.evaluar_narrativa --narrativas reportes/textos.jsonl   # guarda tambien los textos
 """
 import argparse
 import csv
+import json
 import random
 import re
 import time
@@ -104,7 +106,8 @@ def posibles_inconsistencias(narrativa: dict) -> list[str]:
     return avisos
 
 
-def evaluar_uno(area_id: int, area: str, periodo: str, proveedor, df) -> dict:
+def evaluar_uno(area_id: int, area: str, periodo: str, proveedor, df) -> tuple[dict, dict | None]:
+    """Fila del CSV y la narrativa aceptada (None si el modelo no logro una valida)."""
     mes = pd.Timestamp(periodo + "-01")
     hechos = construir_hechos(df, mes, area_id)
     c = conteo_estados(hechos)
@@ -114,6 +117,7 @@ def evaluar_uno(area_id: int, area: str, periodo: str, proveedor, df) -> dict:
         "mes_estable": es_mes_estable(hechos),
     }
     inicio = time.perf_counter()
+    n = None
     try:
         n = generar_narrativa(mes, area_id, proveedor=proveedor, df=df)
     except NarrativaNoGenerada as exc:
@@ -128,7 +132,7 @@ def evaluar_uno(area_id: int, area: str, periodo: str, proveedor, df) -> dict:
             posibles_inconsistencias=" | ".join(posibles_inconsistencias(n)),
         )
     fila["segundos"] = round(time.perf_counter() - inicio, 1)
-    return fila
+    return fila, n
 
 
 def imprimir_resumen(filas: list[dict]):
@@ -172,6 +176,7 @@ def main():
     ap.add_argument("--casos", help='ej. "Operaciones:2026-04,Ventas:2026-06" (por defecto, una muestra curada de 12)')
     ap.add_argument("--aleatorio", type=int, metavar="N", help="N casos al azar (semilla fija) en vez de la muestra curada")
     ap.add_argument("--salida", help="ruta del CSV (por defecto: reportes/evaluacion_AAAAMMDD_HHMM.csv)")
+    ap.add_argument("--narrativas", help="ruta de un .jsonl donde guardar cada texto aceptado y lo rechazado")
     args = ap.parse_args()
 
     try:
@@ -190,13 +195,14 @@ def main():
     print("Con Ollama en CPU cada caso puede tardar varios minutos. Progreso:\n")
 
     filas = []
+    textos = open(args.narrativas, "w", encoding="utf-8") if args.narrativas else None
     with open(salida, "w", newline="", encoding="utf-8") as f:
         escritor = csv.DictWriter(f, fieldnames=COLUMNAS)
         escritor.writeheader()
         for i, (area, periodo) in enumerate(casos, 1):
             print(f"[{i}/{len(casos)}] {area} {periodo}...", end=" ", flush=True)
             try:
-                fila = evaluar_uno(int(areas[area]), area, periodo, proveedor, df)
+                fila, n = evaluar_uno(int(areas[area]), area, periodo, proveedor, df)
             except Exception as exc:
                 print(f"ERROR: {exc}")
                 fila = {c: "" for c in COLUMNAS}
@@ -208,10 +214,21 @@ def main():
             else:
                 estado = "FALLO" if fila["resultado"] != "ok" else f"IA ({fila['intentos']} intento(s))"
                 print(f"{estado} en {fila['segundos']}s")
+                if textos:
+                    texto = {k: n[k] for k in ("resumen", "hallazgos", "recomendaciones")} if n else None
+                    textos.write(json.dumps({
+                        "area": area, "periodo": periodo, "resultado": fila["resultado"],
+                        "intentos": fila["intentos"], "segundos": fila["segundos"],
+                        # con fallo no hay narrativa: queda el detalle de todos los intentos
+                        "rechazos": n["advertencias"] if n else fila["detalle"], "narrativa": texto,
+                    }, ensure_ascii=False) + "\n")
+                    textos.flush()
             filas.append(fila)
             escritor.writerow(fila)
             f.flush()  # progreso guardado aunque se interrumpa a la mitad
 
+    if textos:
+        textos.close()
     imprimir_resumen(filas)
     print(f"\nCSV guardado en: {salida}")
 

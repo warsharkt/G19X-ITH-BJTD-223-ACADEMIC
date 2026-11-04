@@ -8,6 +8,7 @@ SUPABASE = "postgresql://postgres.abcd:clave@aws-0-us-east-1.pooler.supabase.com
 
 def test_sin_database_url_usa_el_postgresql_local(monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("DB_HOST", raising=False)  # dentro de Docker vale "db"
     url = _url_desde_entorno()
     assert url.drivername == "postgresql+psycopg"
     assert url.host in ("localhost", "127.0.0.1")

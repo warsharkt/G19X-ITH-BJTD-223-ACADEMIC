@@ -28,7 +28,7 @@ import pandas as pd
 from app.guardrails import cifras_de, cifras_permitidas, validar_narrativa
 from app.kpis import CORPORATIVO, INDICADORES_SOLO_VARIACION_ABSOLUTA, calcular_kpis
 
-VERSION_PROMPT = "v5"
+VERSION_PROMPT = "v6"  # v6: la regla 8 nombra "porque", "por eso" y "a raíz de"
 INTENTOS = int(os.getenv("LLM_INTENTOS", "3"))
 
 MESES_ES = [
@@ -139,7 +139,7 @@ REGLAS OBLIGATORIAS
 5. Para hablar de umbrales usa solo la frase de "situacion" (por ejemplo "cruzó el umbral crítico"). No compares números con umbrales ni uses "supera" o "por debajo del umbral".
 6. El campo "cambio" ya dice entre paréntesis si el indicador mejoró o empeoró. Úsalo; no lo deduzcas del signo del número.
 7. En el campo "hechos" escribe SOLO ids de la lista (por ejemplo ["H01", "H02"]), nunca frases.
-8. No afirmes causas: están prohibidos "causó", "provocó", "debido a", "se debe a", "gracias a". Si el sistema reporta una coincidencia, di solo que "coinciden" o "se observan juntos", nunca que uno explique al otro.
+8. No afirmes causas: están prohibidos "causó", "provocó", "debido a", "se debe a", "gracias a", "porque", "por eso", "a raíz de". Si el sistema reporta una coincidencia, di solo que "coinciden" o "se observan juntos", nunca que uno explique al otro.
 9. No menciones la confianza de los datos: el sistema la muestra por separado.
 10. El resumen debe decir cuántos indicadores están en rojo y en amarillo, y nombrar los más graves con su valor.
 11. Cada hecho en rojo debe tener al menos una recomendación. Cada recomendación parte de la "accion_base" del hecho que cita y habla solo de ese indicador. Son sugerencias para valoración de RRHH: nunca propongas despidos, sanciones ni acciones sobre personas concretas.

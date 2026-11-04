@@ -31,7 +31,9 @@ from app.llm import (
     esquema_estricto,
     obtener_proveedor,
 )
-from app.main import app, kpis_df, proveedor_configurado
+from app.main import app
+from app.rutas.comun import kpis_df
+from app.rutas.narrativas import proveedor_configurado
 from app.narrativa import (
     ESQUEMA_NARRATIVA,
     INTENTOS,
@@ -175,7 +177,10 @@ def test_extraer_numeros():
     assert extraer_numeros("fue 4.1 %") == [4.1]
     assert extraer_numeros("fue 4,1 puntos") == [4.1]
     assert extraer_numeros("costó 13,126 MXN") == [13126.0]
-    assert extraer_numeros("H01 y H12 en abril de 2026, periodo 2026-04") == []
+    assert extraer_numeros("H01 y H12 en abril de 2026, periodo 2026-04", {2026}) == []
+    # solo se ignoran los anios del reporte: cualquier otro 20xx es una cifra
+    assert extraer_numeros("costó 2031 MXN", {2025, 2026}) == [2031.0]
+    assert extraer_numeros("en abril de 2026") == [2026.0]
 
 
 def buenos(hechos):
@@ -217,6 +222,10 @@ def test_rechaza_cifra_de_otro_hecho_no_citado(caso, visibles):
         "Esto se debe a la falta de liderazgo.",
         "El resultado se dio gracias a la capacitación.",
         "Provocó una caída en la productividad.",
+        "La rotación subió y por eso cayó la productividad.",
+        "La rotación subió porque hubo más carga de trabajo.",
+        "A raíz de la reorganización, la rotación subió.",
+        "El ausentismo derivado de la reorganización subió.",
     ],
 )
 def test_rechaza_causalidad(caso, visibles, frase):
@@ -338,6 +347,47 @@ def test_exige_una_recomendacion_por_cada_hecho_en_rojo(caso, visibles):
     ]
     errores = validar_narrativa(r, visibles, cifras_de(*conteo_estados(hechos).values()))
     assert any("Ninguna recomendacion cubre" in e and rojo["id"] in e for e in errores)
+
+
+def test_rechaza_cifra_disfrazada_de_anio(caso, visibles):
+    """Antes cualquier 20xx se tomaba por un anio y no se revisaba."""
+    _, _, hechos = caso
+    valor = visibles[0]["valor_texto"]
+    cifras = cifras_de(*conteo_estados(hechos).values())
+    r = json.loads(con_cambio(hechos, texto=f"Cerró en {valor} y costó 2031 MXN."))
+    assert any("cifras que no estan" in e and "2031" in e for e in validar_narrativa(r, visibles, cifras))
+    # el anio del reporte y el anterior (comparacion anual) si se pueden mencionar
+    r = json.loads(con_cambio(hechos, texto=f"En abril de 2026 cerró en {valor}, igual que en 2025."))
+    assert validar_narrativa(r, visibles, cifras) == []
+
+
+def _hecho_con_evolucion(visibles, evolucion):
+    return next(h for h in visibles if h["evolucion_mes_ant"] == evolucion and h["evolucion_anio_ant"] != (
+        "mejoró" if evolucion == "empeoró" else "empeoró"))
+
+
+def test_rechaza_mejoro_cuando_el_sistema_calculo_que_empeoro(caso, visibles):
+    _, _, hechos = caso
+    h = _hecho_con_evolucion(visibles, "empeoró")
+    cifras = cifras_de(*conteo_estados(hechos).values())
+    r = json.loads(con_cambio(hechos, titulo="Mejoró el indicador", texto=f"{h['nombre']} mejoró: quedó en {h['valor_texto']}.",
+                              hechos=[h["id"]]))
+    errores = validar_narrativa(r, visibles, cifras)
+    assert any("dice 'mejoró'" in e and h["id"] in e for e in errores), errores
+    assert any("hallazgo 1 (titulo): dice 'Mejoró'" in e for e in errores)
+    # lo que si calculo el sistema pasa, y la negacion no cuenta como afirmacion
+    r = json.loads(con_cambio(hechos, texto=f"{h['nombre']} empeoró y no mejoró: quedó en {h['valor_texto']}.",
+                              hechos=[h["id"]]))
+    assert not any("dice '" in e for e in validar_narrativa(r, visibles, cifras))
+
+
+def test_rechaza_empeoro_si_ningun_hecho_citado_empeoro(caso, visibles):
+    _, _, hechos = caso
+    h = dict(_hecho_con_evolucion(visibles, "empeoró"), evolucion_mes_ant="mejoró", evolucion_anio_ant=None)
+    otros = [x if x["id"] != h["id"] else h for x in visibles]
+    r = json.loads(con_cambio(hechos, texto=f"{h['nombre']} se deterioró: quedó en {h['valor_texto']}.", hechos=[h["id"]]))
+    errores = validar_narrativa(r, otros, set())
+    assert any("dice 'deterioró'" in e and "mejoró frente al mes anterior" in e for e in errores), errores
 
 
 def test_se_deben_como_obligacion_no_es_causalidad_pero_se_debe_a_si(caso, visibles):

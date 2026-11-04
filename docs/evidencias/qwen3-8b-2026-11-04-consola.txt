@@ -1,0 +1,40 @@
+ollama / qwen3:8b  |  Casos: 12  |  Guardando en: ..\docs\evidencias\qwen3-8b-2026-11-04.csv
+Con Ollama en CPU cada caso puede tardar varios minutos. Progreso:
+
+[1/12] Corporativo 2026-08... IA (1 intento(s)) en 386.8s
+[2/12] Corporativo 2026-03... IA (1 intento(s)) en 285.7s
+[3/12] Operaciones 2026-04... IA (1 intento(s)) en 256.3s
+[4/12] Operaciones 2026-02... IA (1 intento(s)) en 177.6s
+[5/12] Operaciones 2026-07... IA (1 intento(s)) en 149.8s
+[6/12] Ventas 2026-06... IA (1 intento(s)) en 204.5s
+[7/12] Transporte 2026-05... IA (1 intento(s)) en 144.4s
+[8/12] Finanzas 2026-01... IA (1 intento(s)) en 139.6s
+[9/12] Almacén 2026-06... IA (2 intento(s)) en 288.2s
+[10/12] Jurídico 2026-08... IA (1 intento(s)) en 63.5s
+[11/12] Ventas 2024-10... IA (1 intento(s)) en 146.1s
+[12/12] Finanzas 2025-04... IA (1 intento(s)) en 129.6s
+
+======================================================================
+RESUMEN (12 casos) - ollama / qwen3:8b
+======================================================================
+  Acerto a la primera:         11 (92%)
+  Acerto tras corregir:         1 (8%)
+  FALLO (sin narrativa):        0 (0%)
+  Con posible inconsistencia:   1 (8%)  <- heuristica, revisar a mano
+  Tiempo promedio por caso:   197.7 s
+
+area          periodo    rojo ambar vigilar   resultado                     seg
+Corporativo   2026-08       0     0       5   IA (a la primera)           386.8
+Corporativo   2026-03       1     2       4   IA (a la primera)           285.7
+Operaciones   2026-04       2     4       1   IA (a la primera)           256.3
+Operaciones   2026-02       1     0       3   IA (a la primera)           177.6
+Operaciones   2026-07       0     1       3   IA (a la primera)           149.8
+Ventas        2026-06       0     3       3   IA (a la primera)           204.5 !
+Transporte    2026-05       0     3       0   IA (a la primera)           144.4
+Finanzas      2026-01       0     2       1   IA (a la primera)           139.6
+Almacén       2026-06       0     0       3   IA (corrigio 1x)            288.2
+Jurídico      2026-08       0     0       0   IA (a la primera) estable    63.5
+Ventas        2024-10       0     0       0   IA (a la primera) estable   146.1
+Finanzas      2025-04       0     0       0   IA (a la primera) estable   129.6
+
+CSV guardado en: ..\docs\evidencias\qwen3-8b-2026-11-04.csv

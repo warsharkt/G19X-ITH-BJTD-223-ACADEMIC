@@ -20,6 +20,7 @@
 - [Desarrollo](#desarrollo): instalación local, pruebas y Supabase
 - [Problemas comunes](#problemas-comunes)
 - [Estructura](#estructura)
+- [Uso de IA en el desarrollo](#uso-de-ia-en-el-desarrollo)
 - [Documentación](#documentación)
 
 ## Qué hace
@@ -105,6 +106,8 @@ En modo desarrollo, `python -m scripts.demo` las crea o las deja como nuevas y t
 
 **Recorrido sugerido** (para cambiar de persona, cierra sesión):
 
+> **Los pasos 2 a 4 necesitan la IA.** El reporte lo redacta siempre un modelo: antes de empezar, abre Ollama con `qwen3:8b` ([Inteligencia artificial](#inteligencia-artificial)) o configura Groq (solo con datos sintéticos). Sin ninguno de los dos, el reporte del paso 2 termina en **error** con el motivo, y en los pasos 3 y 4 no hay nada que firmar ni descargar. Con Ollama en CPU, cada reporte tarda de 2 a 5 minutos; Groq responde en segundos. Los pasos 1 y 5, y la carga de datos del paso 2, funcionan sin IA.
+
 1. Como **Dirección**, en **Reportes**, pide a RRHH el reporte del último mes.
 2. Como la **Analista**, sube en **Carga de datos** los seis archivos del mes pendiente (septiembre de 2026; también están en [`datos-de-prueba/`](datos-de-prueba/LEEME.md)). Después, el aviso del pedido abre el formulario con el área y el mes ya elegidos. Genera el reporte.
 3. Como la **Responsable**, el aviso "listo para tu firma" lleva al reporte. Apruébalo con una Nota de RRHH, o recházalo con motivo.
@@ -166,7 +169,9 @@ La narrativa siempre la redacta un modelo, y se elige en el `.env`:
 
 Los reportes se generan en segundo plano: `POST /narrativas` devuelve un id y `GET /narrativas/{id}` muestra el resultado cuando está listo.
 
-**Revisión antes de distribuir.** Todo reporte nace **pendiente de firma** y dice quién lo firmará. La Responsable de RRHH (o su suplente) lo aprueba, con una Nota de RRHH opcional, o lo rechaza con motivo. Nadie firma lo que pidió, y la decisión queda registrada con usuario, fecha y comentario.
+**Revisión antes de distribuir.** Todo reporte nace **pendiente de firma** y dice quién lo firmará. La Responsable de RRHH (o su suplente) lo aprueba, con una Nota de RRHH opcional, o lo rechaza con motivo. Nadie firma lo que pidió, y la decisión queda registrada con usuario, fecha y comentario. Bajo la portada, el apartado **Lo que el sistema rechazó** le muestra qué respuestas del modelo no pasaron los guardarrailes antes de esta versión y por qué (una cifra que no está en los datos, una causa, un "mejoró" donde el sistema calculó que empeoró…), para que sepa qué se corrigió y no solo cuántos intentos hubo.
+
+**Evaluación con el modelo real.** [`docs/evidencias/`](docs/evidencias/LEEME.md) tiene una corrida completa de `scripts/evaluar_narrativa.py` con Qwen3 8B en Ollama: cuántos casos salieron a la primera, cuántos tras corregir, cuánto tardó cada uno, los textos que se aceptaron y lo que se rechazó.
 
 **Exportar.** Solo los reportes **aprobados** se descargan (`GET /narrativas/{id}/exportar?formato=pdf|pptx`): PDF tamaño carta o PowerPoint 16:9, con resumen, indicadores, hallazgos, alertas, recomendaciones y un anexo con fórmulas, umbrales y fuentes. Se arma con la narrativa tal como se aprobó, sin recalcular nada, y cada descarga queda registrada.
 
@@ -294,15 +299,37 @@ npm run dev
 
 ### Pruebas
 
-```powershell
-cd backend
-python -m pytest -q     # PostgreSQL local; no necesita Ollama, Groq ni internet (el modelo se simula)
+Las del backend no necesitan Ollama, Groq ni internet (el modelo se simula), pero **cambian la base en la que corren**: cargan un mes, vuelven a sembrar los datos de Nordika y crean y borran cuentas. Por eso conviene darles su propia base, `rrhh_pruebas`, en el mismo contenedor: así tu base de trabajo y las cuentas de prueba quedan como estaban. Se niegan a correr si `DATABASE_URL` apunta a una base remota.
 
-cd frontend
-npm test                # simula la API: no necesita el backend ni la base
+**Con Python** (después de la [instalación local](#instalación-local)):
+
+```powershell
+docker compose up -d db
+docker compose exec db sh -c 'createdb -U $POSTGRES_USER rrhh_pruebas'   # solo la primera vez
+cd backend
+.venv\Scripts\Activate.ps1
+$env:POSTGRES_DB = "rrhh_pruebas"   # solo en esta terminal
+python -m scripts.seed              # la primera vez, o si una corrida se interrumpió a la mitad
+python -m pytest -q
 ```
 
-Las del backend se niegan a correr si `DATABASE_URL` apunta a una base remota, y borran las cuentas de prueba: después corre `python -m scripts.demo`.
+**Solo con Docker**, sin instalar Python: la imagen de la API no lleva `backend/tests` (`.dockerignore` lo deja fuera para no meter pruebas en la imagen de producción), así que la carpeta se monta al correrlas. Desde la raíz del proyecto:
+
+```powershell
+docker compose build api            # la imagen con el código actual
+docker compose exec db sh -c 'createdb -U $POSTGRES_USER rrhh_pruebas'   # solo la primera vez
+docker compose run --rm --no-deps -e POSTGRES_DB=rrhh_pruebas api python -m scripts.seed
+docker compose run --rm --no-deps -e POSTGRES_DB=rrhh_pruebas -v "${PWD}/backend/tests:/app/backend/tests:ro" api python -m pytest -q -p no:cacheprovider
+```
+
+Dentro del contenedor se salta una prueba, la del respaldo, porque necesita el comando `docker`. Si corres las pruebas sin `POSTGRES_DB`, usan tu base de trabajo: sus datos vuelven a los de Nordika y se borran las cuentas de prueba. Después corre `python -m scripts.demo`.
+
+Las del frontend simulan la API, así que no necesitan el backend ni la base:
+
+```powershell
+cd frontend
+npm test
+```
 
 **En GitHub** corren solas en cada push a `Main` y en cada pull request (`.github/workflows/pruebas.yml`): el backend contra un PostgreSQL vacío que se llena con `scripts/seed.py`, y el frontend con sus pruebas y la compilación. El resultado aparece en **Actions** y junto a cada commit.
 
@@ -327,7 +354,8 @@ Para volver a la base local, comenta `DATABASE_URL`. El plan gratuito se pausa t
 | http://localhost:8080 no abre | Revisa con `docker compose ps` que los tres servicios digan `Up`; si no, mira `docker compose logs api`. |
 | El navegador dice que la conexión no es privada | Es el certificado autofirmado. Pon el de la empresa en `certs/` o pide a TI que instale `certs/talentia.crt` como confiable. |
 | `rrhh_web` se reinicia y el log dice "lo dejaria sin cifrar" | Abriste el tablero a la red con `WEB_HTTPS=no`. Quita esa línea (o pon `auto`). |
-| Una cuenta de prueba dice "Usuario o contraseña incorrectos" | Revisa que el `.env` tenga `MODO_DATOS=sinteticos`, `MODO_DEMO=si` y `DEMO_CONTRASENA`, y corre `docker compose up -d` (o `python -m scripts.demo`). El motivo aparece en `docker compose logs api`. Después de `pytest` también hay que correr `python -m scripts.demo`. |
+| Una cuenta de prueba dice "Usuario o contraseña incorrectos" | Revisa que el `.env` tenga `MODO_DATOS=sinteticos`, `MODO_DEMO=si` y `DEMO_CONTRASENA`, y corre `docker compose up -d` (o `python -m scripts.demo`). El motivo aparece en `docker compose logs api`. Si corriste `pytest` sin `POSTGRES_DB=rrhh_pruebas`, también hay que correr `python -m scripts.demo`. |
+| `pytest` dice que no hay datos | Siembra la base de pruebas: `python -m scripts.seed` con `POSTGRES_DB=rrhh_pruebas` ([Pruebas](#pruebas)). |
 | "No se pudo leer la verificación en dos pasos de tu cuenta" | Cambió o se perdió la llave del MFA (`MFA_LLAVE` o `llaves/mfa.key`). Vuelve a poner la anterior, entra con un código de respaldo o pide a TI que reinicie la verificación. |
 | El reporte queda en **error** porque el modelo no está disponible | Abre Ollama y corre `ollama pull qwen3:8b` (o usa Groq con datos sintéticos) y vuelve a solicitarlo. |
 | `/health` o `pytest` no se conectan a PostgreSQL | Corre `docker compose up -d db` y revisa con `docker compose ps` que diga `healthy`. |
@@ -340,7 +368,9 @@ Para volver a la base local, comenta `DATABASE_URL`. El plan gratuito se pausa t
 ```
 backend/
   app/
-    main.py          API (endpoints)
+    main.py          arma la API: arranque, CORS y los routers
+    rutas/           endpoints, un archivo por tema (sesion, kpis, narrativas, cargas,
+                     cuentas, firmas, avisos, configuracion, catalogos, demostracion)
     schemas.py       modelos de entrada y salida de la API
     kpis.py          motor analítico: indicadores, tendencias, semáforo
     narrativa.py     motor de narrativa: hechos, prompt, reintentos
@@ -354,6 +384,7 @@ backend/
     exportar.py      reporte aprobado en PDF y presentación
     cargas.py        carga de archivos: validación y conciliación
     seguridad.py     sesión, cuentas, contraseñas, tokens y permisos por rol
+                     (las dependencias solo_rrhh, solo_responsable, solo_ti, ti_o_rrhh...)
     mfa.py           verificación en dos pasos, secreto cifrado y códigos de respaldo
     demo.py          modo demostración: cuentas de prueba y teléfono simulado
     marca.py         nombre del producto y de la empresa
@@ -376,6 +407,7 @@ frontend/
 db/                  esquema y tablas (SQL)
 datos-de-prueba/     archivos para probar Carga de datos (ver su LEEME.md)
 docs/GUIA.md         guía de funcionamiento para quien usa el sistema
+docs/evidencias/     corridas de evaluación con el modelo real (Qwen3 8B)
 docker-compose.yml   base de datos, API y tablero
 .env.example         configuración de ejemplo, sin secretos
 .github/workflows/   pruebas automáticas en GitHub
@@ -383,8 +415,34 @@ docker-compose.yml   base de datos, API y tablero
 
 Se crean en cada instalación y no se suben a GitHub: `.env`, `llaves/`, `certs/` y `respaldos/`.
 
+## Uso de IA en el desarrollo
+
+Este proyecto se programó con un asistente de IA. Esta sección dice qué hizo la herramienta y qué hice yo, para que se pueda evaluar el trabajo propio. No hay que confundirla con la IA del producto (Ollama con Qwen3, o Groq), que redacta los reportes.
+
+**Herramienta:** [Claude Code](https://claude.com/claude-code), el asistente de programación de Anthropic (modelo Claude Opus), en la terminal y sobre este repositorio. Los commits en los que participó llevan la línea `Co-Authored-By: Claude` (27 de los primeros 33).
+
+| Parte | Lo que hizo Claude Code | Lo que hice yo |
+|---|---|---|
+| Requerimientos y alcance | Comentarios y preguntas sobre huecos | Definí el problema, los requerimientos (PRD) y el alcance del MVP, que son documentos internos y no están en el repositorio, y el orden de los pasos |
+| Decisiones de diseño | Propuso opciones cuando había más de un camino | Las elegí antes de que se programaran (ver abajo) |
+| Código del backend y del tablero | Escribió la mayor parte: API, indicadores, motor de narrativa y guardarrailes, seguridad y MFA, carga de datos, exportación, tablero en React, scripts, Docker y GitHub Actions | Revisé lo que hacía, pedí cambios y aprobé cada commit y cada push |
+| Pruebas | Escribió las pruebas (pytest y Vitest) y las corrió antes de cada commit | Pedí qué comprobar y revisé los resultados |
+| Documentación | Redactó los borradores del README, la guía y los LEEME | Los revisé y corregí |
+| Datos | Generó los datos ficticios de Nordika (`scripts/seed.py`) | Definí la empresa ficticia y los escenarios que debían contener. Nunca se usaron datos de personas reales |
+
+**Decisiones que tomé yo**, entre otras:
+
+- Que fuera una demostración de venta completa: la empresa ficticia Nordika Logística, el nombre Talentia Insights y el teléfono simulado, para que cualquiera pudiera probar la seguridad sin celular.
+- Quien prepara no firma: la Analista carga y genera, la Responsable firma, con suplente; solo la Responsable cambia los umbrales.
+- Verificación en dos pasos obligatoria para Dirección, TI y RRHH, con códigos de respaldo; solo TI administra cuentas, y estas se desactivan, no se borran.
+- IA local por defecto y Groq solo con datos sintéticos; el correo de avisos nunca lleva datos; la programación mensual nace apagada.
+- Que el PRD sea un documento interno y no se publique.
+
+**Revisión del código (noviembre de 2026).** Otra persona revisó el proyecto y encontró, entre otras cosas, una prueba que dependía de la fecha, huecos en los guardarrailes (causas con "porque" o "por eso", un "mejoró" cuando el sistema calculó "empeoró", y cifras como "2031" tomadas por años), un desbordamiento del tablero en celular y un `main.py` demasiado grande. Claude Code hizo los arreglos y corrió la evaluación con Qwen3 real que está en [`docs/evidencias/`](docs/evidencias/LEEME.md); yo decidí qué arreglar y reviso los cambios antes de subirlos.
+
 ## Documentación
 
 - [Guía de funcionamiento](docs/GUIA.md): pantallas, roles, archivos que se suben, cómo se calcula cada indicador y por qué.
 - [Datos de prueba](datos-de-prueba/LEEME.md): archivos correctos y con errores para probar la carga, y qué debe pasar con cada uno.
+- [Evidencias](docs/evidencias/LEEME.md): evaluación del modelo de IA real, caso por caso.
 - Documentación de la API: http://localhost:8000/docs con el sistema encendido.

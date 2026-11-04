@@ -25,6 +25,42 @@ function Respaldo({ ids, hechos, fuentes }) {
   )
 }
 
+// Respuestas del modelo que los guardarrailes rechazaron antes de aceptar esta.
+// Quien firma debe ver que se corrigio y por que, no solo cuantos intentos hubo.
+const RECHAZO = /^(.*?): la respuesta del modelo no pasó la validación: (.*)$/s
+
+function Rechazos({ advertencias }) {
+  if (!advertencias?.length) return null
+  const intentos = advertencias.map((a) => {
+    const m = a.match(RECHAZO)
+    return m ? { titulo: m[1], motivos: m[2].split(' | ') } : { titulo: null, motivos: [a] }
+  })
+  return (
+    <details className="rechazos">
+      <summary>
+        Lo que el sistema rechazó: {intentos.length === 1 ? '1 respuesta' : `${intentos.length} respuestas`} del
+        modelo
+      </summary>
+      <p className="texto-secundario">
+        Antes de esta versión, el modelo entregó respuestas que no pasaron los controles automáticos (cifras que no
+        están en los datos, causas, alertas sin cubrir…). No se usaron: se le devolvieron los motivos para que corrigiera.
+      </p>
+      <ol aria-label="Respuestas rechazadas">
+        {intentos.map(({ titulo, motivos }, i) => (
+          <li key={i}>
+            {titulo && <strong>{titulo}</strong>}
+            <ul>
+              {motivos.map((m, j) => (
+                <li key={j}>{m}</li>
+              ))}
+            </ul>
+          </li>
+        ))}
+      </ol>
+    </details>
+  )
+}
+
 // Reporte ejecutivo (seccion 10.1 del PRD) a partir de la respuesta de la API.
 // `aviso`: estado de la revision humana, bajo la portada.
 export default function VistaNarrativa({ narrativa: n, aviso }) {
@@ -43,6 +79,7 @@ export default function VistaNarrativa({ narrativa: n, aviso }) {
           Generado el {fechaHora(n.generado_en)} con {n.modelo ?? n.proveedor} ({n.proveedor === 'ollama' ? 'local' : 'nube'}),
           prompt {n.version_prompt}, {n.intentos === 1 ? '1 intento' : `${n.intentos} intentos`}.
         </p>
+        <Rechazos advertencias={n.advertencias} />
       </header>
 
       {aviso}

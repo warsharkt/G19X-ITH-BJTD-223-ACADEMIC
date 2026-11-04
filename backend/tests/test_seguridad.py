@@ -14,7 +14,8 @@ from sqlalchemy import text
 
 from app import seguridad, trabajos
 from app.database import engine
-from app.main import app, proveedor_configurado
+from app.main import app
+from app.rutas.narrativas import proveedor_configurado
 from app.seguridad import (
     INTENTOS_MAXIMOS,
     ErrorDeUsuario,
