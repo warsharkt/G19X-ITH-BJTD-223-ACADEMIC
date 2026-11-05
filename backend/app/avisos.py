@@ -251,14 +251,19 @@ def avisar_pedido(id_pedido: int) -> int:
 
 
 @_tolerante
-def avisar_cuenta(titulo: str) -> int:
-    """Algo cambio en el acceso de RRHH: TI creo, modifico o restablecio una
-    cuenta de RRHH, o cambio quien firma. Le llega a todo RRHH (incluida la
-    persona afectada), para que nadie tome el control de una cuenta que firma
-    sin que se note. TI no recibe avisos."""
+def avisar_cuenta(titulo: str, afectada: dict | None = None) -> int:
+    """Algo cambio en un acceso a datos: TI creo, modifico o restablecio una
+    cuenta de RRHH, Direccion o gerencia, o cambio quien firma. Le llega a
+    todo RRHH y a la persona afectada, para que nadie tome el control de una
+    cuenta sin que se note. TI no recibe avisos."""
     asegurar_tabla()
+    clave = f"cuenta:{uuid.uuid4().hex}"
     with engine.begin() as conn:
-        creados = _crear(conn, _rrhh(conn), "cuenta", CORPORATIVO, titulo, "/usuarios", f"cuenta:{uuid.uuid4().hex}")
+        creados = _crear(conn, _rrhh(conn), "cuenta", CORPORATIVO, titulo, "/usuarios", clave)
+        if afectada and afectada["activo"] and afectada["rol"] in ("direccion", "gerente"):
+            # su aviso va con su area: es la unica que puede ver
+            area = afectada["area_id"] if afectada["rol"] == "gerente" else CORPORATIVO
+            creados += _crear(conn, {afectada["id"]}, "cuenta", area, titulo, "/cuenta", clave)
     if creados:
         programar_envio()
     return creados

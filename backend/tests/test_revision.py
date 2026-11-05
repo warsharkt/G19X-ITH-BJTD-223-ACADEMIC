@@ -125,6 +125,11 @@ def test_la_suplente_firma_mientras_la_responsable_no_esta(client, como, narrati
     hasta = (date.today() + timedelta(days=3)).isoformat()
     datos = {"suplente": usuarios["rrhh3"], "hasta": hasta, "motivo": "Vacaciones"}
     assert client.post("/firmas/suplencia", json=datos, headers=suplente).status_code == 403  # solo la Responsable
+    # sin su propia verificacion en dos pasos no se puede (TI podria conocer su acceso)
+    r = client.post("/firmas/suplencia", json=datos, headers=responsable)
+    assert r.status_code == 422 and "verificación en dos pasos" in r.json()["detail"]
+    with engine.begin() as conn:  # ya entro y la activo (su sesion sigue valida)
+        conn.execute(text("UPDATE usuarios SET mfa_activo = true WHERE usuario = :u"), {"u": usuarios["rrhh3"]})
     r = client.post("/firmas/suplencia", json=datos, headers=responsable)
     assert r.status_code == 200, r.text
     assert r.json()["suplencia"]["suplente"] == usuarios["rrhh3"]
@@ -145,6 +150,8 @@ def test_la_suplente_firma_mientras_la_responsable_no_esta(client, como, narrati
         assert revisar(client, propia, responsable).status_code == 200
     finally:
         assert client.post("/firmas/suplencia/terminar", headers=responsable).status_code == 200
+        with engine.begin() as conn:  # las demas pruebas entran como rrhh3 sin codigo
+            conn.execute(text("UPDATE usuarios SET mfa_activo = false WHERE usuario = :u"), {"u": usuarios["rrhh3"]})
     despues = narrativa(solicitada_por="rrhh")
     assert revisar(client, despues, suplente).status_code == 403  # termino la suplencia
 

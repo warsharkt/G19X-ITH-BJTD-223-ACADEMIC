@@ -107,6 +107,9 @@ function FirmaReportes() {
               ))}
             </select>
           </label>
+          <p className="nota">
+            Solo aparecen las Analistas que ya entraron con su propia contraseña y su verificación en dos pasos.
+          </p>
           <label>
             Hasta
             <input

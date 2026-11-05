@@ -1,9 +1,10 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { SESION_VENCIDA } from '../api'
 import App from '../App'
+import LimiteDeError from '../componentes/LimiteDeError'
 import { SEGUNDOS_ENTRE_CONSULTAS } from '../paginas/DetalleNarrativa'
 import { ProveedorSesion } from '../sesion'
 import { aplicarTema, temaInicial } from '../tema'
@@ -27,6 +28,22 @@ async function entrar(usuario, contrasena, ruta) {
   await persona.click(screen.getByRole('button', { name: 'Entrar' }))
   return persona
 }
+
+// Las pantallas se cargan con lazy() (App.jsx). Sin esto, la primera prueba que
+// abre el tablero compite contra la compilacion de Recharts, que tarda mas que
+// el segundo que espera findBy: fallaba o pasaba segun la cache de Vite.
+beforeAll(async () => {
+  await Promise.all([
+    import('../paginas/Avisos'),
+    import('../paginas/CargaDatos'),
+    import('../paginas/Configuracion'),
+    import('../paginas/Cuenta'),
+    import('../paginas/DetalleNarrativa'),
+    import('../paginas/Narrativas'),
+    import('../paginas/Tablero'),
+    import('../paginas/Usuarios'),
+  ])
+}, 60_000)
 
 describe('inicio de sesión', () => {
   it('muestra el mensaje de la API si la contraseña es incorrecta', async () => {
@@ -845,5 +862,21 @@ describe('auditoría de seguridad', () => {
     await persona.click(screen.getByRole('button', { name: 'Cerrar sesión' }))
     expect(await screen.findByRole('button', { name: 'Entrar' })).toBeInTheDocument()
     await waitFor(() => expect(estado.salidas).toEqual(['dir']))
+  })
+})
+
+describe('pantalla que no se puede abrir', () => {
+  it('muestra un aviso con Recargar en lugar de dejar la página en blanco', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {}) // React registra el error capturado
+    const Rota = () => {
+      throw new TypeError('Failed to fetch dynamically imported module')
+    }
+    render(
+      <LimiteDeError>
+        <Rota />
+      </LimiteDeError>,
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent('No se pudo abrir esta pantalla')
+    expect(screen.getByRole('button', { name: 'Recargar' })).toBeInTheDocument()
   })
 })

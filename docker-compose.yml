@@ -7,11 +7,24 @@
 # Todo se publica solo en este mismo equipo (127.0.0.1): otra computadora de la
 # red no puede entrar. *_ESCUCHA en el .env lo cambia si de verdad hace falta.
 # La IA local (Ollama) corre fuera de Docker, en el mismo equipo.
+#
+# Cada contenedor corre con lo minimo (hallazgo 9 de la segunda auditoria):
+# sin privilegios extra (no-new-privileges), sin capacidades de Linux salvo
+# las que necesita, y con el sistema de archivos de solo lectura (solo escriben
+# en sus volumenes y en memoria, tmpfs).
 services:
   db:
-    image: postgres:16
+    # Fijada por digest; Dependabot propone las actualizaciones
+    image: postgres:16@sha256:5db6dac2ef5dcff512f4f00a009c3c332b9f2f28f24277175bf3e4a3d02ef83a
     container_name: rrhh_db
     restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    # el arranque de PostgreSQL ajusta el dueno y los permisos de sus datos y
+    # luego deja de ser root
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]
+    read_only: true
+    tmpfs: [/var/run/postgresql, /tmp]
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -32,6 +45,12 @@ services:
       dockerfile: backend/Dockerfile
     container_name: rrhh_api
     restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    read_only: true
+    # /home/talentia: pip install --user al correr las pruebas en un contenedor
+    # aparte. Con dueno: sin uid, el tmpfs queda de root y la API no puede escribir.
+    tmpfs: [/tmp, "/home/talentia:uid=10001,gid=10001,mode=700"]
     env_file: .env
     environment:
       # Siempre la base de este compose, aunque el .env traiga otra DATABASE_URL
@@ -57,6 +76,15 @@ services:
     build: ./frontend
     container_name: rrhh_web
     restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    # puertos 80/443, el cambio al usuario nginx y sus carpetas de trabajo.
+    # DAC_OVERRIDE: nginx lee como root la llave de certs/, que en un servidor
+    # Linux es de quien la copio y con permisos 600; sin esto no arranca.
+    cap_add: [CHOWN, DAC_OVERRIDE, SETUID, SETGID, NET_BIND_SERVICE]
+    read_only: true
+    # conf.d: talentia-https.sh escribe ahi la configuracion al arrancar
+    tmpfs: [/var/cache/nginx, /var/run, /tmp, /etc/nginx/conf.d]
     depends_on:
       api:
         condition: service_healthy

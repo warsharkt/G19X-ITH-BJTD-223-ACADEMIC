@@ -159,6 +159,7 @@ def revisar(origen: str = "api", dia: date | None = None) -> dict:
     {"alertas": avisos nuevos, "periodo": "AAAA-MM" o None,
      "narrativas": ids solicitados, "mensaje": texto para la persona}."""
     asegurar_tabla()
+    cargas.caducar()  # cargas validadas que nadie aplico: se descartan y se borran sus filas
     dia = dia or hoy()
     df = calcular_kpis()
     objetivo = periodo_objetivo(df, dia)

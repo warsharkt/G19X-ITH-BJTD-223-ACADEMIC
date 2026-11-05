@@ -97,7 +97,7 @@ Cada persona entra con su propia cuenta y solo ve lo que le corresponde por su p
 > **Por qué se calcula así**
 > - **Mínimo privilegio:** cada quien ve lo indispensable para su trabajo. Un gerente no necesita ver la rotación de otra área, y TI no necesita ver datos de personas para administrar cuentas.
 > - **Quien prepara no firma:** la Analista prepara y la Responsable firma, así que cada reporte pasa por dos personas. Por la misma razón, solo la Responsable cambia los umbrales: un umbral decide qué sale en rojo en los reportes que prepara la Analista.
-> - **Quien administra cuentas no aprueba contenido:** TI no firma reportes ni decide quién los firma. El permiso de firmar lo da una Responsable de RRHH, y solo a una cuenta que ya entró con su propia contraseña y su verificación en dos pasos. Si TI restablece la contraseña o la verificación de alguien que firma, ese permiso se suspende hasta que otra Responsable lo devuelva, y todo lo que TI hace con una cuenta de RRHH le llega como aviso a RRHH. Así una sola persona de TI no puede crearse, ni apropiarse de, una cuenta que firma.
+> - **Quien administra cuentas no aprueba contenido:** TI no firma reportes ni decide quién los firma. El permiso de firmar lo da una Responsable de RRHH, y solo a una cuenta que ya entró con su propia contraseña y su verificación en dos pasos. Si TI restablece la contraseña o la verificación de alguien que firma, ese permiso se suspende hasta que otra Responsable lo devuelva, y todo lo que TI hace con una cuenta de RRHH, Dirección o gerencia le llega como aviso a RRHH y a la persona afectada. Así una sola persona de TI no puede crearse, ni apropiarse de, una cuenta que firma o que ve datos sin que se note.
 > - **El reporte llega firmado:** Dirección y los gerentes ven en qué va un reporte y quién lo firmará, pero su texto solo cuando RRHH ya lo aprobó.
 
 ### Cuentas de prueba
@@ -225,7 +225,7 @@ Si hay errores, la pantalla dice la fila, la columna y el motivo (por ejemplo: *
 
 > **Por qué se calcula así**
 > - **Todo o nada.** Un archivo con un solo error no se puede aplicar. Si entrara a medias, los indicadores mezclarían datos completos con incompletos y el reporte diría algo falso sin que nadie lo notara. Es mejor corregir el archivo y subirlo de nuevo.
-> - **Validar y luego aplicar.** Primero se ve la vista previa y lo que se descarta; nada cambia hasta pulsar *Aplicar*. Así la Analista confirma que subió el archivo correcto del mes correcto.
+> - **Validar y luego aplicar.** Primero se ve la vista previa y lo que se descarta; nada cambia hasta pulsar *Aplicar*. Así la Analista confirma que subió el archivo correcto del mes correcto. Una carga validada que nadie aplica vence a los 7 días: sus filas se borran y hay que subir el archivo de nuevo.
 
 ### Qué se descarta y por qué
 
@@ -425,7 +425,7 @@ Ningún reporte llega a la dirección sin que la Responsable de RRHH lo haya le�
 
 - **Quién prepara:** solo la Analista de RRHH, por iniciativa propia o porque Dirección o un gerente se lo pidió con **Pedir este reporte a RRHH** (el pedido le llega como aviso con el área y el mes ya elegidos). Dirección y los gerentes no generan reportes.
 - **Quién firma:** la Responsable de RRHH, o su suplente mientras no está. Nunca firma quien preparó el reporte. Cada reporte dice desde el principio quién lo firmará.
-- **Suplencia:** desde Configuración, la Responsable designa a una Analista que firma en su lugar hasta una fecha (máximo 90 días, una a la vez). Si la suplente preparó un reporte, lo firma la Responsable.
+- **Suplencia:** desde Configuración, la Responsable designa a una Analista que firma en su lugar hasta una fecha (máximo 90 días, una a la vez). Solo se puede elegir a quien ya entró con su propia contraseña y su verificación en dos pasos. Si la suplente preparó un reporte, lo firma la Responsable.
 - **Aprobar:** con **Aprobar y firmar**, y una Nota de RRHH opcional (máximo 600 caracteres) que se publica firmada y aparte del texto de la IA.
 - **Rechazar:** exige un motivo (al menos 10 caracteres). Si se rechaza, se prepara uno nuevo.
 - La decisión es definitiva y el texto de la IA no se edita. Si dos personas firman a la vez, solo cuenta la primera decisión.

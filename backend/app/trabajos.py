@@ -135,11 +135,13 @@ def _actualizar(id_: int, terminada=False, **campos):
         conn.execute(text(f"UPDATE narrativas SET {', '.join(asignaciones)} WHERE id = :id"), {"id": id_, **campos})
 
 
-def _firma(conn, fila, designados: dict) -> dict | None:
-    """Quien firma: el que ya la reviso, o a quien se le va a mandar."""
+def _firma(conn, fila, designados: dict, nombres: dict | None = None) -> dict | None:
+    """Quien firma: el que ya la reviso, o a quien se le va a mandar.
+    nombres: {usuario: nombre} ya consultados (el historial los trae juntos)."""
     if fila["revisada_por"]:
-        return {"usuario": fila["revisada_por"], "nombre": firmas.nombre_de(conn, fila["revisada_por"]),
-                "cargo": fila["firmada_como"] or firmas.CARGO_RESPONSABLE}
+        revisor = fila["revisada_por"]
+        nombre = nombres.get(revisor, revisor) if nombres is not None else firmas.nombre_de(conn, revisor)
+        return {"usuario": revisor, "nombre": nombre, "cargo": fila["firmada_como"] or firmas.CARGO_RESPONSABLE}
     if fila["estado"] == "error":
         return None
     solicitante = fila["solicitada_por"]
@@ -185,8 +187,14 @@ def listar(
         filas = conn.execute(
             text(f"SELECT {_COLUMNAS} FROM narrativas {donde} ORDER BY id DESC LIMIT :limite"), params
         ).mappings().all()
+        # Una consulta para todos los nombres de quien firmo, no una por fila
+        # (100 reportes eran 101 consultas: segundos con una base remota)
+        revisores = list({f["revisada_por"] for f in filas if f["revisada_por"]})
+        nombres = dict(conn.execute(
+            text("SELECT usuario, nombre FROM usuarios WHERE usuario = ANY(:u)"), {"u": revisores}
+        ).all()) if revisores else {}
         designados = {}
-        return [{**f, "narrativa": None, "firma": _firma(conn, f, designados)} for f in filas]
+        return [{**f, "narrativa": None, "firma": _firma(conn, f, designados, nombres)} for f in filas]
 
 
 # ------------------------------------------------------------------ revision

@@ -1,6 +1,8 @@
 # Tablero de Talentia Insights: se compila con Node y lo sirve nginx, que
 # tambien reenvia /api a la API. Asi el navegador ve una sola direccion.
-FROM node:24-alpine AS compilar
+# Fijada por digest: la etiqueta puede cambiar de contenido sin avisar. Dependabot
+# (.github/dependabot.yml) propone las actualizaciones.
+FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS compilar
 WORKDIR /web
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -9,7 +11,7 @@ COPY . .
 ENV VITE_API_URL=/api
 RUN npm run build
 
-FROM nginx:1.28-alpine
+FROM nginx:1.28-alpine@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236
 # openssl: genera un certificado autofirmado si la empresa no pone el suyo
 RUN apk add --no-cache openssl && rm -f /etc/nginx/conf.d/default.conf
 COPY nginx/comun.conf nginx/http.conf nginx/https.conf nginx/limites.conf nginx/proxy-api.conf /etc/nginx/talentia/

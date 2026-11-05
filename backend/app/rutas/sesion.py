@@ -86,11 +86,12 @@ def yo(u: Usuario = Depends(sesion_actual)):
 
 
 @router.post("/contrasena", response_model=schemas.Token)
-def cambiar_mi_contrasena(cambio: schemas.CambioContrasena, u: Usuario = Depends(sesion_actual)):
+def cambiar_mi_contrasena(request: Request, cambio: schemas.CambioContrasena, u: Usuario = Depends(sesion_actual)):
     """Cambia tu contrasena (obligatorio si era temporal). Cierra tus otras
-    sesiones y devuelve un token nuevo para esta."""
+    sesiones y devuelve un token nuevo para esta. Una contrasena actual
+    equivocada cuenta como intento fallido de inicio de sesion."""
     try:
-        nuevo = seguridad.cambiar_mi_contrasena(u, cambio.actual, cambio.nueva)
+        nuevo = seguridad.cambiar_mi_contrasena(u, cambio.actual, cambio.nueva, _origen(request))
     except ErrorDeUsuario as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except SQLAlchemyError:

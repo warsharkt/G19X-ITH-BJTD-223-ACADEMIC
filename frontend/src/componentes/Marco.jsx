@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { api, AVISOS_CAMBIARON } from '../api'
 import { cargoDe, puedeCargarDatos, puedeVerCuentas, puedeVerDatos, useSesion } from '../sesion'
 import BotonTema from './BotonTema'
 import Icono from './Iconos'
+import LimiteDeError from './LimiteDeError'
 import Marca from './Marca'
 
 export const SEGUNDOS_ENTRE_AVISOS = 60
@@ -58,6 +59,7 @@ const iniciales = (nombre) =>
 // Estructura comun de las paginas con sesion: menu lateral, encabezado y contenido.
 export default function Marco() {
   const { usuario, marca, cerrarSesion } = useSesion()
+  const { pathname } = useLocation()
   const conDatos = puedeVerDatos(usuario)
   return (
     <div className="marco">
@@ -127,7 +129,11 @@ export default function Marco() {
           </div>
         </header>
         <main className="contenido">
-          <Outlet />
+          <LimiteDeError key={pathname}>
+            <Suspense fallback={<p className="cargando">Cargando…</p>}>
+              <Outlet />
+            </Suspense>
+          </LimiteDeError>
         </main>
       </div>
     </div>

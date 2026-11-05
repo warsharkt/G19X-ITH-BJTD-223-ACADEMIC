@@ -432,19 +432,30 @@ def cambiar_contrasena(usuario: str, contrasena: str, por: str = "consola"):
         registrar(conn, usuario, "restablecer_contrasena", por)
 
 
-def cambiar_mi_contrasena(u: Usuario, actual: str, nueva: str) -> Usuario:
+def cambiar_mi_contrasena(u: Usuario, actual: str, nueva: str, origen: str = "local") -> Usuario:
     """La persona cambia su contrasena (obligatorio si era temporal). Cierra sus
-    otras sesiones; devuelve el usuario con la version nueva para darle token."""
+    otras sesiones; devuelve el usuario con la version nueva para darle token.
+
+    Una contrasena actual equivocada cuenta como intento fallido, igual que al
+    entrar: si no, con una sesion robada se podria adivinar la contrasena sin
+    limite y despues entrar desde cualquier equipo."""
     asegurar_tabla()
     validar_contrasena_nueva(nueva, u.usuario)
     if actual == nueva:
         raise ErrorDeUsuario("La contraseña nueva debe ser distinta de la actual")
+    error = None  # se lanza fuera de la transaccion para que el fallo se guarde
     with engine.begin() as conn:
         guardado = conn.execute(
             text("SELECT contrasena_hash FROM usuarios WHERE id = :i FOR UPDATE"), {"i": u.id}
         ).scalar_one()
-        if not verificar_contrasena(actual, guardado):
-            raise ErrorDeUsuario("La contraseña actual no es correcta")
+        if (bloqueo := error_si_bloqueada(conn, u.usuario, origen)) is not None:
+            error = bloqueo
+        elif not verificar_contrasena(actual, guardado):
+            registrar_fallo(conn, u.usuario, origen)
+            error = ErrorDeUsuario("La contraseña actual no es correcta")
+    if error is not None:
+        raise error
+    with engine.begin() as conn:
         conn.execute(
             text(
                 "UPDATE usuarios SET contrasena_hash = :h, debe_cambiar_contrasena = false, "

@@ -1,4 +1,5 @@
 """Lo que comparten varios routers: los KPIs en memoria y el formato de mes."""
+import math
 import time
 
 import pandas as pd
@@ -33,10 +34,45 @@ def olvidar_kpis():
     _cache["df"] = None
 
 
+SERIE = ("periodo", "valor", "n", "suprimido", "estado")
+
+
+def indice_kpis() -> dict:
+    """Los KPIs ya convertidos a JSON e indexados, una vez por calculo: por
+    (area, mes) para el tablero y por (indicador, area) para las graficas.
+    Antes cada peticion filtraba las ~1,500 filas y las convertia de nuevo;
+    con una sola API atendiendo, eso limitaba a unas 70 peticiones/s."""
+    df = kpis_df()
+    indice = _cache.get("indice")
+    if indice is None or indice["df"] is not df:
+        por_mes, por_serie = {}, {}
+        for r in a_registros(df):
+            por_mes.setdefault((r["area_id"], r["periodo"]), []).append(r)
+            por_serie.setdefault((r["indicador"], r["area_id"]), []).append({c: r[c] for c in SERIE})
+        for puntos in por_serie.values():
+            puntos.sort(key=lambda p: p["periodo"])
+        indice = {
+            "df": df, "por_mes": por_mes, "por_serie": por_serie,
+            "areas": set(df["area_id"]), "indicadores": set(df["indicador"]),
+            "periodos": {p.date() for p in df["periodo"].unique()}, "ultimo_mes": df["periodo"].max().date(),
+        }
+        _cache["indice"] = indice
+    return indice
+
+
 def a_registros(df: pd.DataFrame) -> list[dict]:
-    """DataFrame -> lista de dicts JSON-compatible (NaN pasa a null)."""
-    df = df.assign(periodo=df["periodo"].dt.date).astype(object)
-    return df.where(df.notna(), None).to_dict("records")
+    """DataFrame -> lista de dicts JSON-compatible (NaN pasa a null).
+
+    Fila por fila en Python y no con astype(object) + where, que es mucho
+    mas lento en pandas."""
+    registros = df.to_dict("records")
+    for r in registros:
+        for campo, valor in r.items():
+            if isinstance(valor, float) and math.isnan(valor):
+                r[campo] = None
+            elif isinstance(valor, pd.Timestamp):
+                r[campo] = valor.date()
+    return registros
 
 
 def mes(texto: str) -> pd.Timestamp:

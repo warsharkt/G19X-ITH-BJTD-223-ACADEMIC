@@ -148,17 +148,18 @@ Nada de Nordika está fijo en el código: el nombre sale de `EMPRESA_NOMBRE`, y 
 | Medida | Cómo |
 |---|---|
 | Acceso | Rol y área en cada endpoint de la API; Dirección solo ve el consolidado, cada gerente solo su área y TI no ve datos de colaboradores. Dirección y los gerentes leen un reporte solo cuando RRHH ya lo firmó |
-| Firma | El permiso de firmar lo da una Responsable de RRHH, nunca TI. Si TI restablece la contraseña o la verificación de quien firma, el permiso se suspende, y todo lo que TI hace con una cuenta de RRHH le llega como aviso a RRHH |
-| Contraseñas | Mínimo 10 caracteres, guardadas con scrypt. TI genera temporales que la persona cambia al entrar. Tras 5 intentos fallidos se bloquea ese equipo para ese usuario (no la cuenta entera, para que nadie pueda dejar fuera a otra persona). Un usuario inventado se bloquea igual que uno real, así que el bloqueo no revela qué cuentas existen; nginx además limita los intentos por IP |
+| Firma | El permiso de firmar lo da una Responsable de RRHH, nunca TI. Si TI restablece la contraseña o la verificación de quien firma, el permiso se suspende. La suplente también debe haber entrado con su propia contraseña y su verificación. Todo lo que TI hace con una cuenta de RRHH, Dirección o gerencia le llega como aviso a RRHH y a la persona |
+| Contraseñas | Mínimo 10 caracteres, guardadas con scrypt. TI genera temporales que la persona cambia al entrar. Tras 5 intentos fallidos (al entrar o al escribir la contraseña actual en Mi cuenta) se bloquea ese equipo para ese usuario (no la cuenta entera, para que nadie pueda dejar fuera a otra persona). Un usuario inventado se bloquea igual que uno real, así que el bloqueo no revela qué cuentas existen; nginx además limita los intentos por IP |
 | Verificación en dos pasos | Código de 6 dígitos (TOTP) obligatorio para Dirección, TI y RRHH, con 10 códigos de respaldo. El secreto se guarda cifrado (AES-256) con una llave que no está en la base |
-| Datos personales | La carga descarta nombres, CURP, RFC, correos y demás; el sistema solo conoce códigos de empleado |
+| Datos personales | La carga descarta nombres, CURP, RFC, correos y demás; el sistema solo conoce códigos de empleado. Una carga validada que nadie aplica vence a los 7 días y sus filas se borran |
 | IA | Con `MODO_DATOS=reales` solo se permite el modelo local: ningún dato sale del servidor |
 | Red | Por defecto solo acepta conexiones del mismo equipo; abierto a la red, HTTPS se activa solo |
 | Bitácoras | Cuentas, umbrales, cargas, reportes, firmas y descargas: quién, qué, cuándo y desde qué IP. Nunca guardan contraseñas |
-| Navegador | Las respuestas de la API llevan `Cache-Control: no-store`: los datos de RRHH no quedan guardados en un equipo compartido |
+| Navegador | Las respuestas de la API llevan `Cache-Control: no-store`: los datos de RRHH no quedan guardados en un equipo compartido. El tablero no carga nada de otros sitios, ni la fuente |
 | Dependencias | La imagen de la API solo instala lo que usa (`requirements.txt`); las de las pruebas van aparte (`requirements-dev.txt`). Los Excel se leen con `defusedxml` |
 | Sesión | Token en `sessionStorage` de la pestaña, que vence solo; **Cerrar sesión** lo invalida en el servidor. El tablero envía una Content-Security-Policy que solo deja correr su propio código |
-| Base de datos | En Docker, la API se conecta con la cuenta `talentia_api`, sin privilegios de superusuario y con una contraseña nueva en cada arranque (`scripts/arranque.py`) |
+| Base de datos | En Docker, la API se conecta con la cuenta `talentia_api`, sin privilegios de superusuario y con una contraseña nueva en cada arranque (`scripts/arranque.py`). El proceso de la API ya no conserva la contraseña del superusuario |
+| Contenedores | Sin capacidades de Linux salvo las necesarias, sin escalar privilegios y con el sistema de archivos de solo lectura. Imágenes y acciones de GitHub fijadas por digest y SHA; Dependabot propone las actualizaciones |
 
 **Nunca se suben a GitHub** (están en `.gitignore`): el `.env` con contraseñas y llaves, `llaves/` (llave del MFA), `certs/` (certificado HTTPS) y `respaldos/`. Este repositorio no contiene usuarios ni contraseñas: cada instalación pone los suyos en su `.env`. Si alguna vez subes un secreto por error, cámbialo de inmediato; borrarlo del repositorio no basta, porque queda en el historial.
 

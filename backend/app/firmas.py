@@ -111,8 +111,8 @@ def estado(u: Usuario) -> dict:
                 dict(f)
                 for f in conn.execute(
                     text(
-                        "SELECT usuario, nombre FROM usuarios "
-                        "WHERE activo AND rol = 'rrhh' AND NOT firma_reportes ORDER BY nombre"
+                        "SELECT usuario, nombre FROM usuarios WHERE activo AND rol = 'rrhh' AND NOT firma_reportes "
+                        "AND NOT debe_cambiar_contrasena AND mfa_activo ORDER BY nombre"
                     )
                 ).mappings()
             ]
@@ -126,7 +126,11 @@ def estado(u: Usuario) -> dict:
 
 def designar_suplente(titular: Usuario, suplente: str, hasta: date, motivo: str | None) -> dict:
     """La Responsable designa a una Analista que firma en su lugar desde hoy
-    hasta `hasta`. Una sola suplencia a la vez. Queda en la bitacora de cuentas."""
+    hasta `hasta`. Una sola suplencia a la vez. Queda en la bitacora de cuentas.
+
+    Como para dar el permiso de firma (seguridad.cambiar_firma), la suplente
+    ya debe haber entrado con su propia contrasena y su verificacion en dos
+    pasos: una cuenta con la temporal que entrego TI la podria usar TI."""
     if not titular.es_responsable:
         raise ErrorDeUsuario("Solo la Responsable de RRHH designa a su suplente")
     hoy = date.today()
@@ -138,10 +142,16 @@ def designar_suplente(titular: Usuario, suplente: str, hasta: date, motivo: str 
     seguridad.asegurar_tabla()
     with engine.begin() as conn:
         persona = conn.execute(
-            text("SELECT rol, firma_reportes, activo FROM usuarios WHERE usuario = :u"), {"u": suplente}
+            text("SELECT rol, firma_reportes, activo, debe_cambiar_contrasena, mfa_activo FROM usuarios WHERE usuario = :u"),
+            {"u": suplente},
         ).mappings().first()
         if persona is None or not persona["activo"] or persona["rol"] != "rrhh" or persona["firma_reportes"]:
             raise ErrorDeUsuario("La suplente debe ser una Analista de RRHH con cuenta activa")
+        if persona["debe_cambiar_contrasena"] or not persona["mfa_activo"]:
+            raise ErrorDeUsuario(
+                "Esa persona debe entrar primero, cambiar su contraseña temporal y activar su verificación "
+                "en dos pasos: así nadie más conoce su acceso"
+            )
         ya = conn.execute(
             text("SELECT 1 FROM suplencias WHERE cancelada_en IS NULL AND hasta >= :hoy"), {"hoy": hoy}
         ).first()

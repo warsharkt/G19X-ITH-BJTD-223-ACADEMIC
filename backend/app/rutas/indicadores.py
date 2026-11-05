@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app import schemas
-from app.rutas.comun import PATRON_MES, a_registros, kpis_df, mes
+from app.rutas.comun import PATRON_MES, indice_kpis, mes
 from app.seguridad import Usuario, area_por_defecto, con_acceso_a_datos, exigir_acceso_a_datos
 
 router = APIRouter(prefix="/kpis", tags=["KPIs"])
@@ -22,19 +22,17 @@ def kpis(
     """KPIs de un mes y un area, con tendencias y semaforo."""
     area_id = area_por_defecto(u) if area_id is None else area_id
     exigir_acceso_a_datos(u, area_id)
-    df = kpis_df()
-    del_mes = mes(periodo) if periodo else df["periodo"].max()
-    if not (df["periodo"] == del_mes).any():
+    indice = indice_kpis()
+    del_mes = mes(periodo).date() if periodo else indice["ultimo_mes"]
+    if del_mes not in indice["periodos"]:
         raise HTTPException(status_code=404, detail=f"No hay datos para el periodo {periodo}")
-    if area_id not in set(df["area_id"]):
+    if area_id not in indice["areas"]:
         raise HTTPException(status_code=404, detail=f"El area {area_id} no existe")
-    if indicador is not None and indicador not in set(df["indicador"]):
+    if indicador is not None and indicador not in indice["indicadores"]:
         raise HTTPException(status_code=404, detail=f"El indicador '{indicador}' no existe")
 
-    filtro = (df["periodo"] == del_mes) & (df["area_id"] == area_id)
-    if indicador is not None:
-        filtro &= df["indicador"] == indicador
-    return a_registros(df[filtro])
+    filas = indice["por_mes"].get((area_id, del_mes), [])
+    return [f for f in filas if f["indicador"] == indicador] if indicador is not None else filas
 
 
 @router.get("/serie/{indicador}", response_model=list[schemas.PuntoSerie])
@@ -50,16 +48,13 @@ def serie(
     """Serie de tiempo de un indicador (para las graficas del dashboard)."""
     area_id = area_por_defecto(u) if area_id is None else area_id
     exigir_acceso_a_datos(u, area_id)
-    df = kpis_df()
-    if indicador not in set(df["indicador"]):
+    indice = indice_kpis()
+    if indicador not in indice["indicadores"]:
         raise HTTPException(status_code=404, detail=f"El indicador '{indicador}' no existe")
-    if area_id not in set(df["area_id"]):
+    if area_id not in indice["areas"]:
         raise HTTPException(status_code=404, detail=f"El area {area_id} no existe")
 
-    f = df[(df["indicador"] == indicador) & (df["area_id"] == area_id)]
-    if desde:
-        f = f[f["periodo"] >= mes(desde)]
-    if hasta:
-        f = f[f["periodo"] <= mes(hasta)]
-    f = f.sort_values("periodo")[["periodo", "valor", "n", "suprimido", "estado"]]
-    return a_registros(f)
+    puntos = indice["por_serie"].get((indicador, area_id), [])
+    inicio = mes(desde).date() if desde else None
+    fin = mes(hasta).date() if hasta else None
+    return [p for p in puntos if (inicio is None or p["periodo"] >= inicio) and (fin is None or p["periodo"] <= fin)]

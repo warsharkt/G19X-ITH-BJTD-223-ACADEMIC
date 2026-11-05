@@ -1,16 +1,20 @@
+import { lazy } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import Marco from './componentes/Marco'
-import Avisos from './paginas/Avisos'
-import CargaDatos from './paginas/CargaDatos'
-import Configuracion from './paginas/Configuracion'
-import Cuenta from './paginas/Cuenta'
-import DetalleNarrativa from './paginas/DetalleNarrativa'
 import Login from './paginas/Login'
-import Narrativas from './paginas/Narrativas'
 import Pendiente from './paginas/Pendiente'
-import Tablero from './paginas/Tablero'
-import Usuarios from './paginas/Usuarios'
 import { puedeCargarDatos, puedeVerCuentas, puedeVerDatos, useSesion } from './sesion'
+
+// Cada pantalla se descarga al abrirla: el inicio de sesion ya no baja las
+// graficas (Recharts) ni las demas pantallas. Marco muestra "Cargando…" mientras.
+const Avisos = lazy(() => import('./paginas/Avisos'))
+const CargaDatos = lazy(() => import('./paginas/CargaDatos'))
+const Configuracion = lazy(() => import('./paginas/Configuracion'))
+const Cuenta = lazy(() => import('./paginas/Cuenta'))
+const DetalleNarrativa = lazy(() => import('./paginas/DetalleNarrativa'))
+const Narrativas = lazy(() => import('./paginas/Narrativas'))
+const Tablero = lazy(() => import('./paginas/Tablero'))
+const Usuarios = lazy(() => import('./paginas/Usuarios'))
 
 export default function App() {
   const { usuario, cargando } = useSesion()

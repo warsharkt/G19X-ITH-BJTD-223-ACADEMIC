@@ -466,7 +466,7 @@ export default function CargaDatos() {
                       <Estado estado={c.estado} />
                     </td>
                     <td>{c.subida_por}</td>
-                    <td>{c.aplicada_por ?? '—'}</td>
+                    <td>{c.aplicada_por === 'sistema:venció' ? 'Venció sin aplicarse' : (c.aplicada_por ?? '—')}</td>
                     <td className="huella" title={c.sha256}>
                       {c.sha256.slice(0, 10)}…
                     </td>

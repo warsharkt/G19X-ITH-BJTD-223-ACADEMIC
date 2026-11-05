@@ -9,7 +9,7 @@ import os
 import pytest
 from sqlalchemy import text
 
-from app import avisos
+from app import avisos, seguridad
 from app.database import DB_URL, ES_REMOTA, engine
 from app.main import app
 from app.seguridad import Usuario, usuario_actual
@@ -49,10 +49,22 @@ def _base_de_datos_lista():
 @pytest.fixture(scope="session", autouse=True)
 def _sin_bitacora_de_cuentas_de_prueba(_base_de_datos_lista):
     """Las cuentas de prueba (prefijo zz_) se crean por modulo y se borran al
-    final, pero su bitacora no tiene llave foranea: se limpia aqui."""
+    final, pero su bitacora no tiene llave foranea: se limpia aqui. Tambien los
+    intentos fallidos, que van por nombre (incluso de usuarios que no existen):
+    al empezar, para no heredar bloqueos de una corrida anterior. En una base
+    recien sembrada (GitHub Actions) estas tablas aun no existen: las crea
+    asegurar_tabla, como hace la API al arrancar."""
+
+    def limpiar(conn):
+        conn.execute(text(r"DELETE FROM usuarios_cambios WHERE usuario LIKE 'zz\_%' OR hecho_por LIKE 'pruebas\_%'"))
+        conn.execute(text(r"DELETE FROM bloqueos_acceso WHERE usuario LIKE 'zz\_%'"))
+
+    seguridad.asegurar_tabla()
+    with engine.begin() as conn:
+        limpiar(conn)
     yield
     with engine.begin() as conn:
-        conn.execute(text(r"DELETE FROM usuarios_cambios WHERE usuario LIKE 'zz\_%' OR hecho_por LIKE 'pruebas\_%'"))
+        limpiar(conn)
 
 
 # Usuario con el que corren las pruebas que no son de seguridad: RRHH ve todo.

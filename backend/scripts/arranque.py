@@ -116,7 +116,13 @@ def preparar_cuenta_de_la_api() -> dict[str, str]:
 def main():
     sembrar_si_hace_falta()
     preparar_demo()
-    os.environ.update(preparar_cuenta_de_la_api())
+    cuenta_api = preparar_cuenta_de_la_api()
+    os.environ.update(cuenta_api)
+    if cuenta_api:
+        # La API ya no la necesita: si se queda en su entorno, cualquier codigo
+        # que llegue a ejecutarse en la API podria entrar como superusuario.
+        # Los scripts (docker compose exec api ...) la siguen recibiendo del .env.
+        os.environ.pop("POSTGRES_PASSWORD", None)
     if len(os.getenv("JWT_SECRETO", "")) < 32:
         os.environ["JWT_SECRETO"] = secrets.token_urlsafe(48)
         print("JWT_SECRETO no configurado: se genero uno temporal para esta ejecucion.")

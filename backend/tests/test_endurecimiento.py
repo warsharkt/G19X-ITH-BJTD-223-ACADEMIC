@@ -133,8 +133,8 @@ def test_lo_que_ti_hace_con_una_cuenta_de_rrhh_le_llega_a_rrhh(client):
     assert r.status_code == 201
     titulo = f"{PREFIJO}ti (TI) creó la cuenta de RRHH de Nueva RRHH ({PREFIJO}nueva)"
     assert titulo in avisos_de_cuenta("resp") and titulo in avisos_de_cuenta("ana")
-    # una cuenta que no es de RRHH no genera aviso
-    client.post("/usuarios", headers=como(client, "ti"), json={"usuario": PREFIJO + "otro", "nombre": "G", "rol": "direccion"})
+    # una cuenta de TI no ve datos de colaboradores: no genera aviso
+    client.post("/usuarios", headers=como(client, "ti"), json={"usuario": PREFIJO + "otro", "nombre": "G", "rol": "admin_ti"})
     assert not any("otro" in t for t in avisos_de_cuenta("resp"))
 
 
@@ -538,3 +538,138 @@ def test_un_reporte_en_espera_dice_cuantos_van_antes(cuentas):
     assert segundo["antes_en_cola"] == primero["antes_en_cola"] + 1
     listo = trabajos.obtener(_narrativa("aprobada"))
     assert listo["antes_en_cola"] is None
+
+
+# ============================================================================
+# Segunda auditoria (noviembre de 2026)
+# ============================================================================
+
+# ============ 1. la suplente tambien debe tener su propio acceso, no el de TI
+def test_no_se_designa_suplente_a_quien_tiene_la_temporal_de_ti(client, cuentas):
+    with engine.begin() as conn:  # TI la creo: tiene la contrasena temporal que TI conoce
+        conn.execute(text("UPDATE usuarios SET debe_cambiar_contrasena = true WHERE usuario = :u"), {"u": PREFIJO + "ana"})
+    responsable = como(client, "resp")
+    hasta = str(date.today() + timedelta(days=3))
+    assert PREFIJO + "ana" not in [c["usuario"] for c in client.get("/firmas", headers=responsable).json()["candidatas"]]
+    r = client.post("/firmas/suplencia", headers=responsable, json={"suplente": PREFIJO + "ana", "hasta": hasta})
+    assert r.status_code == 422 and "contraseña temporal" in r.json()["detail"]  # antes: 200
+    with engine.begin() as conn:  # ya entro, la cambio y activo su verificacion en dos pasos
+        conn.execute(text("UPDATE usuarios SET debe_cambiar_contrasena = false, mfa_activo = true WHERE usuario = :u"),
+                     {"u": PREFIJO + "ana"})
+    assert PREFIJO + "ana" in [c["usuario"] for c in client.get("/firmas", headers=responsable).json()["candidatas"]]
+    r = client.post("/firmas/suplencia", headers=responsable, json={"suplente": PREFIJO + "ana", "hasta": hasta})
+    assert r.status_code == 200, r.text
+
+
+# ======== 2. la API no conserva la contrasena del superusuario en su entorno
+def test_el_arranque_quita_la_contrasena_del_superusuario_antes_de_la_api(monkeypatch):
+    from scripts import arranque
+
+    monkeypatch.setenv("POSTGRES_PASSWORD", "secreto-del-superusuario")
+    monkeypatch.setattr(arranque, "sembrar_si_hace_falta", lambda: None)
+    monkeypatch.setattr(arranque, "preparar_demo", lambda: None)
+    monkeypatch.setattr(arranque, "preparar_cuenta_de_la_api",
+                        lambda: {"DB_API_USUARIO": "talentia_api", "DB_API_CONTRASENA": "x" * 40})
+    entorno = {}
+    monkeypatch.setattr(arranque.os, "execvp", lambda *a: entorno.update(os.environ))
+    arranque.main()
+    assert "POSTGRES_PASSWORD" not in entorno  # antes: la API la tenia y podia entrar como superusuario
+    assert entorno["DB_API_USUARIO"] == "talentia_api"
+
+
+# ===== 3. adivinar la contrasena actual con una sesion robada tambien bloquea
+def test_la_contrasena_actual_equivocada_cuenta_como_intento_fallido(cuentas):
+    equipo = TestClient(app, client=("10.0.6.1", 5000))
+    sesion = como(equipo, "ger")
+    for i in range(INTENTOS_MAXIMOS):
+        r = equipo.post("/auth/contrasena", headers=sesion, json={"actual": f"intento-{i}-xxxx", "nueva": "Otra-clave-nueva-1"})
+        assert r.status_code == 422
+    r = equipo.post("/auth/contrasena", headers=sesion, json={"actual": CLAVE, "nueva": "Otra-clave-nueva-1"})
+    assert r.status_code == 429  # antes: 200 tras intentos sin limite
+    assert entrar(equipo, "ger").status_code == 429  # y desde ese equipo tampoco entra
+    assert entrar(TestClient(app, client=("10.0.6.2", 5000)), "ger").status_code == 200  # la persona, desde el suyo, si
+
+
+# == 4. lo que TI hace con Direccion o un gerente tambien se avisa (y a la persona)
+def test_si_ti_restablece_a_un_gerente_se_entera_rrhh_y_el_gerente(client, cuentas):
+    r = client.post(f"/usuarios/{cuentas['ids']['ger']}/contrasena", headers=como(client, "ti"))
+    assert r.status_code == 200
+    titulo = f"{PREFIJO}ti (TI) restableció la contraseña de la cuenta de gerencia de Gerente Ventas ({PREFIJO}ger)"
+    assert titulo in avisos_de_cuenta("resp")  # antes: solo se avisaba de cuentas de RRHH
+    assert titulo in avisos_de_cuenta("ger")
+    with engine.connect() as conn:  # al gerente le llega con su area, la unica que puede ver
+        area = conn.execute(text("SELECT a.area_id FROM avisos a JOIN usuarios u ON u.id = a.usuario_id "
+                                 "WHERE u.usuario = :u AND a.tipo = 'cuenta'"), {"u": PREFIJO + "ger"}).scalar()
+    assert area == cuentas["ventas"]
+
+
+# ================================ 6. el historial no consulta una vez por fila
+def test_el_historial_consulta_los_nombres_de_una_vez(client, cuentas):
+    from sqlalchemy import event
+
+    for _ in range(15):
+        id_ = _narrativa("pendiente")
+        with engine.begin() as conn:
+            conn.execute(text("UPDATE narrativas SET revision = 'aprobada', revisada_por = :r WHERE id = :i"),
+                         {"r": PREFIJO + "resp", "i": id_})
+    encabezado = como(client, "resp")  # el inicio de sesion no cuenta
+    consultas = []
+
+    def contar(*_):
+        consultas.append(1)
+
+    event.listen(engine, "before_cursor_execute", contar)
+    try:
+        lista = client.get("/narrativas", params={"limite": 100}, headers=encabezado).json()
+    finally:
+        event.remove(engine, "before_cursor_execute", contar)
+    mias = [t for t in lista if t["revisada_por"] == PREFIJO + "resp"]
+    assert len(mias) >= 15 and all(t["firma"]["nombre"] == "Eva Responsable" for t in mias)
+    assert len(consultas) < 12  # antes: una por fila (mas de 15)
+
+
+# ====================== 7. el tablero sirve los KPIs ya listos, sin recalcularlos
+def test_los_kpis_salen_del_indice_y_coinciden_con_el_calculo(client):
+    from app.rutas.comun import a_registros, indice_kpis, kpis_df
+
+    df = kpis_df()
+    mes = df["periodo"].max()
+    esperado = a_registros(df[(df["periodo"] == mes) & (df["area_id"] == 0)])
+    assert client.get("/kpis", params={"area_id": 0}, headers=como(client, "dir")).json() == json.loads(
+        json.dumps(esperado, default=str))
+    assert indice_kpis() is indice_kpis()  # se arma una vez por calculo
+
+
+# ================ 11. una carga validada que nadie aplica vence y se borran sus filas
+def test_una_carga_validada_que_nadie_aplica_vence(cuentas):
+    with engine.begin() as conn:
+        id_ = conn.execute(
+            text("INSERT INTO cargas (fuente, archivo, sha256, bytes, filas, estado, errores, descartadas, periodos, "
+                 "datos, resultado, subida_por, subida_en) VALUES ('productividad', 'viejo.csv', repeat('a', 64), 10, 1, "
+                 "'validada', '[]', '[]', '[]', CAST(:d AS jsonb), '{}', :u, now() - make_interval(days => :dias)) "
+                 "RETURNING id"),
+            {"d": json.dumps([{"area": 1}]), "u": PREFIJO + "ana", "dias": cargas.DIAS_PARA_APLICAR + 1},
+        ).scalar_one()
+    try:
+        with pytest.raises(cargas.ErrorDeCarga, match="venció"):
+            cargas.aplicar(id_, PREFIJO + "ana")
+        with engine.connect() as conn:
+            fila = conn.execute(text("SELECT estado, datos, aplicada_por FROM cargas WHERE id = :i"), {"i": id_}).one()
+        assert fila.estado == "descartada" and fila.datos is None and fila.aplicada_por == cargas.CADUCADA
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM cargas WHERE id = :i"), {"i": id_})
+
+
+def test_vencer_cargas_no_truena_si_la_api_nunca_ha_arrancado():
+    """scripts/programar.py recien sembrada la base: la tabla cargas aun no existe.
+    revisar() vence las cargas antes de las alertas: un error ahi las detendria."""
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE cargas RENAME TO cargas_guardada"))
+    try:
+        assert cargas.caducar() == 0  # antes: UndefinedTable
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text("DROP TABLE IF EXISTS cargas"))
+            conn.execute(text("ALTER TABLE cargas_guardada RENAME TO cargas"))
+

@@ -1,29 +1,34 @@
 """Administracion de cuentas (RF-11, RF-12): solo TI las cambia; TI y RRHH las ven.
 
 TI nunca da el permiso de firmar reportes (lo da una Responsable, en
-/firmas/responsables), y todo lo que TI le hace a una cuenta de RRHH le
-llega como aviso a RRHH: asi una sola persona de TI no puede crearse, ni
-apropiarse de, una cuenta que firma (regla 10.3.9).
+/firmas/responsables), y todo lo que TI le hace a una cuenta que ve datos de
+colaboradores (RRHH, Direccion, gerentes) le llega como aviso a RRHH y a la
+persona afectada: asi una sola persona de TI no puede crearse, ni apropiarse
+de, una cuenta que firma o que ve datos sin que se note (reglas 10.3.2 y 10.3.9).
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import SQLAlchemyError
 
 from app import avisos, mfa, schemas, seguridad
-from app.seguridad import ErrorDeUsuario, Usuario, solo_ti, ti_o_rrhh
+from app.seguridad import ROLES_CON_DATOS, ErrorDeUsuario, Usuario, solo_ti, ti_o_rrhh
 
 router = APIRouter(prefix="/usuarios", tags=["Cuentas"])
 
 SIN_FIRMA = "El permiso de firmar reportes lo da una Responsable de RRHH, no Administración de TI"
 
 
-def _avisar_a_rrhh(cuenta: dict | None, quien: str, que: str, firma_suspendida: bool = False):
-    """Aviso a RRHH si la cuenta es (o era) de RRHH."""
-    if cuenta is None:
+_DE_QUIEN = {"rrhh": "de RRHH", "direccion": "de Dirección", "gerente": "de gerencia"}
+
+
+def _avisar(cuenta: dict | None, quien: str, que: str, firma_suspendida: bool = False, rol_antes: str | None = None):
+    """Aviso a RRHH y a la persona si la cuenta ve (o veia) datos de colaboradores."""
+    if cuenta is None or not ({cuenta["rol"], rol_antes} & set(ROLES_CON_DATOS)):
         return
-    titulo = f"{quien} (TI) {que} la cuenta de RRHH de {cuenta['nombre']} ({cuenta['usuario']})"
+    tipo = _DE_QUIEN.get(cuenta["rol"]) or _DE_QUIEN.get(rol_antes, "")
+    titulo = f"{quien} (TI) {que} la cuenta {tipo} de {cuenta['nombre']} ({cuenta['usuario']})"
     if firma_suspendida:
         titulo += ". Ya no puede firmar reportes hasta que otra Responsable le devuelva el permiso"
-    avisos.avisar_cuenta(titulo)
+    avisos.avisar_cuenta(titulo, cuenta)
 
 
 def _cuentas(funcion, *args):
@@ -67,8 +72,7 @@ def crear_cuenta(nueva: schemas.CuentaNueva, u: Usuario = Depends(solo_ti)):
         )
     )
     cuenta = seguridad.obtener_cuenta(id_)
-    if cuenta["rol"] == "rrhh":
-        _avisar_a_rrhh(cuenta, u.usuario, "creó")
+    _avisar(cuenta, u.usuario, "creó")
     return {"cuenta": cuenta, "contrasena_temporal": temporal}
 
 
@@ -82,8 +86,8 @@ def modificar_cuenta(usuario_id: int, cambio: schemas.CuentaCambio, u: Usuario =
         raise HTTPException(status_code=403, detail=SIN_FIRMA)
     antes = seguridad.obtener_cuenta(usuario_id)
     despues = _cuentas(seguridad.modificar_usuario, usuario_id, pedidos, u.usuario)
-    if antes != despues and "rrhh" in (antes["rol"], despues["rol"]):
-        _avisar_a_rrhh(despues, u.usuario, "modificó")
+    if antes != despues:
+        _avisar(despues, u.usuario, "modificó", rol_antes=antes["rol"])
     return despues
 
 
@@ -94,8 +98,7 @@ def restablecer_contrasena(usuario_id: int, u: Usuario = Depends(solo_ti)):
     reportes, pierde el permiso hasta que otra Responsable se lo devuelva."""
     temporal, suspendida = _cuentas(seguridad.restablecer_contrasena, usuario_id, u.usuario)
     cuenta = seguridad.obtener_cuenta(usuario_id)
-    if cuenta["rol"] == "rrhh":
-        _avisar_a_rrhh(cuenta, u.usuario, "restableció la contraseña de", suspendida)
+    _avisar(cuenta, u.usuario, "restableció la contraseña de", suspendida)
     return {"contrasena_temporal": temporal}
 
 
@@ -106,6 +109,5 @@ def reiniciar_mfa(usuario_id: int, u: Usuario = Depends(solo_ti)):
     reportes, pierde el permiso hasta que otra Responsable se lo devuelva."""
     suspendida = _cuentas(mfa.reiniciar, usuario_id, u.usuario, True)
     cuenta = seguridad.obtener_cuenta(usuario_id)
-    if cuenta["rol"] == "rrhh":
-        _avisar_a_rrhh(cuenta, u.usuario, "reinició la verificación en dos pasos de", suspendida)
+    _avisar(cuenta, u.usuario, "reinició la verificación en dos pasos de", suspendida)
     return cuenta

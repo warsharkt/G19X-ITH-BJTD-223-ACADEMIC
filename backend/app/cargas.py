@@ -47,6 +47,11 @@ BYTES_MAXIMOS = 5 * 1024 * 1024
 # filas trae antes de validar (un mes real de Nordika: ~1,100 filas).
 BYTES_DESCOMPRIMIDOS_MAXIMOS = 60 * 1024 * 1024
 FILAS_MAXIMAS = 50_000
+# Una carga validada guarda sus filas hasta que se aplica o se descarta. Si
+# nadie la aplica en este plazo, vence: se descarta sola y sus filas se borran
+# (no se quedan datos de colaboradores olvidados en la base).
+DIAS_PARA_APLICAR = 7
+CADUCADA = "sistema:venció"
 EXTENSIONES = (".csv", ".xlsx")
 ERRORES_MOSTRADOS = 100
 FILAS_DE_MUESTRA = 8
@@ -709,16 +714,36 @@ _APLICAR = {
 }
 
 
-def aplicar(id_: int, usuario: str) -> dict:
-    """Aplica una carga validada en UNA transaccion y concilia. LookupError si
-    no existe; ErrorDeCarga si no esta lista (con errores, ya aplicada...)."""
+def caducar() -> int:
+    """Descarta las cargas validadas que nadie aplico en DIAS_PARA_APLICAR dias
+    y borra sus filas. Devuelve cuantas vencieron. Crea la tabla si hace falta:
+    scripts/programar.py puede correr antes de que la API arranque por primera vez."""
     asegurar_tabla()
     with engine.begin() as conn:
+        return conn.execute(
+            text(
+                "UPDATE cargas SET estado = 'descartada', datos = NULL, aplicada_por = :p, aplicada_en = now() "
+                "WHERE estado = 'validada' AND subida_en < now() - make_interval(days => :d)"
+            ),
+            {"p": CADUCADA, "d": DIAS_PARA_APLICAR},
+        ).rowcount
+
+
+def aplicar(id_: int, usuario: str) -> dict:
+    """Aplica una carga validada en UNA transaccion y concilia. LookupError si
+    no existe; ErrorDeCarga si no esta lista (con errores, ya aplicada, vencida...)."""
+    caducar()
+    with engine.begin() as conn:
         carga = conn.execute(
-            text("SELECT id, fuente, estado, datos, resultado FROM cargas WHERE id = :i FOR UPDATE"), {"i": id_}
+            text("SELECT id, fuente, estado, datos, resultado, aplicada_por FROM cargas WHERE id = :i FOR UPDATE"),
+            {"i": id_},
         ).mappings().first()
         if carga is None:
             raise LookupError(f"La carga {id_} no existe")
+        if carga["estado"] == "descartada" and carga["aplicada_por"] == CADUCADA:
+            raise ErrorDeCarga(
+                f"Esta carga venció: pasaron más de {DIAS_PARA_APLICAR} días sin aplicarla. Vuelve a subir el archivo"
+            )
         if carga["estado"] != "validada":
             raise ErrorDeCarga({
                 "con_errores": "Esta carga tiene errores: corrige el archivo y vuelve a subirlo",
@@ -772,7 +797,7 @@ def obtener(id_: int) -> dict | None:
 
 
 def listar(limite: int = 50) -> list[dict]:
-    asegurar_tabla()
+    caducar()
     with engine.connect() as conn:
         filas = conn.execute(text(f"SELECT {_COLUMNAS} FROM cargas ORDER BY id DESC LIMIT :l"), {"l": limite}).mappings().all()
     return [dict(f) for f in filas]
