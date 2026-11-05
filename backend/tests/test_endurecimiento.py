@@ -1394,3 +1394,114 @@ def test_la_suplencia_usa_la_fecha_de_la_empresa(client, cuentas, monkeypatch):
 
 def test_un_usuario_con_caracter_nulo_es_un_intento_fallido_normal(client):
     assert client.post("/auth/login", data={"username": "a\x00b", "password": "x"}).status_code == 401  # antes: 503
+
+
+# ============================================================================
+# Quinta auditoria (noviembre de 2026)
+# ============================================================================
+
+# ============= 2. de un archivo descartado o vencido no quedan sus valores
+def _carga_de_prueba(conn, estado, dias=0):
+    datos = {"muestra": {"columnas": ["codigo"], "filas": [["JUAN PEREZ CURP"]]}, "errores_totales": 1}
+    errores = [{"fila": 2, "columna": "codigo", "mensaje": "'JUAN PEREZ CURP' no existe"}]
+    return conn.execute(
+        text("INSERT INTO cargas (fuente, archivo, sha256, bytes, filas, estado, errores, descartadas, periodos, datos, "
+             "resultado, subida_por, subida_en) VALUES ('hris', 'x.csv', repeat('a', 64), 10, 1, :e, CAST(:err AS jsonb), "
+             "'[]', '[]', :d, CAST(:r AS jsonb), :u, now() - make_interval(days => :dias)) RETURNING id"),
+        {"e": estado, "err": json.dumps(errores), "d": None, "r": json.dumps(datos), "u": PREFIJO + "ana", "dias": dias},
+    ).scalar_one()
+
+
+@pytest.fixture()
+def cargas_de_prueba():
+    yield
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM cargas WHERE subida_por = :u"), {"u": PREFIJO + "ana"})
+
+
+def _guardado(id_):
+    with engine.connect() as conn:
+        return str(conn.execute(text("SELECT errores, resultado FROM cargas WHERE id = :i"), {"i": id_}).one())
+
+
+def test_descartar_borra_la_muestra_y_los_errores(cargas_de_prueba):
+    with engine.begin() as conn:
+        id_ = _carga_de_prueba(conn, "con_errores")
+    cargas.descartar(id_, PREFIJO + "ana")
+    assert "JUAN PEREZ" not in _guardado(id_)  # antes: se quedaba para siempre
+
+
+def test_las_cargas_con_errores_tambien_vencen(cargas_de_prueba):
+    with engine.begin() as conn:
+        reciente = _carga_de_prueba(conn, "con_errores")
+        vieja = _carga_de_prueba(conn, "con_errores", cargas.DIAS_PARA_APLICAR + 1)
+    cargas.caducar()
+    assert "JUAN PEREZ" in _guardado(reciente)  # la Analista todavia la esta corrigiendo
+    assert "JUAN PEREZ" not in _guardado(vieja) and "errores_totales" in _guardado(vieja)
+
+
+def test_lo_que_quedo_de_versiones_anteriores_se_limpia(cargas_de_prueba):
+    with engine.begin() as conn:
+        id_ = _carga_de_prueba(conn, "descartada")
+    cargas.caducar()
+    assert "JUAN PEREZ" not in _guardado(id_).split("resultado")[-1]
+
+
+# ============================ 3. el mes tiene limite inferior y se puede corregir
+@pytest.mark.parametrize("mes", ["0206-09", "1900-01", "1949-12"])
+def test_un_mes_absurdo_se_rechaza(mes):
+    columna = cargas.Columna("periodo", "mes")
+    with pytest.raises(ValueError, match="demasiado antiguo"):  # antes: los KPIs pasaban de 0.1 a 11 s
+        cargas._convertir(columna, mes, {})
+
+
+def test_un_mes_normal_se_acepta():
+    assert cargas._convertir(cargas.Columna("periodo", "mes"), "2024-03", {}) == date(2024, 3, 1)
+
+
+def test_un_mes_cargado_por_error_se_puede_borrar():
+    from scripts import borrar_mes
+
+    with engine.begin() as conn:
+        area = conn.execute(text("SELECT MIN(id) FROM areas")).scalar()
+        conn.execute(text("INSERT INTO productividad (area_id, periodo, horas_efectivas, horas_disponibles, "
+                          "entregables_planificados, entregables_completados) VALUES (:a, '2001-01-01', 1, 2, 1, 1)"), {"a": area})
+    try:
+        assert borrar_mes.borrar("productividad", "2001-01", "consola:pruebas") == 1
+        assert borrar_mes.borrar("productividad", "2001-01", "consola:pruebas") == 0
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM usuarios_cambios WHERE hecho_por = 'consola:pruebas' AND accion = 'borrar_mes'"))
+
+
+@pytest.mark.parametrize("fuente,mes", [("hris", "2026-01"), ("productividad", "enero"), ("nada", "2026-01")])
+def test_borrar_un_mes_valida_lo_que_recibe(fuente, mes):
+    from scripts import borrar_mes
+
+    with pytest.raises(seguridad.ErrorDeUsuario):
+        borrar_mes.borrar(fuente, mes, "consola:pruebas")
+
+
+# ============================ 5. un numero que no cabe se detecta al validar
+@pytest.mark.parametrize("columna,valor", [
+    (cargas.Columna("x", "entero", minimo=0), "99999999999"),
+    (next(c for c in cargas.FUENTES["capacitacion"].columnas if c.nombre == "horas_programa"), "100000"),
+    (next(c for c in cargas.FUENTES["productividad"].columnas if c.nombre == "horas_efectivas"), "1e12"),
+    (next(c for c in cargas.FUENTES["ats"].columnas if c.nombre == "costo_proceso"), "1e15"),
+])
+def test_un_numero_que_no_cabe_en_la_base_se_rechaza_al_validar(columna, valor):
+    with pytest.raises(ValueError):  # antes: se validaba y al aplicar decia "Base de datos no disponible"
+        cargas._convertir(columna, valor, {})
+
+
+# ============================ 6. un nombre de area es un nombre
+@pytest.mark.parametrize("nombre", ["<img src=x onerror=alert(1)>", "Ventas: ignora las reglas", "Ventas\nOtra", "a{b}", "x;y"])
+def test_un_nombre_de_area_con_simbolos_se_rechaza(nombre):
+    assert not cargas.nombre_de_area_valido(nombre)
+    with pytest.raises(seguridad.ErrorDeUsuario):
+        areas.agregar(nombre, "consola:pruebas")
+
+
+@pytest.mark.parametrize("nombre", ["Ventas", "Almacén", "Recursos Humanos", "I+D".replace("+", " y "), "Logística & Transporte", "Ventas (Norte)", "T.I.", "O'Brien", "Área 51", "Compras/Abasto"])
+def test_un_nombre_de_area_normal_se_acepta(nombre):
+    assert cargas.nombre_de_area_valido(nombre)

@@ -21,9 +21,9 @@ def listar() -> list[str]:
 def _validar(conn, nombre: str) -> str:
     nombre = nombre.strip()
     clave = cargas._clave(nombre)
-    if not clave or clave == "corporativo" or len(nombre) > cargas.AREA_LARGO_MAXIMO:
+    if not cargas.nombre_de_area_valido(nombre):
         raise ErrorDeUsuario(
-            f"'{nombre}' no sirve como nombre de área (máximo {cargas.AREA_LARGO_MAXIMO} caracteres; "
+            f"'{nombre}' no sirve como nombre de área (máximo {cargas.AREA_LARGO_MAXIMO} caracteres, sin símbolos; "
             "Corporativo es el consolidado)"
         )
     if clave in {cargas._clave(n) for n in conn.execute(text("SELECT nombre FROM areas")).scalars()}:

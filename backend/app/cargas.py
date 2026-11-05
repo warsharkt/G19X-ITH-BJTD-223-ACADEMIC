@@ -28,6 +28,7 @@ import io
 import json
 import math
 import random
+import re
 import unicodedata
 import zipfile
 from dataclasses import dataclass, field
@@ -59,10 +60,17 @@ ENCABEZADO_MAXIMO = 20_000  # caracteres
 _SEPARADORES = ",;\t|"
 # Una carga validada guarda sus filas hasta que se aplica o se descarta. Si
 # nadie la aplica en este plazo, vence: se descarta sola y sus filas se borran
-# (no se quedan datos de colaboradores olvidados en la base).
+# (no se quedan datos de colaboradores olvidados en la base). Lo mismo con lo
+# que se ve en la revision: la muestra y los errores llevan valores del archivo,
+# y un archivo equivocado puede traer nombres o CURP en la columna del codigo.
 DIAS_PARA_APLICAR = 7
 CADUCADA = "sistema:venció"
+ANIO_MINIMO = 1950
+ENTERO_MAXIMO = 2_147_483_647  # columnas INT de la base
 AREA_LARGO_MAXIMO = 60
+# Letras (con acentos), numeros y la puntuacion normal de un nombre: el nombre
+# llega a reportes, avisos y al texto que recibe el modelo de IA.
+_NOMBRE_DE_AREA = re.compile(r"[\w .,&()/'-]+")
 EXTENSIONES = (".csv", ".xlsx")
 ERRORES_MOSTRADOS = 100
 FILAS_DE_MUESTRA = 8
@@ -128,7 +136,7 @@ FUENTES = {
                 Columna("area", "area"),
                 Columna("fecha_apertura", "fecha"),
                 Columna("fecha_contratacion", "fecha", requerida=False, ayuda="Vacía si sigue abierta"),
-                Columna("costo_proceso", "numero", minimo=0, ayuda="MXN"),
+                Columna("costo_proceso", "numero", minimo=0, maximo=999_999_999, ayuda="MXN"),
             ),
             "Las vacantes abiertas y las que se cubrieron, con su folio, fechas y costo del proceso.",
             ("folio",),
@@ -152,11 +160,11 @@ FUENTES = {
             (
                 Columna("programa", "texto"),
                 Columna("periodo", "mes", ayuda="AAAA-MM"),
-                Columna("horas_programa", "numero", minimo=0.5),
+                Columna("horas_programa", "numero", minimo=0.5, maximo=9999),
                 Columna("area_programa", "area", requerida=False, ayuda="Vacía si es para toda la empresa"),
                 Columna("codigo_empleado", "empleado"),
                 Columna("completado", "si_no"),
-                Columna("horas_cursadas", "numero", minimo=0),
+                Columna("horas_cursadas", "numero", minimo=0, maximo=9999),
             ),
             "Las inscripciones del mes a cada programa, con horas cursadas y si se completó.",
             ("programa", "periodo", "area_programa", "codigo_empleado"),
@@ -179,8 +187,8 @@ FUENTES = {
             (
                 Columna("area", "area"),
                 Columna("periodo", "mes", ayuda="AAAA-MM"),
-                Columna("horas_efectivas", "numero", minimo=0),
-                Columna("horas_disponibles", "numero", minimo=1),
+                Columna("horas_efectivas", "numero", minimo=0, maximo=999_999_999),
+                Columna("horas_disponibles", "numero", minimo=1, maximo=999_999_999),
                 Columna("entregables_planificados", "entero", minimo=0),
                 Columna("entregables_completados", "entero", minimo=0),
             ),
@@ -411,13 +419,15 @@ def _convertir(c: Columna, v, contexto: dict):
         d = _a_fecha(v)
         if d > _hoy():
             raise ValueError("es una fecha futura")
-        if d.year < 1950:
+        if d.year < ANIO_MINIMO:
             raise ValueError("es una fecha demasiado antigua")
         return d
     if c.tipo == "mes":
         d = _a_mes(v)
         if d > _hoy().replace(day=1):
             raise ValueError("es un mes futuro")
+        if d.year < ANIO_MINIMO:  # el calendario de los KPIs va del mes mas antiguo al mas nuevo
+            raise ValueError("es un mes demasiado antiguo")
         return d
     if c.tipo in ("entero", "numero"):
         n = _a_entero(v) if c.tipo == "entero" else _a_numero(v)
@@ -425,6 +435,8 @@ def _convertir(c: Columna, v, contexto: dict):
             raise ValueError(f"debe ser al menos {c.minimo:g}")
         if c.maximo is not None and n > c.maximo:
             raise ValueError(f"debe ser como máximo {c.maximo:g}")
+        if c.tipo == "entero" and abs(n) > ENTERO_MAXIMO:
+            raise ValueError("es demasiado grande")
         return n
     if c.tipo == "area":
         id_ = contexto["areas"].get(_clave(v))
@@ -457,12 +469,19 @@ def _convertir(c: Columna, v, contexto: dict):
     raise AssertionError(c.tipo)
 
 
+def nombre_de_area_valido(nombre: str) -> bool:
+    clave = _clave(nombre)
+    return (bool(clave) and clave != "corporativo" and len(nombre) <= AREA_LARGO_MAXIMO
+            and _NOMBRE_DE_AREA.fullmatch(nombre) is not None)
+
+
 def _area_nueva(v, contexto: dict) -> str:
     """Primera plantilla de personal: el area se creara al aplicar la carga.
     Devuelve su nombre, escrito como la primera vez que aparecio en el archivo."""
     nombre, clave = _texto(v).strip(), _clave(v)
-    if not clave or clave == "corporativo" or len(nombre) > AREA_LARGO_MAXIMO:
-        raise ValueError(f"no sirve como nombre de área (máximo {AREA_LARGO_MAXIMO} caracteres; Corporativo es el consolidado)")
+    if not nombre_de_area_valido(nombre):
+        raise ValueError(f"no sirve como nombre de área (máximo {AREA_LARGO_MAXIMO} caracteres, sin símbolos; "
+                         "Corporativo es el consolidado)")
     return contexto["areas_nuevas"].setdefault(clave, nombre)
 
 
@@ -804,17 +823,30 @@ _APLICAR = {
 
 def caducar() -> int:
     """Descarta las cargas validadas que nadie aplico en DIAS_PARA_APLICAR dias
-    y borra sus filas. Devuelve cuantas vencieron. Crea la tabla si hace falta:
-    scripts/programar.py puede correr antes de que la API arranque por primera vez."""
+    y borra sus filas. A las que tenian errores les borra la muestra y los
+    errores en el mismo plazo. Devuelve cuantas vencieron. Crea la tabla si hace
+    falta: scripts/programar.py puede correr antes de que la API arranque por
+    primera vez."""
     asegurar_tabla()
     with engine.begin() as conn:
-        return conn.execute(
+        vencidas = conn.execute(
             text(
-                "UPDATE cargas SET estado = 'descartada', datos = NULL, aplicada_por = :p, aplicada_en = now() "
+                "UPDATE cargas SET estado = 'descartada', datos = NULL, errores = '[]', resultado = resultado - 'muestra', "
+                "aplicada_por = :p, aplicada_en = now() "
                 "WHERE estado = 'validada' AND subida_en < now() - make_interval(days => :d)"
             ),
             {"p": CADUCADA, "d": DIAS_PARA_APLICAR},
         ).rowcount
+        conn.execute(
+            text(
+                "UPDATE cargas SET errores = '[]', resultado = resultado - 'muestra' "
+                "WHERE (estado = 'con_errores' AND subida_en < now() - make_interval(days => :d) "
+                "       AND (errores <> '[]' OR resultado ? 'muestra')) "
+                "   OR (estado IN ('aplicada', 'descartada') AND resultado ? 'muestra')"  # las de versiones anteriores
+            ),
+            {"d": DIAS_PARA_APLICAR},
+        )
+    return vencidas
 
 
 def aplicar(id_: int, usuario: str) -> dict:
@@ -844,7 +876,7 @@ def aplicar(id_: int, usuario: str) -> dict:
         for c in conciliacion:
             c["cuadra"] = c["archivo"] == c["base"]
         resultado = {
-            **carga["resultado"],
+            **{k: v for k, v in carga["resultado"].items() if k != "muestra"},
             "nuevas": int(nuevas),
             "actualizadas": len(filas) - int(nuevas) if fuente.clave != "clima" else 0,
             "conciliacion": conciliacion,
@@ -866,7 +898,8 @@ def descartar(id_: int, usuario: str) -> dict:
         if estado == "aplicada":
             raise ErrorDeCarga("Una carga aplicada no se puede descartar")
         conn.execute(
-            text("UPDATE cargas SET estado = 'descartada', datos = NULL, aplicada_por = :u, aplicada_en = now() WHERE id = :i"),
+            text("UPDATE cargas SET estado = 'descartada', datos = NULL, errores = '[]', resultado = resultado - 'muestra', "
+                 "aplicada_por = :u, aplicada_en = now() WHERE id = :i"),
             {"i": id_, "u": usuario},
         )
     return obtener(id_)

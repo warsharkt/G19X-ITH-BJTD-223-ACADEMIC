@@ -225,7 +225,7 @@ Si hay errores, la pantalla dice la fila, la columna y el motivo (por ejemplo: *
 
 > **Por qué se calcula así**
 > - **Todo o nada.** Un archivo con un solo error no se puede aplicar. Si entrara a medias, los indicadores mezclarían datos completos con incompletos y el reporte diría algo falso sin que nadie lo notara. Es mejor corregir el archivo y subirlo de nuevo.
-> - **Validar y luego aplicar.** Primero se ve la vista previa y lo que se descarta; nada cambia hasta pulsar *Aplicar*. Así la Analista confirma que subió el archivo correcto del mes correcto. Una carga validada que nadie aplica vence a los 7 días: sus filas se borran y hay que subir el archivo de nuevo.
+> - **Validar y luego aplicar.** Primero se ve la vista previa y lo que se descarta; nada cambia hasta pulsar *Aplicar*. Así la Analista confirma que subió el archivo correcto del mes correcto. Una carga validada que nadie aplica vence a los 7 días: sus filas se borran y hay que subir el archivo de nuevo. Al descartar una carga, o a los 7 días si tenía errores, también se borra su vista previa.
 > - **Las áreas salen de la primera plantilla.** En una instalación nueva, la primera plantilla de personal define las áreas, y la vista previa dice cuáles va a crear. Después, un área que no esté en esa lista es un error: así un error de dedo no inventa un área. Si la empresa abre un área o le cambia el nombre, TI la da de alta en el servidor.
 
 ### Qué se descarta y por qué

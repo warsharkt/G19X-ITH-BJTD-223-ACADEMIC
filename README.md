@@ -140,7 +140,7 @@ Nada de Nordika está fijo en el código: el nombre sale de `EMPRESA_NOMBRE`, y 
 1. En el `.env`, pon `EMPRESA_NOMBRE`, `MODO_DATOS=reales` y `MODO_DEMO=no`. Así se apagan las cuentas de prueba, el teléfono simulado y la IA en la nube; los reportes los redacta Ollama en el propio servidor. Fija también `MFA_LLAVE` y guárdala aparte de los respaldos.
 2. Parte de una base vacía: `docker compose down -v` y luego `docker compose up -d --build`. Con `MODO_DATOS=reales` no se siembra nada.
 3. Crea con `python -m scripts.crear_usuario` ([Cuentas desde la consola](#cuentas-desde-la-consola)) la primera cuenta de TI y la de la Responsable de RRHH (con `--firma`). Desde el tablero, TI crea las demás con contraseña temporal; quién más firma lo decide la Responsable, no TI. Lo que TI crea desde el tablero espera la aprobación de esa Responsable.
-4. La Analista de RRHH sube desde **Carga de datos** lo que exporta cada sistema: plantilla de personal, vacantes, metas, capacitación, ambiente laboral y productividad. Cada fuente dice qué reporte exportar y trae su formato vacío. La plantilla de personal va primero: la primera que se aplica define las áreas de la empresa, y la pantalla muestra cuáles va a crear. Después, un área que no esté en esa lista es un error. Los gerentes se crean ya con las áreas cargadas. Si después hace falta un área nueva o cambia un nombre: `docker compose exec api python -m scripts.areas --agregar "Compras"` o `--renombrar "Ventas" "Comercial"`.
+4. La Analista de RRHH sube desde **Carga de datos** lo que exporta cada sistema: plantilla de personal, vacantes, metas, capacitación, ambiente laboral y productividad. Cada fuente dice qué reporte exportar y trae su formato vacío. La plantilla de personal va primero: la primera que se aplica define las áreas de la empresa, y la pantalla muestra cuáles va a crear. Después, un área que no esté en esa lista es un error. Los gerentes se crean ya con las áreas cargadas. Si después hace falta un área nueva o cambia un nombre: `docker compose exec api python -m scripts.areas --agregar "Compras"` o `--renombrar "Ventas" "Comercial"`. Si un mes se cargó mal: `docker compose exec -it api python -m scripts.borrar_mes --fuente productividad --mes 2016-09`.
 5. La Responsable de RRHH revisa los umbrales en **Configuración** antes del primer reporte.
 
 ## Seguridad
@@ -152,7 +152,7 @@ Nada de Nordika está fijo en el código: el nombre sale de `EMPRESA_NOMBRE`, y 
 | Aprobación de accesos | TI no ve datos de colaboradores, y tampoco puede abrirse una cuenta que los vea: si crea una cuenta de RRHH, Dirección o gerencia, le cambia rol o área, o restablece su contraseña o su verificación, la cuenta queda en espera hasta que una Responsable de RRHH la apruebe en **Usuarios**, y solo se puede aprobar cuando la persona ya cambió la temporal y activó su verificación. También le llega un aviso a RRHH y a la persona. Si no hay otra Responsable que pueda aprobar: `crear_usuario --aprobar` desde la consola del servidor |
 | Contraseñas | Mínimo 10 caracteres, sin las más comunes ni secuencias obvias, guardadas con scrypt (parámetros de OWASP; las cuentas anteriores se actualizan solas al entrar). TI genera temporales que la persona cambia al entrar y que vencen a las 72 horas. Tras 5 intentos fallidos (al entrar o al escribir la contraseña actual en Mi cuenta) se bloquea ese equipo para ese usuario (no la cuenta entera, para que nadie pueda dejar fuera a otra persona). Un usuario inventado se bloquea igual que uno real, así que el bloqueo no revela qué cuentas existen; nginx además limita los intentos por IP |
 | Verificación en dos pasos | Código de 6 dígitos (TOTP) obligatorio para Dirección, TI y RRHH, con 10 códigos de respaldo. El secreto se guarda cifrado (AES-256) con una llave que no está en la base |
-| Datos personales | La carga descarta nombres, CURP, RFC, correos y demás; el sistema solo conoce códigos de empleado. Una carga validada que nadie aplica vence a los 7 días y sus filas se borran |
+| Datos personales | La carga descarta nombres, CURP, RFC, correos y demás; el sistema solo conoce códigos de empleado. Una carga validada que nadie aplica vence a los 7 días y sus filas se borran; de lo descartado o con errores tampoco queda la muestra |
 | IA | Con `MODO_DATOS=reales` solo se permite un modelo en este equipo o en una IP privada de la empresa, y ninguno `-cloud`: si no, la IA no arranca |
 | Red | Por defecto solo acepta conexiones del mismo equipo; abierto a la red, HTTPS se activa solo |
 | Bitácoras | Inicios de sesión (entradas y fallos, un año), cuentas, umbrales, cargas, reportes, firmas y descargas: quién, qué, cuándo y desde qué IP. Nunca guardan contraseñas |
@@ -225,7 +225,7 @@ schtasks /create /tn "Talentia Insights" /sc daily /st 07:00 /tr "cmd /c cd /d C
 
 ### Respaldos
 
-**Cada respaldo se prueba:** el script lo restaura en una base temporal y compara las filas de cada tabla con la base real. Si no cuadra, termina con error.
+**Cada respaldo se prueba:** el script lo restaura en una base temporal y compara las filas de cada tabla con la base real. Si no cuadra, termina con error. Restaura sin permisos, igual que en un servidor nuevo; aun así, conviene ensayar la recuperación completa de vez en cuando.
 
 ```powershell
 cd backend
@@ -237,6 +237,7 @@ python -m scripts.respaldo --restaurar ..\respaldos\<archivo>.dump
 
 - Van en `respaldos/` (o en `RESPALDOS_DIR`), cada uno con su huella SHA-256. Se conservan los últimos 30 (`RESPALDOS_CONSERVAR`). Usa el `pg_dump` del contenedor: no hace falta instalar PostgreSQL.
 - **La llave del MFA nunca va en el respaldo.** Cópiala con `--llave` a otra unidad; así, quien se lleve un respaldo no puede generar códigos de verificación.
+- **Si se pierde el servidor:** instala el proyecto con el mismo `.env` y la misma llave en `llaves/`, enciende solo la base (`docker compose up -d db`), corre `--restaurar` y después `docker compose up -d`: el arranque crea la cuenta de la API y sus permisos.
 - **Restaurar** reemplaza toda la base. Primero apaga la API (`docker compose stop api`); el script pide confirmar, verifica la huella y guarda antes una copia del estado actual.
 - Con datos reales, los respaldos tienen datos de colaboradores: guárdalos en un disco cifrado y con acceso solo para TI.
 

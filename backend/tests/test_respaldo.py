@@ -87,3 +87,29 @@ def test_respaldar_y_probar_la_restauracion(tmp_path: Path):
     assert filas > 0 and "empleados" in antes
     # la base temporal de la prueba no se queda
     assert respaldo.BASE_DE_PRUEBA not in respaldo._psql("postgres", "SELECT datname FROM pg_database")
+
+
+@pytest.mark.skipif(not _hay_contenedor(), reason="sin el contenedor rrhh_db de docker compose")
+def test_un_respaldo_se_restaura_en_un_servidor_sin_la_cuenta_de_la_api(tmp_path: Path):
+    """Probar en el mismo servidor no lo detectaba: ahi la cuenta siempre existe."""
+    origen, destino, rol = "zz_respaldo_origen", "zz_respaldo_destino", "zz_rol_que_no_existira"
+
+    def limpiar():
+        for base in (origen, destino):
+            respaldo._docker("dropdb", "-U", respaldo.usuario_db(), "--if-exists", base)
+        respaldo._psql("postgres", f"DROP ROLE IF EXISTS {rol}")
+
+    limpiar()
+    try:
+        respaldo._docker("createdb", "-U", respaldo.usuario_db(), origen)
+        respaldo._psql("postgres", f"CREATE ROLE {rol}")
+        respaldo._psql(origen, f"CREATE TABLE datos (id int); INSERT INTO datos VALUES (1); GRANT SELECT ON datos TO {rol}")
+        archivo = tmp_path / "x.dump"
+        with open(archivo, "wb") as f:
+            respaldo._docker("pg_dump", "-U", respaldo.usuario_db(), "-d", origen, "-Fc", salida=f)
+        respaldo._docker("dropdb", "-U", respaldo.usuario_db(), origen)
+        respaldo._psql("postgres", f"DROP ROLE {rol}")
+        respaldo._restaurar_en(destino, archivo)  # antes: role does not exist, y 0 tablas
+        assert respaldo._psql(destino, "SELECT count(*) FROM datos").strip() == "1"
+    finally:
+        limpiar()

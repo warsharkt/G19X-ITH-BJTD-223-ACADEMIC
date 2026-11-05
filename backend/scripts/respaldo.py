@@ -112,7 +112,10 @@ def _restaurar_en(base: str, archivo: Path):
     _docker("dropdb", "-U", usuario_db(), "--if-exists", base)
     _docker("createdb", "-U", usuario_db(), base)
     with open(archivo, "rb") as f:
-        _docker("pg_restore", "-U", usuario_db(), "-d", base, "--no-owner", "--exit-on-error",
+        # --no-privileges: el respaldo trae los permisos de talentia_api, una cuenta
+        # que en un servidor nuevo aun no existe, y sin esto no se restauraba nada.
+        # Los permisos los vuelve a poner el arranque de la API.
+        _docker("pg_restore", "-U", usuario_db(), "-d", base, "--no-owner", "--no-privileges", "--exit-on-error",
                 "--single-transaction", entrada=f, interactivo=True)
 
 

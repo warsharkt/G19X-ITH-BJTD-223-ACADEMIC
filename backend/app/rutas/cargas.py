@@ -2,7 +2,7 @@
 from typing import Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import DataError, SQLAlchemyError
 
 from app import cargas, programacion, schemas
 from app.rutas.comun import olvidar_kpis
@@ -24,6 +24,8 @@ def _carga(funcion, *args):
         raise HTTPException(status_code=404, detail=str(exc.args[0]))
     except cargas.ErrorDeCarga as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+    except DataError:
+        raise HTTPException(status_code=422, detail="Un valor del archivo no cabe en la base: revisa las cifras")
     except SQLAlchemyError:
         raise HTTPException(status_code=503, detail="Base de datos no disponible")
 

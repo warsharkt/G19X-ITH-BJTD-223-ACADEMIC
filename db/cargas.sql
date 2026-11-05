@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS cargas (
     errores       JSONB NOT NULL DEFAULT '[]',   -- [{fila, columna, mensaje}]
     descartadas   JSONB NOT NULL DEFAULT '[]',   -- columnas que no se guardan (p. ej. datos personales)
     periodos      JSONB NOT NULL DEFAULT '[]',   -- meses que abarca el archivo
-    datos         JSONB,                         -- filas listas para aplicar; se borran al aplicar, descartar o vencer
+    datos         JSONB,                         -- filas listas para aplicar; se borran al aplicar, descartar o vencer (y la muestra de resultado)
     resultado     JSONB,                         -- nuevas, actualizadas y conciliacion
     subida_por    TEXT NOT NULL,
     subida_en     TIMESTAMPTZ NOT NULL DEFAULT now(),

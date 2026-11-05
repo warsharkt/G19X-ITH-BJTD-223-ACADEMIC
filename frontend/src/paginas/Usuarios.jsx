@@ -24,6 +24,7 @@ const ACCIONES = {
   aprobar_acceso: 'Acceso aprobado',
   crear_area: 'Área agregada',
   renombrar_area: 'Área renombrada',
+  borrar_mes: 'Mes de datos borrado',
   rechazar_acceso: 'Acceso rechazado',
 }
 
