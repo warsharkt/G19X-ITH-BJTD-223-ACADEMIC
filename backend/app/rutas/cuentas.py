@@ -4,13 +4,14 @@ TI nunca da el permiso de firmar reportes (lo da una Responsable, en
 /firmas/responsables), y todo lo que TI le hace a una cuenta que ve datos de
 colaboradores (RRHH, Direccion, gerentes) le llega como aviso a RRHH y a la
 persona afectada: asi una sola persona de TI no puede crearse, ni apropiarse
-de, una cuenta que firma o que ve datos sin que se note (reglas 10.3.2 y 10.3.9).
+de, una cuenta que firma o que ve datos (reglas 10.3.2 y 10.3.9). Ademas esas
+cuentas quedan en espera hasta que una Responsable de RRHH las apruebe.
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import SQLAlchemyError
 
 from app import avisos, mfa, schemas, seguridad
-from app.seguridad import ROLES_CON_DATOS, ErrorDeUsuario, Usuario, solo_ti, ti_o_rrhh
+from app.seguridad import ROLES_CON_DATOS, ErrorDeUsuario, Usuario, solo_ti, ti_o_rrhh, usuario_actual
 
 router = APIRouter(prefix="/usuarios", tags=["Cuentas"])
 
@@ -28,6 +29,8 @@ def _avisar(cuenta: dict | None, quien: str, que: str, firma_suspendida: bool = 
     titulo = f"{quien} (TI) {que} la cuenta {tipo} de {cuenta['nombre']} ({cuenta['usuario']})"
     if firma_suspendida:
         titulo += ". Ya no puede firmar reportes hasta que otra Responsable le devuelva el permiso"
+    if not cuenta["acceso_aprobado"]:
+        titulo += ". Su acceso espera que una Responsable lo apruebe en Usuarios"
     avisos.avisar_cuenta(titulo, cuenta)
 
 
@@ -59,6 +62,29 @@ def bitacora_de_cuentas(
     return _cuentas(seguridad.cambios, limite, usuario)
 
 
+@router.get("/accesos", response_model=list[schemas.Acceso])
+def bitacora_de_accesos(
+    usuario: str | None = Query(None, description="Solo los accesos de esa cuenta"),
+    limite: int = Query(100, ge=1, le=500),
+    _u: Usuario = Depends(ti_o_rrhh),
+):
+    """Quien entro y quien fallo al entrar, cuando y desde que IP."""
+    return _cuentas(seguridad.accesos, limite, usuario)
+
+
+@router.put("/{usuario_id}/aprobacion", response_model=schemas.Cuenta)
+def aprobar_acceso(usuario_id: int, cambio: schemas.AprobacionCambio, u: Usuario = Depends(usuario_actual)):
+    """Una Responsable de RRHH aprueba o rechaza un acceso que dejo en espera lo
+    que hizo TI. Rechazar desactiva la cuenta. TI no puede: no ve datos, y no
+    debe poder abrirse una cuenta que los vea."""
+    if not u.es_responsable:
+        raise HTTPException(status_code=403, detail="Solo una Responsable de RRHH aprueba los accesos")
+    cuenta = _cuentas(seguridad.resolver_aprobacion, usuario_id, cambio.aprobada, u.usuario)
+    que = "aprobó" if cambio.aprobada else "rechazó"
+    avisos.avisar_cuenta(f"{u.nombre} (Responsable de RRHH) {que} el acceso de {cuenta['nombre']} ({cuenta['usuario']})", cuenta)
+    return cuenta
+
+
 @router.post("", status_code=201, response_model=schemas.CuentaCreada)
 def crear_cuenta(nueva: schemas.CuentaNueva, u: Usuario = Depends(solo_ti)):
     """Crea una cuenta con una contrasena temporal que se muestra UNA vez: la
@@ -85,7 +111,7 @@ def modificar_cuenta(usuario_id: int, cambio: schemas.CuentaCambio, u: Usuario =
     if "firma_reportes" in pedidos:
         raise HTTPException(status_code=403, detail=SIN_FIRMA)
     antes = seguridad.obtener_cuenta(usuario_id)
-    despues = _cuentas(seguridad.modificar_usuario, usuario_id, pedidos, u.usuario)
+    despues = _cuentas(seguridad.modificar_usuario, usuario_id, pedidos, u.usuario, True)
     if antes != despues:
         _avisar(despues, u.usuario, "modificó", rol_antes=antes["rol"])
     return despues

@@ -23,7 +23,7 @@ class UsuarioOut(BaseModel):
     area_id: int | None = Field(description="Solo los gerentes tienen area")
     areas_permitidas: list[int] = Field(description="Areas que puede consultar (0 = corporativo)")
     pendiente: str | None = Field(
-        None, description="cambiar_contrasena o configurar_mfa: hasta resolverlo, el resto de la API da 403"
+        None, description="cambiar_contrasena, configurar_mfa o aprobacion: hasta resolverlo, el resto de la API da 403"
     )
     mfa_activo: bool = False
     mfa_obligatorio: bool = Field(False, description="Su rol debe usar verificacion en dos pasos")
@@ -69,6 +69,7 @@ class Cuenta(BaseModel):
     debe_cambiar_contrasena: bool
     mfa_activo: bool
     firma_reportes: bool = False
+    acceso_aprobado: bool = Field(True, description="false: espera que una Responsable de RRHH lo apruebe")
     creado_en: datetime
     ultimo_acceso: datetime | None
 
@@ -92,6 +93,19 @@ class CuentaCambio(BaseModel):
     correo: str | None = None
     activo: bool | None = None
     firma_reportes: bool | None = None
+
+
+class AprobacionCambio(BaseModel):
+    aprobada: bool = Field(description="true aprueba el acceso; false lo rechaza y desactiva la cuenta")
+
+
+class Acceso(BaseModel):
+    """Bitacora de accesos: una entrada o un intento fallido."""
+    id: int
+    usuario: str
+    evento: str = Field(description="entrada o fallo")
+    origen: str | None
+    momento: datetime
 
 
 class FirmaCambio(BaseModel):

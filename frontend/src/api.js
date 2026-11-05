@@ -105,6 +105,8 @@ export const api = {
   // Cuentas: TI las administra; RRHH solo las consulta
   cuentas: () => pedir('/usuarios'),
   cambiosCuentas: () => pedir('/usuarios/cambios' + consulta({ limite: 100 })),
+  accesos: () => pedir('/usuarios/accesos' + consulta({ limite: 100 })),
+  aprobarAcceso: (id, aprobada) => pedir(`/usuarios/${id}/aprobacion`, { metodo: 'PUT', cuerpo: { aprobada } }),
   crearCuenta: (datos) => pedir('/usuarios', { metodo: 'POST', cuerpo: datos }),
   modificarCuenta: (id, cambios) => pedir(`/usuarios/${id}`, { metodo: 'PATCH', cuerpo: cambios }),
   restablecerContrasena: (id) => pedir(`/usuarios/${id}/contrasena`, { metodo: 'POST' }),

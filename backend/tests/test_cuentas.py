@@ -103,10 +103,14 @@ def test_ti_crea_una_cuenta_con_contrasena_temporal(client):
     r = client.post("/auth/contrasena", headers=eva, json={"actual": temporal, "nueva": "Mi-clave-propia-1"})
     assert r.status_code == 200
     nuevo = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    espera = client.get("/kpis", headers=nuevo)  # TI la creo: falta que RRHH la apruebe
+    assert espera.status_code == 403 and "aprobación" in espera.json()["detail"]
+    seguridad.resolver_aprobacion(cuenta["id"], True, "consola:pruebas")
     assert client.get("/kpis", headers=nuevo).status_code == 200
     assert client.get("/auth/yo", headers=eva).status_code == 401  # la sesion vieja se cierra
     assert entrar(client, "nueva", temporal).status_code == 401
-    assert bitacora(PREFIJO + "nueva")[-1][:2] == ("cambiar_contrasena", PREFIJO + "nueva")
+    assert bitacora(PREFIJO + "nueva")[-1][:2] == ("aprobar_acceso", "consola:pruebas")
+    assert ("cambiar_contrasena", PREFIJO + "nueva") in [b[:2] for b in bitacora(PREFIJO + "nueva")]
 
 
 @pytest.mark.parametrize("rol", ["rrhh", "ger"])

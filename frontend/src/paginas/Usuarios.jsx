@@ -21,6 +21,8 @@ const ACCIONES = {
   dar_firma: 'Permiso de firma dado',
   quitar_firma: 'Permiso de firma quitado',
   suspender_firma: 'Permiso de firma suspendido',
+  aprobar_acceso: 'Acceso aprobado',
+  rechazar_acceso: 'Acceso rechazado',
 }
 
 // Cambios que no hizo una persona desde el tablero
@@ -155,6 +157,7 @@ export default function Usuarios() {
   const [version, setVersion] = useState(0)
   const cuentas = useConsulta(() => api.cuentas(), [version])
   const cambios = useConsulta(() => api.cambiosCuentas(), [version])
+  const accesos = useConsulta(() => api.accesos(), [version])
   const catalogo = useConsulta(() => api.areas(), [])
   const [formulario, setFormulario] = useState(null) // 'nueva' o la cuenta en edicion
   const [temporal, setTemporal] = useState(null) // { nombre, contrasena } se muestra una vez
@@ -192,11 +195,15 @@ export default function Usuarios() {
   const yaNoFirma = (c) =>
     c.firma_reportes ? ' Dejará de firmar reportes hasta que otra Responsable de RRHH le devuelva el permiso.' : ''
 
+  // TI no ve datos: lo que le da acceso a una cuenta con datos lo aprueba RRHH
+  const enEspera = (c) =>
+    c.rol === 'admin_ti' ? '' : ' Su acceso quedará en espera hasta que una Responsable de RRHH lo apruebe.'
+
   const restablecer = (c) =>
     accion(async () => {
       const r = await api.restablecerContrasena(c.id)
       setTemporal({ nombre: c.nombre, contrasena: r.contrasena_temporal })
-    }, `¿Restablecer la contraseña de ${c.nombre}? Sus sesiones abiertas se cerrarán.${yaNoFirma(c)}`)
+    }, `¿Restablecer la contraseña de ${c.nombre}? Sus sesiones abiertas se cerrarán.${yaNoFirma(c)}${enEspera(c)}`)
 
   return (
     <div>
@@ -282,6 +289,7 @@ export default function Usuarios() {
                       {c.activo ? 'Activa' : 'Desactivada'}
                       {c.bloqueado && ' · Bloqueada'}
                       {c.debe_cambiar_contrasena && ' · Contraseña temporal'}
+                      {!c.acceso_aprobado && ' · Espera aprobación'}
                     </td>
                     <td>{c.mfa_activo ? 'Activa' : '—'}</td>
                     <td>{c.ultimo_acceso ? fechaHora(c.ultimo_acceso) : 'Nunca'}</td>
@@ -339,7 +347,37 @@ export default function Usuarios() {
                     )}
                     {esResponsable && (
                       <td className="acciones">
-                        {c.rol === 'rrhh' && c.activo && !propia && (
+                        {!c.acceso_aprobado && c.activo && !propia && (
+                          <>
+                            <button
+                              type="button"
+                              className="boton-texto"
+                              aria-label={`Aprobar el acceso de ${c.usuario}`}
+                              onClick={() =>
+                                accion(
+                                  () => api.aprobarAcceso(c.id, true),
+                                  `¿Aprobar el acceso de ${c.nombre}? Confirma con esa persona que ella lo pidió: TI lo dejó en espera.`,
+                                )
+                              }
+                            >
+                              Aprobar
+                            </button>
+                            <button
+                              type="button"
+                              className="boton-texto"
+                              aria-label={`Rechazar el acceso de ${c.usuario}`}
+                              onClick={() =>
+                                accion(
+                                  () => api.aprobarAcceso(c.id, false),
+                                  `¿Rechazar el acceso de ${c.nombre}? La cuenta se desactivará.`,
+                                )
+                              }
+                            >
+                              Rechazar
+                            </button>
+                          </>
+                        )}
+                        {c.rol === 'rrhh' && c.activo && !propia && c.acceso_aprobado && (
                           <button
                             type="button"
                             className="boton-texto"
@@ -365,6 +403,36 @@ export default function Usuarios() {
           </table>
         </div>
       )}
+
+      <section className="seccion">
+        <h2>Inicios de sesión</h2>
+        {accesos.error && <Mensaje>{accesos.error.message}</Mensaje>}
+        {accesos.datos?.length === 0 && <p className="nota">Todavía no hay inicios de sesión registrados.</p>}
+        {accesos.datos?.length > 0 && (
+          <div className="panel tabla-desplazable">
+            <table className="tabla" aria-label="Inicios de sesión">
+              <thead>
+                <tr>
+                  <th scope="col">Fecha</th>
+                  <th scope="col">Cuenta</th>
+                  <th scope="col">Qué pasó</th>
+                  <th scope="col">Desde</th>
+                </tr>
+              </thead>
+              <tbody>
+                {accesos.datos.map((a) => (
+                  <tr key={a.id}>
+                    <td>{fechaHora(a.momento)}</td>
+                    <td>{a.usuario}</td>
+                    <td>{a.evento === 'entrada' ? 'Entró' : 'Intento fallido'}</td>
+                    <td>{a.origen ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <section className="seccion">
         <h2>Bitácora de cuentas</h2>

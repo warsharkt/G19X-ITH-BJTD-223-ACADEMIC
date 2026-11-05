@@ -164,6 +164,7 @@ def preparar_cuentas(por: str) -> list[str]:
             mfa.reiniciar(id_, por)
         with engine.begin() as conn:  # un MFA a medio configurar tambien se borra
             conn.execute(text("UPDATE usuarios SET mfa_secreto = NULL WHERE id = :i AND NOT mfa_activo"), {"i": id_})
+            conn.execute(text("UPDATE usuarios SET acceso_aprobado = true WHERE id = :i"), {"i": id_})
         hecho.append(f"{usuario}: restablecida")
     return hecho
 
@@ -178,6 +179,8 @@ def apagar_cuentas(por: str) -> list[str]:
     with engine.connect() as conn:
         if conn.execute(text("SELECT to_regclass('public.usuarios_cambios') IS NULL")).scalar():
             return []  # base nueva: aun no hay cuentas
+    seguridad.asegurar_tabla()  # una base de una version anterior: columnas nuevas
+    with engine.connect() as conn:
         filas = conn.execute(
             text(
                 "SELECT u.id, u.usuario FROM usuarios u WHERE u.activo AND u.usuario = ANY(:u) AND EXISTS ("

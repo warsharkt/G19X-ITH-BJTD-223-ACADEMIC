@@ -107,6 +107,15 @@ function RevisionCarga({ carga, fuente, alCambiar }) {
         )}
       </div>
 
+      {carga.estado === 'validada' && previo.areas_nuevas?.length > 0 && (
+        <Mensaje tipo="advertencia" titulo="Esta carga define las áreas de la empresa">
+          <p>
+            Se crearán {previo.areas_nuevas.length}: {previo.areas_nuevas.join(', ')}.
+          </p>
+          <p>Revisa que estén bien escritas: después, un área que no esté en esta lista será un error.</p>
+        </Mensaje>
+      )}
+
       {carga.descartadas.length > 0 && (
         <div>
           <h3>Columnas que no se guardaron</h3>

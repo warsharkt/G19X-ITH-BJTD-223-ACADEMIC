@@ -20,8 +20,13 @@
   contrasena o la verificacion en dos pasos de alguien que firma, ese
   permiso se suspende y se cancela su suplencia, hasta que otra Responsable
   lo devuelva. Asi una sola persona de TI no puede firmar reportes.
-- Pendientes: con una contrasena temporal, o sin MFA en un rol que lo exige
-  (app/mfa.py), la sesion solo sirve para resolverlo; todo lo demas da 403.
+- Pendientes: con una contrasena temporal, sin MFA en un rol que lo exige
+  (app/mfa.py) o sin la aprobacion de RRHH, la sesion solo sirve para
+  resolverlo; todo lo demas da 403.
+- Aprobacion: lo que TI hace y da acceso a datos de colaboradores (crear la
+  cuenta, cambiarle rol o area, restablecer su contrasena o su MFA) deja la
+  cuenta en espera hasta que una Responsable de RRHH la apruebe. TI no ve
+  datos: tampoco puede abrirse una cuenta que los vea.
 - Cuentas: solo admin_ti las administra (lo exige la API) y nadie cambia su
   propio rol ni se desactiva. Cada cambio queda en `usuarios_cambios`
   (RF-11): quien, cuando y que, nunca contrasenas ni secretos.
@@ -61,6 +66,9 @@ INTENTOS_MAXIMOS = 5             # por cuenta y origen
 MINUTOS_BLOQUEO = 15
 ORIGENES_PARA_BLOQUEO_TOTAL = 3  # origenes bloqueados a la vez -> toda la cuenta
 MINUTOS_PASO_MFA = 5  # para escribir el codigo tras la contrasena
+HORAS_CONTRASENA_TEMPORAL = 72  # despues, TI debe generar otra
+DIAS_BITACORA_ACCESOS = 365
+USUARIO_INEXISTENTE = "(usuario inexistente)"
 _SCRYPT = {"n": 2**14, "r": 8, "p": 1}
 _ALGORITMO = "HS256"
 # Sin letras ni numeros que se confundan (0/O, 1/l/I) al dictar una temporal
@@ -201,11 +209,25 @@ def cambios(limite: int = 50, usuario: str | None = None) -> list[dict]:
     return [dict(f) for f in filas]
 
 
+def accesos(limite: int = 100, usuario: str | None = None) -> list[dict]:
+    """Bitacora de accesos, de lo mas reciente a lo mas antiguo."""
+    asegurar_tabla()
+    filtro, params = "", {"limite": limite}
+    if usuario:
+        filtro, params["u"] = "WHERE usuario = :u", usuario
+    with engine.connect() as conn:
+        filas = conn.execute(
+            text(f"SELECT id, usuario, evento, origen, momento FROM accesos {filtro} ORDER BY id DESC LIMIT :limite"),
+            params,
+        ).mappings().all()
+    return [dict(f) for f in filas]
+
+
 # ---------------------------------------------------------------- usuarios
 _PATRON_CORREO = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _COLUMNAS_CUENTA = (
     "id, usuario, nombre, rol, area_id, correo, activo, debe_cambiar_contrasena, mfa_activo, firma_reportes, "
-    "creado_en, ultimo_acceso, (COALESCE(bloqueado_hasta > now(), false) OR EXISTS ("
+    "acceso_aprobado, creado_en, ultimo_acceso, (COALESCE(bloqueado_hasta > now(), false) OR EXISTS ("
     "  SELECT 1 FROM bloqueos_acceso b WHERE b.usuario = usuarios.usuario AND b.bloqueado_hasta > now()"
     ")) AS bloqueado"
 )
@@ -248,7 +270,8 @@ def crear_usuario(
     """Crea un usuario y devuelve su id. ErrorDeUsuario si los datos no son validos.
 
     temporal=True: la persona debe cambiar la contrasena al entrar (cuentas que
-    crea TI desde el panel). correo es opcional: sirve para el correo de avisos.
+    crea TI desde el panel) y, si la cuenta ve datos de colaboradores, espera la
+    aprobacion de RRHH. correo es opcional: sirve para el correo de avisos.
     firma_reportes=True: Responsable de RRHH (firma); si no, Analista."""
     asegurar_tabla()
     usuario = usuario.strip().lower()
@@ -263,10 +286,12 @@ def crear_usuario(
         id_ = conn.execute(
             text(
                 "INSERT INTO usuarios (usuario, nombre, rol, area_id, contrasena_hash, correo, debe_cambiar_contrasena, "
-                "firma_reportes) VALUES (:u, :n, :r, :a, :h, :c, :t, :f) RETURNING id"
+                "firma_reportes, acceso_aprobado, temporal_vence) VALUES (:u, :n, :r, :a, :h, :c, :t, :f, :ok, "
+                "CASE WHEN :t THEN now() + make_interval(hours => :horas) END) RETURNING id"
             ),
             {"u": usuario, "n": nombre.strip(), "r": rol, "a": area_id, "h": hash_contrasena(contrasena),
-             "c": correo, "t": temporal, "f": firma_reportes},
+             "c": correo, "t": temporal, "f": firma_reportes, "horas": HORAS_CONTRASENA_TEMPORAL,
+             "ok": not (temporal and rol in ROLES_CON_DATOS)},
         ).scalar_one()
         # el bloqueo va por nombre: lo que alguien intento antes con ese nombre no aplica
         conn.execute(text("DELETE FROM bloqueos_acceso WHERE usuario = :u"), {"u": usuario})
@@ -304,13 +329,44 @@ def _cuenta_para_cambiar(conn, usuario_id: int):
     return dict(fila)
 
 
-def modificar_usuario(usuario_id: int, cambios_pedidos: dict, por: str) -> dict:
+def pedir_aprobacion(conn, usuario_id: int):
+    """TI toco un acceso a datos de colaboradores: queda en espera de RRHH."""
+    conn.execute(
+        text("UPDATE usuarios SET acceso_aprobado = false WHERE id = :i AND rol = ANY(:r)"),
+        {"i": usuario_id, "r": list(ROLES_CON_DATOS)},
+    )
+
+
+def resolver_aprobacion(usuario_id: int, aprobada: bool, por: str) -> dict:
+    """Una Responsable de RRHH aprueba el acceso que dejo en espera TI, o lo
+    rechaza: la cuenta se desactiva, y seguiria en espera aunque TI la reactive."""
+    asegurar_tabla()
+    with engine.begin() as conn:
+        actual = _cuenta_para_cambiar(conn, usuario_id)
+        if actual["usuario"] == por:
+            raise ErrorDeUsuario("Tu propio acceso lo aprueba otra Responsable de RRHH")
+        espera = conn.execute(text("SELECT NOT acceso_aprobado FROM usuarios WHERE id = :i"), {"i": usuario_id}).scalar()
+        if not espera or not actual["activo"]:
+            raise ErrorDeUsuario("Esa cuenta no está esperando aprobación")
+        conn.execute(
+            text(
+                "UPDATE usuarios SET acceso_aprobado = :a, activo = :a, "
+                "version_sesion = version_sesion + CASE WHEN :a THEN 0 ELSE 1 END WHERE id = :i"
+            ),
+            {"a": aprobada, "i": usuario_id},
+        )
+        registrar(conn, actual["usuario"], "aprobar_acceso" if aprobada else "rechazar_acceso", por)
+    return obtener_cuenta(usuario_id)
+
+
+def modificar_usuario(usuario_id: int, cambios_pedidos: dict, por: str, desde_panel: bool = False) -> dict:
     """Cambia nombre, rol, area, correo, si firma los reportes o si esta
     activo, y lo registra.
 
     cambios_pedidos trae solo los campos a cambiar. Al pasar a un rol sin area,
     el area se quita sola, y al salir de RRHH deja de firmar. Nadie cambia su
-    propio rol ni se desactiva.
+    propio rol ni se desactiva. desde_panel=True (TI): un cambio de rol o area
+    que da acceso a datos queda en espera de la aprobacion de RRHH.
     LookupError si no existe; ErrorDeUsuario si los datos no son validos."""
     asegurar_tabla()
     permitidos = {"nombre", "rol", "area_id", "correo", "activo", "firma_reportes"}
@@ -343,6 +399,8 @@ def modificar_usuario(usuario_id: int, cambios_pedidos: dict, por: str) -> dict:
                 ),
                 nuevo,
             )
+            if desde_panel and {"rol", "area_id"} & set(diferencias):
+                pedir_aprobacion(conn, usuario_id)
             accion = "modificar"
             if set(diferencias) == {"activo"}:
                 accion = "reactivar" if nuevo["activo"] else "desactivar"
@@ -383,7 +441,8 @@ def restablecer_contrasena(usuario_id: int, por: str) -> tuple[str, bool]:
     """Pone una contrasena temporal (que se devuelve UNA vez para entregarla),
     obliga a cambiarla al entrar, desbloquea la cuenta y cierra sus sesiones.
     Si la cuenta firmaba reportes, el permiso se suspende (lo devuelve otra
-    Responsable). Devuelve la temporal y si se suspendio la firma."""
+    Responsable), y si ve datos queda en espera de la aprobacion de RRHH: la
+    temporal la conoce TI. Devuelve la temporal y si se suspendio la firma."""
     asegurar_tabla()
     temporal = generar_contrasena_temporal()
     with engine.begin() as conn:
@@ -393,10 +452,12 @@ def restablecer_contrasena(usuario_id: int, por: str) -> tuple[str, bool]:
         conn.execute(
             text(
                 "UPDATE usuarios SET contrasena_hash = :h, debe_cambiar_contrasena = true, intentos_fallidos = 0, "
-                "bloqueado_hasta = NULL, version_sesion = version_sesion + 1 WHERE id = :i"
+                "bloqueado_hasta = NULL, version_sesion = version_sesion + 1, "
+                "temporal_vence = now() + make_interval(hours => :horas) WHERE id = :i"
             ),
-            {"i": usuario_id, "h": hash_contrasena(temporal)},
+            {"i": usuario_id, "h": hash_contrasena(temporal), "horas": HORAS_CONTRASENA_TEMPORAL},
         )
+        pedir_aprobacion(conn, usuario_id)
         _desbloquear(conn, usuario_id)
         registrar(conn, actual["usuario"], "restablecer_contrasena", por)
         suspendida = suspender_firma(conn, actual, por, "se restableció su contraseña")
@@ -417,7 +478,8 @@ def cambiar_firma(usuario_id: int, firma: bool, por: str) -> dict:
             raise ErrorDeUsuario("Tu propio permiso de firma lo cambia otra Responsable de RRHH")
         if firma:
             estado = conn.execute(
-                text("SELECT debe_cambiar_contrasena, mfa_activo FROM usuarios WHERE id = :i"), {"i": usuario_id}
+                text("SELECT debe_cambiar_contrasena, mfa_activo, acceso_aprobado FROM usuarios WHERE id = :i"),
+                {"i": usuario_id},
             ).mappings().one()
             if actual["rol"] != "rrhh" or not actual["activo"]:
                 raise ErrorDeUsuario("Solo una cuenta activa de RRHH puede firmar los reportes")
@@ -426,6 +488,8 @@ def cambiar_firma(usuario_id: int, firma: bool, por: str) -> dict:
                     "Esa persona debe entrar primero, cambiar su contraseña temporal y activar su verificación "
                     "en dos pasos: así nadie más conoce su acceso"
                 )
+            if not estado["acceso_aprobado"]:
+                raise ErrorDeUsuario("Primero aprueba el acceso de esa persona")
         if actual["firma_reportes"] != firma:
             conn.execute(text("UPDATE usuarios SET firma_reportes = :f WHERE id = :i"), {"f": firma, "i": usuario_id})
             registrar(conn, actual["usuario"], "dar_firma" if firma else "quitar_firma", por,
@@ -443,7 +507,7 @@ def cambiar_contrasena(usuario: str, contrasena: str, por: str = "consola"):
         filas = conn.execute(
             text(
                 "UPDATE usuarios SET contrasena_hash = :h, debe_cambiar_contrasena = false, intentos_fallidos = 0, "
-                "bloqueado_hasta = NULL, version_sesion = version_sesion + 1 WHERE usuario = :u"
+                "bloqueado_hasta = NULL, version_sesion = version_sesion + 1, temporal_vence = NULL WHERE usuario = :u"
             ),
             {"u": usuario, "h": hash_contrasena(contrasena)},
         ).rowcount
@@ -482,7 +546,7 @@ def cambiar_mi_contrasena(u: Usuario, actual: str, nueva: str, origen: str = "lo
     with engine.begin() as conn:
         conn.execute(
             text(
-                "UPDATE usuarios SET contrasena_hash = :h, debe_cambiar_contrasena = false, "
+                "UPDATE usuarios SET contrasena_hash = :h, debe_cambiar_contrasena = false, temporal_vence = NULL, "
                 "version_sesion = version_sesion + 1 WHERE id = :i"
             ),
             {"i": u.id, "h": hash_contrasena(nueva)},
@@ -511,6 +575,8 @@ def _pendiente(fila) -> str | None:
         return "cambiar_contrasena"
     if fila["rol"] in roles_con_mfa() and not fila["mfa_activo"]:
         return "configurar_mfa"
+    if not fila["acceso_aprobado"]:
+        return "aprobacion"
     return None
 
 
@@ -522,7 +588,8 @@ def _a_usuario(fila) -> Usuario:
 
 
 _COLUMNAS_SESION = (
-    "id, usuario, nombre, rol, area_id, debe_cambiar_contrasena, mfa_activo, version_sesion, firma_reportes"
+    "id, usuario, nombre, rol, area_id, debe_cambiar_contrasena, mfa_activo, version_sesion, firma_reportes, "
+    "acceso_aprobado, temporal_vence"
 )
 
 
@@ -552,6 +619,16 @@ def registrar_fallo(conn, usuario: str, origen: str):
         "DELETE FROM bloqueos_acceso WHERE actualizado_en < now() - make_interval(days => 1) "
         "AND (bloqueado_hasta IS NULL OR bloqueado_hasta < now())"
     ))
+    conn.execute(
+        text(
+            "INSERT INTO accesos (usuario, evento, origen) VALUES "
+            "(COALESCE((SELECT usuario FROM usuarios WHERE usuario = :u), :x), 'fallo', :o)"
+        ),
+        {"u": usuario, "x": USUARIO_INEXISTENTE, "o": origen},
+    )
+    conn.execute(
+        text("DELETE FROM accesos WHERE momento < now() - make_interval(days => :d)"), {"d": DIAS_BITACORA_ACCESOS}
+    )
 
 
 def registrar_entrada(conn, usuario_id: int, usuario: str, origen: str):
@@ -560,6 +637,9 @@ def registrar_entrada(conn, usuario_id: int, usuario: str, origen: str):
     )
     conn.execute(
         text("UPDATE usuarios SET intentos_fallidos = 0, ultimo_acceso = now() WHERE id = :id"), {"id": usuario_id}
+    )
+    conn.execute(
+        text("INSERT INTO accesos (usuario, evento, origen) VALUES (:u, 'entrada', :o)"), {"u": usuario, "o": origen}
     )
 
 
@@ -614,6 +694,8 @@ def autenticar(usuario: str, contrasena: str, origen: str = "local") -> Usuario:
         elif not verificar_contrasena(contrasena, fila["contrasena_hash"] if existe else _HASH_SENUELO) or not existe:
             registrar_fallo(conn, nombre, origen)
             error = invalido
+        elif fila["temporal_vence"] and fila["temporal_vence"] < datetime.now(timezone.utc):
+            error = HTTPException(status.HTTP_401_UNAUTHORIZED, "Tu contraseña temporal venció: pide a TI una nueva")
         elif not fila["mfa_activo"]:
             registrar_entrada(conn, fila["id"], nombre, origen)
     if error is not None:
@@ -689,6 +771,7 @@ def sesion_actual(token: str = Depends(esquema_oauth)) -> Usuario:
 PENDIENTES = {
     "cambiar_contrasena": "Antes de continuar debes cambiar tu contraseña temporal",
     "configurar_mfa": "Antes de continuar debes configurar la verificación en dos pasos (MFA)",
+    "aprobacion": "Tu acceso espera la aprobación de la Responsable de RRHH",
 }
 
 

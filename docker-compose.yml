@@ -11,9 +11,20 @@
 # Cada contenedor corre con lo minimo (hallazgo 9 de la segunda auditoria):
 # sin privilegios extra (no-new-privileges), sin capacidades de Linux salvo
 # las que necesita, y con el sistema de archivos de solo lectura (solo escriben
-# en sus volumenes y en memoria, tmpfs).
+# en sus volumenes y en memoria, tmpfs). Cada uno tiene tope de memoria y de
+# procesos, y sus logs rotan. El tablero no ve la base: solo la API esta en las
+# dos redes.
+x-logs: &logs
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "3"}
+
 services:
   db:
+    <<: *logs
+    mem_limit: 1g
+    pids_limit: 200
+    networks: [interna]
     # Fijada por digest; Dependabot propone las actualizaciones
     image: postgres:16@sha256:5db6dac2ef5dcff512f4f00a009c3c332b9f2f28f24277175bf3e4a3d02ef83a
     container_name: rrhh_db
@@ -40,6 +51,10 @@ services:
       retries: 5
 
   api:
+    <<: *logs
+    mem_limit: 2g
+    pids_limit: 256
+    networks: [interna, publica]
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -73,6 +88,10 @@ services:
       - "${API_ESCUCHA:-127.0.0.1}:8000:8000"
 
   web:
+    <<: *logs
+    mem_limit: 256m
+    pids_limit: 100
+    networks: [publica]
     build: ./frontend
     container_name: rrhh_web
     restart: unless-stopped
@@ -104,3 +123,7 @@ services:
 
 volumes:
   pgdata:
+
+networks:
+  interna:
+  publica:

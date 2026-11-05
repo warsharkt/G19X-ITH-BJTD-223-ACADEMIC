@@ -85,6 +85,29 @@ BEGIN
     END IF;
 END $$;
 
+-- Aprobacion de accesos (regla 10.3.2): TI no ve datos de colaboradores. Si
+-- TI crea una cuenta con datos, le cambia rol o area, o restablece su acceso,
+-- la cuenta queda en espera hasta que una Responsable de RRHH la apruebe: asi
+-- TI no puede abrirse la puerta a si misma. Lo que se hace desde la consola
+-- del servidor no pasa por aqui.
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS acceso_aprobado BOOLEAN NOT NULL DEFAULT true;
+
+-- Hasta cuando sirve una contrasena temporal (NULL si no es temporal).
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS temporal_vence TIMESTAMPTZ;
+
+-- Bitacora de accesos: cada entrada y cada intento fallido, con su IP. Los
+-- nombres que no existen no se guardan: a veces la gente escribe su contrasena
+-- en el campo de usuario. Se purga despues de un ano.
+CREATE TABLE IF NOT EXISTS accesos (
+    id       BIGSERIAL PRIMARY KEY,
+    usuario  TEXT NOT NULL,
+    evento   TEXT NOT NULL CHECK (evento IN ('entrada', 'fallo')),
+    origen   TEXT,
+    momento  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS accesos_momento ON accesos (momento);
+
 -- Suplencias: mientras la Responsable no esta, designa a una Analista que
 -- firma en su lugar hasta una fecha. Nunca se borran: cancelar deja quien
 -- y cuando (bitacora RF-11).

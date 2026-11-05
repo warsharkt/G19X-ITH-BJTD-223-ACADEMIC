@@ -47,11 +47,15 @@ BYTES_MAXIMOS = 5 * 1024 * 1024
 # filas trae antes de validar (un mes real de Nordika: ~1,100 filas).
 BYTES_DESCOMPRIMIDOS_MAXIMOS = 60 * 1024 * 1024
 FILAS_MAXIMAS = 50_000
+# Leer un Excel tarda por celda, no por peso: 1.6 millones de celdas repetidas
+# caben en 4 MB y tardaban un minuto. Un mes real no llega a 20,000.
+CELDAS_MAXIMAS = 1_000_000
 # Una carga validada guarda sus filas hasta que se aplica o se descarta. Si
 # nadie la aplica en este plazo, vence: se descarta sola y sus filas se borran
 # (no se quedan datos de colaboradores olvidados en la base).
 DIAS_PARA_APLICAR = 7
 CADUCADA = "sistema:venció"
+AREA_LARGO_MAXIMO = 60
 EXTENSIONES = (".csv", ".xlsx")
 ERRORES_MOSTRADOS = 100
 FILAS_DE_MUESTRA = 8
@@ -264,13 +268,17 @@ def _revisar_zip(contenido: bytes):
     try:
         with zipfile.ZipFile(io.BytesIO(contenido)) as z:
             total = sum(i.file_size for i in z.infolist())
+            if total > BYTES_DESCOMPRIMIDOS_MAXIMOS:
+                raise ErrorDeCarga(
+                    f"El Excel descomprimido pesa más de {BYTES_DESCOMPRIMIDOS_MAXIMOS // (1024 * 1024)} MB: "
+                    "divídelo en varios archivos o súbelo como .csv"
+                )
+            hojas = [z.read(i) for i in z.namelist() if i.startswith("xl/worksheets/") and i.endswith(".xml")]
     except zipfile.BadZipFile:
         raise ErrorDeCarga("El archivo no es un Excel (.xlsx) válido")
-    if total > BYTES_DESCOMPRIMIDOS_MAXIMOS:
-        raise ErrorDeCarga(
-            f"El Excel descomprimido pesa más de {BYTES_DESCOMPRIMIDOS_MAXIMOS // (1024 * 1024)} MB: "
-            "divídelo en varios archivos o súbelo como .csv"
-        )
+    # Se cuentan en el XML, sin abrir el libro, y no se usa su <dimension>: la declara el archivo
+    if sum(h.count(b"<c ") + h.count(b"<c>") for h in hojas) > CELDAS_MAXIMAS:
+        raise ErrorDeCarga(f"El Excel tiene más de {CELDAS_MAXIMAS:,} celdas: divídelo en varios archivos o súbelo como .csv")
 
 
 def leer_archivo(nombre: str, contenido: bytes) -> pd.DataFrame:
@@ -392,9 +400,13 @@ def _convertir(c: Columna, v, contexto: dict):
         return n
     if c.tipo == "area":
         id_ = contexto["areas"].get(_clave(v))
-        if id_ is None:
-            raise ValueError(f"el área '{_texto(v)}' no existe. Áreas: {', '.join(contexto['nombres_area'])}")
-        return id_
+        if id_ is not None:
+            return id_
+        if contexto["definir_areas"]:
+            return _area_nueva(v, contexto)
+        if not contexto["nombres_area"]:
+            raise ValueError("no existe: carga primero la plantilla de personal (HRIS), de ahí salen las áreas")
+        raise ValueError(f"el área '{_texto(v)}' no existe. Áreas: {', '.join(contexto['nombres_area'])}")
     if c.tipo == "empleado":
         id_ = contexto["empleados"].get(_texto(v).upper())
         if id_ is None:
@@ -415,9 +427,21 @@ def _convertir(c: Columna, v, contexto: dict):
     raise AssertionError(c.tipo)
 
 
+def _area_nueva(v, contexto: dict) -> str:
+    """Primera plantilla de personal: el area se creara al aplicar la carga.
+    Devuelve su nombre, escrito como la primera vez que aparecio en el archivo."""
+    nombre, clave = _texto(v).strip(), _clave(v)
+    if not clave or clave == "corporativo" or len(nombre) > AREA_LARGO_MAXIMO:
+        raise ValueError(f"no sirve como nombre de área (máximo {AREA_LARGO_MAXIMO} caracteres; Corporativo es el consolidado)")
+    return contexto["areas_nuevas"].setdefault(clave, nombre)
+
+
 def _contexto(conn, fuente: Fuente) -> dict:
     filas = conn.execute(text("SELECT id, nombre FROM areas ORDER BY nombre")).all()
-    ctx = {"areas": {_clave(n): i for i, n in filas}, "nombres_area": [n for _, n in filas], "empleados": {}}
+    ctx = {"areas": {_clave(n): i for i, n in filas}, "nombres_area": [n for _, n in filas], "empleados": {},
+           # Con datos reales nadie mas crea las areas: las define la primera
+           # plantilla. Despues, un area desconocida es un error (un typo no inventa areas).
+           "definir_areas": fuente.clave == "hris" and not filas, "areas_nuevas": {}}
     if any(c.tipo == "empleado" for c in fuente.columnas):
         ctx["empleados"] = {c.upper(): i for i, c in conn.execute(text("SELECT id, codigo FROM empleados"))}
     return ctx
@@ -541,6 +565,7 @@ def validar(clave_fuente: str, archivo: str, contenido: bytes, usuario: str) -> 
         {"columna": c, "motivo": "dato personal: no se guarda" if c in PERSONALES else "no la usa ningún indicador"}
         for c in df.columns if c not in esperadas
     ]
+    areas_nuevas = []
     with engine.connect() as conn:
         if faltan:
             filas, muestra = [], {"columnas": [], "filas": []}
@@ -549,12 +574,15 @@ def validar(clave_fuente: str, archivo: str, contenido: bytes, usuario: str) -> 
             filas, muestra = [], {"columnas": [], "filas": []}
             errores = [{"fila": None, "columna": None, "mensaje": "El archivo no tiene filas"}]
         else:
-            filas, errores, muestra = _validar_filas(fuente, df, _contexto(conn, fuente))
+            contexto = _contexto(conn, fuente)
+            filas, errores, muestra = _validar_filas(fuente, df, contexto)
+            areas_nuevas = sorted(contexto["areas_nuevas"].values())
         existentes = 0 if errores else _existentes(conn, fuente, filas)
 
     estado = "con_errores" if errores else "validada"
     resumen = {"filas": len(df), "validas": len(filas), "existentes": existentes,
-               "nuevas": len(filas) - existentes if fuente.clave != "clima" else len(filas)}
+               "nuevas": len(filas) - existentes if fuente.clave != "clima" else len(filas),
+               "areas_nuevas": areas_nuevas}
     with engine.begin() as conn:
         id_ = conn.execute(
             text(
@@ -594,7 +622,23 @@ def _insertar(conn, tabla: str, columnas: list[tuple[str, str, str]], filas: lis
     return sum(conn.execute(text(sql), valores).scalars())
 
 
+def _con_areas_creadas(conn, filas: list[dict]) -> list[dict]:
+    """Crea las areas de la primera plantilla y pone su id en cada fila."""
+    nombres = list(dict.fromkeys(f["area"] for f in filas if isinstance(f["area"], str)))
+    if not nombres:
+        return filas
+    conn.execute(text("LOCK TABLE areas IN SHARE ROW EXCLUSIVE MODE"))  # dos cargas a la vez: gana una
+    if conn.execute(text("SELECT EXISTS (SELECT 1 FROM areas)")).scalar():
+        raise ErrorDeCarga("Las áreas ya se definieron con otra carga: vuelve a subir el archivo")
+    ids = {
+        n: conn.execute(text("INSERT INTO areas (nombre) VALUES (:n) RETURNING id"), {"n": n}).scalar_one()
+        for n in nombres
+    }
+    return [{**f, "area": ids.get(f["area"], f["area"])} for f in filas]
+
+
 def _aplicar_hris(conn, filas):
+    filas = _con_areas_creadas(conn, filas)
     nuevas = _insertar(conn, "empleados", [
         ("codigo", "codigo", "text"), ("area_id", "area", "int"), ("fecha_ingreso", "fecha_ingreso", "date"),
         ("fecha_baja", "fecha_baja", "date"), ("tipo_baja", "tipo_baja", "text"),

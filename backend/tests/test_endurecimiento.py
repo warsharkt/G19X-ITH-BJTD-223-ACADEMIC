@@ -132,7 +132,8 @@ def test_lo_que_ti_hace_con_una_cuenta_de_rrhh_le_llega_a_rrhh(client):
         "usuario": PREFIJO + "nueva", "nombre": "Nueva RRHH", "rol": "rrhh",
     })
     assert r.status_code == 201
-    titulo = f"{PREFIJO}ti (TI) creó la cuenta de RRHH de Nueva RRHH ({PREFIJO}nueva)"
+    titulo = (f"{PREFIJO}ti (TI) creó la cuenta de RRHH de Nueva RRHH ({PREFIJO}nueva). "
+              "Su acceso espera que una Responsable lo apruebe en Usuarios")
     assert titulo in avisos_de_cuenta("resp") and titulo in avisos_de_cuenta("ana")
     # una cuenta de TI no ve datos de colaboradores: no genera aviso
     client.post("/usuarios", headers=como(client, "ti"), json={"usuario": PREFIJO + "otro", "nombre": "G", "rol": "admin_ti"})
@@ -595,7 +596,8 @@ def test_la_contrasena_actual_equivocada_cuenta_como_intento_fallido(cuentas):
 def test_si_ti_restablece_a_un_gerente_se_entera_rrhh_y_el_gerente(client, cuentas):
     r = client.post(f"/usuarios/{cuentas['ids']['ger']}/contrasena", headers=como(client, "ti"))
     assert r.status_code == 200
-    titulo = f"{PREFIJO}ti (TI) restableció la contraseña de la cuenta de gerencia de Gerente Ventas ({PREFIJO}ger)"
+    titulo = (f"{PREFIJO}ti (TI) restableció la contraseña de la cuenta de gerencia de Gerente Ventas ({PREFIJO}ger). "
+              "Su acceso espera que una Responsable lo apruebe en Usuarios")
     assert titulo in avisos_de_cuenta("resp")  # antes: solo se avisaba de cuentas de RRHH
     assert titulo in avisos_de_cuenta("ger")
     with engine.connect() as conn:  # al gerente le llega con su area, la unica que puede ver
@@ -819,3 +821,294 @@ def test_con_datos_reales_y_base_vacia_se_crean_las_tablas(monkeypatch):
 def test_con_datos_reales_y_base_con_datos_no_se_toca_nada(monkeypatch):
     """schema.sql borra las tablas de las fuentes: nunca con datos."""
     assert _arranque_con_datos_reales(monkeypatch, vacia=False) == []
+
+
+# ================= 1. TI no puede abrirse una cuenta que vea datos de colaboradores
+def _entrar_con_temporal(client, usuario, temporal):
+    """Lo que haria TI: entrar con la temporal que ella misma recibio y cambiarla."""
+    sesion = {"Authorization": "Bearer " + client.post(
+        "/auth/login", data={"username": usuario, "password": temporal}).json()["access_token"]}
+    r = client.post("/auth/contrasena", headers=sesion, json={"actual": temporal, "nueva": "Clave-que-ti-eligio-7"})
+    assert r.status_code == 200, r.text
+    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+
+def _bloqueada_por_aprobacion(client, sesion):
+    r = client.get("/kpis", headers=sesion)
+    return r.status_code == 403 and "aprobación" in r.json()["detail"]
+
+
+@pytest.mark.parametrize("rol", ["rrhh", "direccion", "gerente"])
+def test_ti_no_lee_datos_con_una_cuenta_que_ella_creo(client, cuentas, rol):
+    datos = {"usuario": PREFIJO + "sombra", "nombre": "Sombra", "rol": rol}
+    if rol == "gerente":
+        datos["area_id"] = cuentas["ventas"]
+    r = client.post("/usuarios", headers=como(client, "ti"), json=datos)
+    assert r.status_code == 201 and r.json()["cuenta"]["acceso_aprobado"] is False
+    sesion = _entrar_con_temporal(client, PREFIJO + "sombra", r.json()["contrasena_temporal"])
+    con_mfa_activa("sombra")
+    assert client.get("/auth/yo", headers=sesion).json()["pendiente"] == "aprobacion"
+    assert _bloqueada_por_aprobacion(client, sesion)  # antes: 200 con los datos de todas las areas
+    assert client.get("/narrativas", headers=sesion).status_code == 403
+    id_ = r.json()["cuenta"]["id"]
+    r = client.put(f"/usuarios/{id_}/aprobacion", headers=como(client, "resp"), json={"aprobada": True})
+    assert r.status_code == 200 and r.json()["acceso_aprobado"] is True
+    assert client.get("/auth/yo", headers=sesion).json()["pendiente"] is None
+
+
+def test_una_cuenta_de_ti_no_espera_aprobacion(client):
+    r = client.post("/usuarios", headers=como(client, "ti"),
+                    json={"usuario": PREFIJO + "ti2", "nombre": "Otro TI", "rol": "admin_ti"})
+    assert r.json()["cuenta"]["acceso_aprobado"] is True
+
+
+def test_ti_no_toma_una_cuenta_existente_restableciendola(client, cuentas):
+    ti = como(client, "ti")
+    r = client.post(f"/usuarios/{cuentas['ids']['ger']}/contrasena", headers=ti)
+    sesion = _entrar_con_temporal(client, PREFIJO + "ger", r.json()["contrasena_temporal"])
+    assert _bloqueada_por_aprobacion(client, sesion)  # antes: leia los datos de su area
+
+
+def test_reiniciar_el_mfa_tambien_pide_aprobacion(client, cuentas):
+    con_mfa_activa("ana")
+    assert client.post(f"/usuarios/{cuentas['ids']['ana']}/mfa/reiniciar", headers=como(client, "ti")).status_code == 200
+    assert seguridad.obtener_cuenta(cuentas["ids"]["ana"])["acceso_aprobado"] is False
+
+
+def test_subir_de_rol_una_cuenta_de_ti_pide_aprobacion(client, cuentas):
+    ti = como(client, "ti")
+    r = client.post("/usuarios", headers=ti, json={"usuario": PREFIJO + "ti2", "nombre": "Otro TI", "rol": "admin_ti"})
+    id_ = r.json()["cuenta"]["id"]
+    r = client.patch(f"/usuarios/{id_}", headers=ti, json={"rol": "rrhh"})
+    assert r.status_code == 200 and r.json()["acceso_aprobado"] is False
+
+
+def test_cambiar_de_area_a_un_gerente_pide_aprobacion(client, cuentas):
+    with engine.connect() as conn:
+        otra = conn.execute(text("SELECT id FROM areas WHERE id <> :v ORDER BY id LIMIT 1"), {"v": cuentas["ventas"]}).scalar()
+    r = client.patch(f"/usuarios/{cuentas['ids']['ger']}", headers=como(client, "ti"), json={"area_id": otra})
+    assert r.status_code == 200 and r.json()["acceso_aprobado"] is False
+
+
+def test_cambiar_el_nombre_no_pide_aprobacion(client, cuentas):
+    r = client.patch(f"/usuarios/{cuentas['ids']['ger']}", headers=como(client, "ti"), json={"nombre": "Otro Nombre"})
+    assert r.status_code == 200 and r.json()["acceso_aprobado"] is True
+
+
+@pytest.mark.parametrize("quien", ["ti", "ana", "dir", "ger"])
+def test_solo_una_responsable_aprueba(client, cuentas, quien):
+    client.post(f"/usuarios/{cuentas['ids']['ana2']}/contrasena", headers=como(client, "ti"))
+    r = client.put(f"/usuarios/{cuentas['ids']['ana2']}/aprobacion", headers=como(client, quien), json={"aprobada": True})
+    assert r.status_code == 403
+    assert seguridad.obtener_cuenta(cuentas["ids"]["ana2"])["acceso_aprobado"] is False
+
+
+def test_nadie_aprueba_su_propio_acceso(cuentas):
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE usuarios SET acceso_aprobado = false WHERE id = :i"), {"i": cuentas["ids"]["resp"]})
+    with pytest.raises(seguridad.ErrorDeUsuario, match="otra Responsable"):
+        seguridad.resolver_aprobacion(cuentas["ids"]["resp"], True, PREFIJO + "resp")
+
+
+def test_lo_que_no_espera_no_se_aprueba(client, cuentas):
+    r = client.put(f"/usuarios/{cuentas['ids']['ger']}/aprobacion", headers=como(client, "resp"), json={"aprobada": True})
+    assert r.status_code == 422
+
+
+def test_una_cuenta_rechazada_no_revive_aunque_ti_la_reactive(client, cuentas):
+    ti, resp = como(client, "ti"), como(client, "resp")
+    id_ = cuentas["ids"]["ger"]
+    temporal = client.post(f"/usuarios/{id_}/contrasena", headers=ti).json()["contrasena_temporal"]
+    r = client.put(f"/usuarios/{id_}/aprobacion", headers=resp, json={"aprobada": False})
+    assert r.status_code == 200 and r.json()["activo"] is False
+    assert client.post("/auth/login", data={"username": PREFIJO + "ger", "password": temporal}).status_code == 401
+    assert client.patch(f"/usuarios/{id_}", headers=ti, json={"activo": True}).status_code == 200
+    sesion = _entrar_con_temporal(client, PREFIJO + "ger", temporal)
+    assert _bloqueada_por_aprobacion(client, sesion)
+
+
+def test_quien_espera_aprobacion_no_recibe_firma_ni_suplencia(client, cuentas):
+    con_mfa_activa("ana")
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE usuarios SET acceso_aprobado = false WHERE usuario = :u"), {"u": PREFIJO + "ana"})
+    resp = como(client, "resp")
+    assert PREFIJO + "ana" not in [c["usuario"] for c in client.get("/firmas", headers=resp).json()["candidatas"]]
+    r = client.post("/firmas/suplencia", headers=resp,
+                    json={"suplente": PREFIJO + "ana", "hasta": str(date.today() + timedelta(days=3))})
+    assert r.status_code == 422
+    r = client.put(f"/firmas/responsables/{cuentas['ids']['ana']}", headers=resp, json={"firma": True})
+    assert r.status_code == 422 and "aprueba" in r.json()["detail"]
+
+
+# ========================================== 3. bitacora de inicios de sesion
+def _accesos(usuario):
+    with engine.connect() as conn:
+        return conn.execute(text("SELECT evento, origen FROM accesos WHERE usuario = :u ORDER BY id"), {"u": usuario}).all()
+
+
+@pytest.fixture()
+def sin_accesos():
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM accesos"))
+
+
+def test_las_entradas_y_los_fallos_quedan_en_la_bitacora(client, sin_accesos):
+    equipo = TestClient(app, client=("10.0.7.1", 5000))
+    assert entrar(equipo, "ger", "equivocada-1234").status_code == 401
+    assert entrar(equipo, "ger").status_code == 200
+    assert [tuple(f) for f in _accesos(PREFIJO + "ger")] == [("fallo", "10.0.7.1"), ("entrada", "10.0.7.1")]
+
+
+def test_un_nombre_que_no_existe_no_se_guarda(client, sin_accesos):
+    """A veces la gente escribe la contrasena en el campo de usuario."""
+    equipo = TestClient(app, client=("10.0.7.2", 5000))
+    equipo.post("/auth/login", data={"username": "Mi-Clave-Secreta-1", "password": "x"})
+    with engine.connect() as conn:
+        assert list(conn.execute(text("SELECT usuario FROM accesos")).scalars()) == [seguridad.USUARIO_INEXISTENTE]
+
+
+def test_con_mfa_la_entrada_cuenta_hasta_acertar_el_codigo(client, sin_accesos):
+    con_mfa_activa("ana")
+    assert entrar(client, "ana").json()["mfa_requerido"] is True
+    assert _accesos(PREFIJO + "ana") == []  # la contrasena sola no es una entrada
+
+
+def test_ti_y_rrhh_ven_los_accesos_y_nadie_mas(client, sin_accesos):
+    como(client, "ger")
+    for quien, estado in (("ti", 200), ("ana", 200), ("ger", 403), ("dir", 403)):
+        r = client.get("/usuarios/accesos", headers=como(client, quien))
+        assert r.status_code == estado
+    r = client.get("/usuarios/accesos", params={"usuario": PREFIJO + "ger"}, headers=como(client, "ti"))
+    assert {a["evento"] for a in r.json()} == {"entrada"} and {a["usuario"] for a in r.json()} == {PREFIJO + "ger"}
+
+
+# =================================== 13. la temporal vence y el ejemplo no se usa
+def test_una_contrasena_temporal_vencida_no_sirve(client, cuentas):
+    r = client.post(f"/usuarios/{cuentas['ids']['ger']}/contrasena", headers=como(client, "ti"))
+    temporal = r.json()["contrasena_temporal"]
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE usuarios SET temporal_vence = now() - interval '1 minute' WHERE id = :i"),
+                     {"i": cuentas["ids"]["ger"]})
+    r = client.post("/auth/login", data={"username": PREFIJO + "ger", "password": temporal})
+    assert r.status_code == 401 and "venció" in r.json()["detail"]
+    r = client.post("/auth/login", data={"username": PREFIJO + "ger", "password": "equivocada-1234"})
+    assert "venció" not in r.json()["detail"]  # sin la contrasena no se revela nada
+
+
+def test_cambiar_la_temporal_quita_el_vencimiento(client, cuentas):
+    r = client.post(f"/usuarios/{cuentas['ids']['ger']}/contrasena", headers=como(client, "ti"))
+    _entrar_con_temporal(client, PREFIJO + "ger", r.json()["contrasena_temporal"])
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT temporal_vence FROM usuarios WHERE id = :i"), {"i": cuentas["ids"]["ger"]}).scalar() is None
+
+
+def test_con_datos_reales_no_arranca_con_la_contrasena_de_ejemplo(monkeypatch):
+    from scripts import arranque
+
+    monkeypatch.setenv("POSTGRES_PASSWORD", arranque.CONTRASENA_DE_EJEMPLO)
+    monkeypatch.setattr(arranque, "modo_datos", lambda: "reales")
+    with pytest.raises(SystemExit, match="cámbiala"):
+        arranque.revisar_contrasena_de_la_base()
+    monkeypatch.setattr(arranque, "modo_datos", lambda: "sinteticos")
+    arranque.revisar_contrasena_de_la_base()  # en una demo solo avisa
+    monkeypatch.setenv("POSTGRES_PASSWORD", "otra-cualquiera")
+    monkeypatch.setattr(arranque, "modo_datos", lambda: "reales")
+    arranque.revisar_contrasena_de_la_base()
+
+
+# ================= con datos reales, las areas las define la primera plantilla
+def _hris(areas):
+    return pd.DataFrame({
+        "codigo": [f"E{i}" for i in range(len(areas))], "area": areas,
+        "fecha_ingreso": ["2024-01-10"] * len(areas), "fecha_baja": [None] * len(areas), "tipo_baja": [None] * len(areas),
+    })
+
+
+@pytest.fixture()
+def sin_areas():
+    """Una transaccion que se deshace al final: la base de pruebas queda igual."""
+    with engine.connect() as conn:
+        transaccion = conn.begin()
+        conn.execute(text("TRUNCATE areas CASCADE"))
+        try:
+            yield conn
+        finally:
+            transaccion.rollback()
+
+
+def _validar(conn, clave, df):
+    fuente = cargas.FUENTES[clave]
+    contexto = cargas._contexto(conn, fuente)
+    filas, errores, _ = cargas._validar_filas(fuente, df, contexto)
+    return filas, errores, contexto
+
+
+def test_la_primera_plantilla_crea_las_areas(sin_areas):
+    filas, errores, contexto = _validar(sin_areas, "hris", _hris(["Ventas", "VENTAS ", "Almacén", "almacen"]))
+    assert errores == []
+    assert sorted(contexto["areas_nuevas"].values()) == ["Almacén", "Ventas"]  # sin duplicar por mayusculas o acentos
+    assert cargas._aplicar_hris(sin_areas, filas)[0] == 4
+    assert sorted(sin_areas.execute(text("SELECT nombre FROM areas")).scalars()) == ["Almacén", "Ventas"]
+    ventas, otra = sin_areas.execute(text(
+        "SELECT COUNT(*) FILTER (WHERE a.nombre = 'Ventas'), COUNT(*) FROM empleados e JOIN areas a ON a.id = e.area_id"
+    )).one()
+    assert (ventas, otra) == (2, 4)
+
+
+def test_despues_de_la_primera_un_error_de_dedo_no_inventa_areas(sin_areas):
+    filas, _, _ = _validar(sin_areas, "hris", _hris(["Ventas"]))
+    cargas._aplicar_hris(sin_areas, filas)
+    _, errores, contexto = _validar(sin_areas, "hris", _hris(["Ventsa"]))
+    assert "no existe" in errores[0]["mensaje"] and contexto["areas_nuevas"] == {}
+
+
+def test_otras_fuentes_no_crean_areas_y_dicen_que_cargar_primero(sin_areas):
+    df = pd.DataFrame({"area": ["Ventas"], "periodo": ["2026-08"], "dimension": ["enps"], "puntaje": [8]})
+    _, errores, _ = _validar(sin_areas, "clima", df)
+    assert "plantilla de personal" in errores[0]["mensaje"]
+
+
+def test_corporativo_no_es_un_area(sin_areas):
+    _, errores, _ = _validar(sin_areas, "hris", _hris(["Corporativo"]))
+    assert "Corporativo es el consolidado" in errores[0]["mensaje"]
+
+
+def test_dos_cargas_que_definen_areas_no_se_pisan(sin_areas):
+    filas, _, _ = _validar(sin_areas, "hris", _hris(["Ventas"]))
+    otra, _, _ = _validar(sin_areas, "hris", _hris(["Otra"]))
+    cargas._aplicar_hris(sin_areas, filas)
+    with pytest.raises(cargas.ErrorDeCarga, match="vuelve a subir"):
+        cargas._aplicar_hris(sin_areas, otra)
+
+
+# ======================== 10. un Excel se limita por celdas, no solo por peso
+def test_un_excel_con_demasiadas_celdas_se_rechaza_sin_abrirlo(monkeypatch):
+    monkeypatch.setattr(cargas, "CELDAS_MAXIMAS", 10)
+    salida = io.BytesIO()
+    pd.DataFrame({"a": range(20), "b": range(20)}).to_excel(salida, index=False)
+    with pytest.raises(cargas.ErrorDeCarga, match="celdas"):
+        cargas.leer_archivo("grande.xlsx", salida.getvalue())
+
+
+# ================ 12. al vencer la cache, uno calcula y los demas esperan
+def test_al_vencer_la_cache_los_kpis_se_calculan_una_vez(monkeypatch):
+    from app.rutas import comun
+
+    calculos = []
+
+    def calcular():
+        calculos.append(1)
+        time.sleep(0.2)
+        return pd.DataFrame()
+
+    comun.olvidar_kpis()
+    monkeypatch.setattr(comun, "calcular_kpis", calcular)
+    hilos = [threading.Thread(target=comun.kpis_df) for _ in range(8)]
+    try:
+        for h in hilos:
+            h.start()
+        for h in hilos:
+            h.join()
+    finally:
+        comun.olvidar_kpis()
+    assert len(calculos) == 1  # antes: uno por peticion

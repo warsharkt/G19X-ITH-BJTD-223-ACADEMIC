@@ -1,5 +1,6 @@
 """Lo que comparten varios routers: los KPIs en memoria y el formato de mes."""
 import math
+import threading
 import time
 
 import pandas as pd
@@ -16,17 +17,29 @@ SEGUNDOS_CACHE = 60
 # Calcular los KPIs toma casi un segundo: se guardan en memoria unos segundos
 # para no recalcular en cada peticion del dashboard.
 _cache = {"df": None, "momento": 0.0}
+# Al vencer la cache, uno calcula y los demas esperan: si cada peticion
+# calculara por su cuenta, 25 a la vez tardaban 3 s en lugar de 0.2.
+_calculando = threading.Lock()
+
+
+def _vigente() -> pd.DataFrame | None:
+    df = _cache["df"]
+    return df if df is not None and time.monotonic() - _cache["momento"] <= SEGUNDOS_CACHE else None
 
 
 def kpis_df() -> pd.DataFrame:
-    ahora = time.monotonic()
-    if _cache["df"] is None or ahora - _cache["momento"] > SEGUNDOS_CACHE:
-        try:
-            _cache["df"] = calcular_kpis()
-        except SQLAlchemyError:
-            raise HTTPException(status_code=503, detail="Base de datos no disponible")
-        _cache["momento"] = ahora
-    return _cache["df"]
+    df = _vigente()
+    if df is not None:
+        return df
+    with _calculando:
+        df = _vigente()
+        if df is None:
+            try:
+                df = calcular_kpis()
+            except SQLAlchemyError:
+                raise HTTPException(status_code=503, detail="Base de datos no disponible")
+            _cache["df"], _cache["momento"] = df, time.monotonic()
+    return df
 
 
 def olvidar_kpis():

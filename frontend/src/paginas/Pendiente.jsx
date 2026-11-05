@@ -13,6 +13,11 @@ const TEXTOS = {
     texto:
       'Tu rol tiene acceso a información sensible, así que además de la contraseña necesitas un código de tu teléfono para entrar.',
   },
+  aprobacion: {
+    titulo: 'Tu acceso espera aprobación',
+    texto:
+      'La Responsable de RRHH debe aprobarlo antes de que veas información de colaboradores. Ya le llegó el aviso.',
+  },
 }
 
 // Lo que hay que resolver antes de usar el sistema. La API exige lo mismo:
@@ -30,10 +35,14 @@ export default function Pendiente() {
         <p className="texto-secundario">
           Hola, {usuario.nombre}. {texto}
         </p>
-        {usuario.pendiente === 'cambiar_contrasena' ? (
+        {usuario.pendiente === 'cambiar_contrasena' && (
           <FormularioContrasena alCambiar={recargarUsuario} textoBoton="Guardar y continuar" />
-        ) : (
-          <ConfigurarMfa alTerminar={recargarUsuario} />
+        )}
+        {usuario.pendiente === 'configurar_mfa' && <ConfigurarMfa alTerminar={recargarUsuario} />}
+        {usuario.pendiente === 'aprobacion' && (
+          <button type="button" className="boton-primario" onClick={() => recargarUsuario()}>
+            Ya me aprobaron
+          </button>
         )}
         <button type="button" className="boton-texto" onClick={() => cerrarSesion()}>
           Cerrar sesión

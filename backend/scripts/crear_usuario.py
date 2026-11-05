@@ -45,6 +45,7 @@ from app.seguridad import (
     cambiar_contrasena,
     cambiar_correo,
     cambiar_firma,
+    resolver_aprobacion,
     crear_usuario,
 )
 
@@ -117,6 +118,8 @@ def main():
     ap.add_argument("--firma", action="store_true", help="al crear (rol rrhh): Responsable que firma los reportes")
     ap.add_argument("--dar-firma", action="store_true", help="da el permiso de firmar reportes a una cuenta de RRHH")
     ap.add_argument("--quitar-firma", action="store_true", help="quita el permiso de firmar reportes")
+    ap.add_argument("--aprobar", action="store_true",
+                    help="aprueba un acceso en espera (si no hay otra Responsable que pueda hacerlo)")
     ap.add_argument("--listar", action="store_true", help="muestra los usuarios existentes")
     args = ap.parse_args()
 
@@ -138,6 +141,11 @@ def main():
                 raise SystemExit("Indica --usuario")
             cambiar_firma(id_de_usuario(args.usuario), args.dar_firma, POR)
             print(f"'{args.usuario}' {'ya puede' if args.dar_firma else 'ya no puede'} firmar reportes.")
+        elif args.aprobar:
+            if not args.usuario:
+                raise SystemExit("Indica --usuario")
+            resolver_aprobacion(id_de_usuario(args.usuario), True, POR)
+            print(f"Acceso de '{args.usuario}' aprobado.")
         elif args.reiniciar_mfa:
             if not args.usuario:
                 raise SystemExit("Indica --usuario")

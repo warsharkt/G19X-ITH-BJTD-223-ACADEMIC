@@ -243,12 +243,13 @@ def reiniciar(usuario_id: int, por: str, suspender_firma: bool = False) -> bool:
     configurar. Cierra sus sesiones. Nadie reinicia el suyo.
 
     suspender_firma=True (desde el panel de TI): si la cuenta firmaba
-    reportes, pierde el permiso hasta que otra Responsable se lo devuelva.
+    reportes, pierde el permiso hasta que otra Responsable se lo devuelva, y
+    si ve datos queda en espera de la aprobacion de RRHH.
     Devuelve si se suspendio la firma."""
     seguridad.asegurar_tabla()
     with engine.begin() as conn:
         cuenta = conn.execute(
-            text("SELECT id, usuario, firma_reportes FROM usuarios WHERE id = :i FOR UPDATE"), {"i": usuario_id}
+            text("SELECT id, usuario, rol, firma_reportes FROM usuarios WHERE id = :i FOR UPDATE"), {"i": usuario_id}
         ).mappings().first()
         if cuenta is None:
             raise LookupError(f"El usuario {usuario_id} no existe")
@@ -265,6 +266,7 @@ def reiniciar(usuario_id: int, por: str, suspender_firma: bool = False) -> bool:
         conn.execute(text("DELETE FROM codigos_respaldo WHERE usuario_id = :i"), {"i": usuario_id})
         seguridad.registrar(conn, actual, "reiniciar_mfa", por)
         if suspender_firma:
+            seguridad.pedir_aprobacion(conn, usuario_id)
             return seguridad.suspender_firma(conn, dict(cuenta), por, "se reinició su verificación en dos pasos")
     return False
 

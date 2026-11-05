@@ -31,6 +31,9 @@ from app.llm import ConfiguracionIA, modo_datos
 from app.seguridad import ErrorDeUsuario
 
 
+CONTRASENA_DE_EJEMPLO = "cambia_esto"
+
+
 def base_vacia() -> bool:
     with engine.connect() as conn:
         return not conn.execute(text("SELECT to_regclass('public.empleados') IS NOT NULL")).scalar()
@@ -120,7 +123,18 @@ def preparar_cuenta_de_la_api() -> dict[str, str]:
     return {"DB_API_USUARIO": usuario, "DB_API_CONTRASENA": contrasena}
 
 
+def revisar_contrasena_de_la_base():
+    """La del .env.example la conoce cualquiera que lea el repositorio."""
+    if os.getenv("POSTGRES_PASSWORD", "") != CONTRASENA_DE_EJEMPLO:
+        return
+    mensaje = f"POSTGRES_PASSWORD sigue siendo '{CONTRASENA_DE_EJEMPLO}', el valor de ejemplo: cámbiala en el .env"
+    if modo_datos() == "reales":
+        sys.exit(mensaje)
+    print(f"AVISO: {mensaje}")
+
+
 def main():
+    revisar_contrasena_de_la_base()
     sembrar_si_hace_falta()
     preparar_demo()
     cuenta_api = preparar_cuenta_de_la_api()

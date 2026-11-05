@@ -829,6 +829,65 @@ describe('auditoría de seguridad', () => {
     expect(screen.queryByRole('button', { name: /permiso de firma a eva/ })).not.toBeInTheDocument()
   })
 
+  it('la Responsable aprueba el acceso que TI dejó en espera', async () => {
+    const { contrasena, estado } = instalarApiFalsa()
+    estado.cuentas.find((c) => c.usuario === 'lia').acceso_aprobado = false
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const persona = await entrar('eva', contrasena, '/usuarios')
+    expect(await screen.findByRole('cell', { name: /Espera aprobación/ })).toBeInTheDocument()
+    // mientras espera no se le da firma
+    expect(screen.queryByRole('button', { name: 'Dar permiso de firma a lia' })).not.toBeInTheDocument()
+    await persona.click(screen.getByRole('button', { name: 'Aprobar el acceso de lia' }))
+    expect(await screen.findByRole('button', { name: 'Dar permiso de firma a lia' })).toBeInTheDocument()
+    expect(screen.queryByText(/Espera aprobación/)).not.toBeInTheDocument()
+    expect(await screen.findByRole('table', { name: 'Bitácora de cuentas' })).toHaveTextContent('Acceso aprobado')
+  })
+
+  it('una Analista ve quién espera aprobación pero no puede aprobar', async () => {
+    const { contrasena, estado } = instalarApiFalsa()
+    estado.cuentas.find((c) => c.usuario === 'lia').acceso_aprobado = false
+    await entrar('ana', contrasena, '/usuarios')
+    expect(await screen.findByRole('cell', { name: /Espera aprobación/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Aprobar el acceso de lia' })).not.toBeInTheDocument()
+  })
+
+  it('quien espera aprobación solo ve esa pantalla, y entra cuando lo aprueban', async () => {
+    const { contrasena, estado } = instalarApiFalsa()
+    estado.pendientes.ana = 'aprobacion'
+    const persona = await entrar('ana', contrasena)
+    expect(await screen.findByRole('heading', { name: 'Tu acceso espera aprobación' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Tablero' })).not.toBeInTheDocument()
+    estado.pendientes.ana = null
+    await persona.click(screen.getByRole('button', { name: 'Ya me aprobaron' }))
+    expect(await screen.findByRole('heading', { name: 'Indicadores de Corporativo' })).toBeInTheDocument()
+  })
+
+  it('Usuarios muestra los inicios de sesión y los fallidos', async () => {
+    const { contrasena, estado } = instalarApiFalsa()
+    estado.accesos = [
+      { id: 2, usuario: 'ana', evento: 'entrada', origen: '10.0.0.8', momento: '2026-10-06T12:00:00Z' },
+      { id: 1, usuario: '(usuario inexistente)', evento: 'fallo', origen: '10.0.0.9', momento: '2026-10-06T11:59:00Z' },
+    ]
+    await entrar('ti', contrasena, '/usuarios')
+    const tabla = await screen.findByRole('table', { name: 'Inicios de sesión' })
+    expect(tabla).toHaveTextContent('Entró')
+    expect(tabla).toHaveTextContent('Intento fallido')
+    expect(tabla).toHaveTextContent('10.0.0.9')
+  })
+
+  it('la primera plantilla avisa qué áreas va a crear', async () => {
+    const { contrasena, estado } = instalarApiFalsa()
+    estado.areasNuevas = ['Almacén', 'Ventas']
+    const persona = await entrar('ana', contrasena, '/carga')
+    await persona.upload(
+      await screen.findByLabelText('Importar datos de Plantilla de personal'),
+      new File(['codigo,area'], 'hris.xlsx'),
+    )
+    const revision = await screen.findByRole('region', { name: 'Revisión del archivo' })
+    expect(revision).toHaveTextContent('Esta carga define las áreas de la empresa')
+    expect(revision).toHaveTextContent('Se crearán 2: Almacén, Ventas')
+  })
+
   it('Dirección no lee un reporte que RRHH todavía no firma', async () => {
     const { contrasena } = instalarApiFalsa()
     await entrar('dir', contrasena, '/narrativas/5')

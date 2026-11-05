@@ -180,7 +180,7 @@ function actualizarUmbral(usuario, indicador, { umbral_atencion, umbral_critico 
 function cuentasIniciales() {
   return Object.values(USUARIOS).map((u) => ({
     id: u.id, usuario: u.usuario, nombre: u.nombre, rol: u.rol, area_id: u.area_id, correo: null, activo: true,
-    firma_reportes: Boolean(u.firma_reportes),
+    firma_reportes: Boolean(u.firma_reportes), acceso_aprobado: true,
     bloqueado: false, debe_cambiar_contrasena: u.pendiente === 'cambiar_contrasena', mfa_activo: Boolean(u.mfa_activo),
     creado_en: '2026-09-01T10:00:00Z', ultimo_acceso: null,
   }))
@@ -193,7 +193,16 @@ function cuentas(usuario, pathname, metodo, cuerpo, estado) {
     estado.bitacora.unshift({ id: estado.bitacora.length + 1, usuario: cuenta, accion, detalle, hecho_por: usuario.usuario, hecho_en: '2026-10-06T12:00:00Z' })
   if (metodo === 'GET') {
     if (!['admin_ti', 'rrhh'].includes(usuario.rol)) return respuesta(403, { detail: 'Solo TI y Recursos Humanos pueden ver las cuentas' })
+    if (pathname === '/usuarios/accesos') return respuesta(200, estado.accesos)
     return respuesta(200, pathname === '/usuarios/cambios' ? estado.bitacora : estado.cuentas)
+  }
+  const aprobacion = pathname.match(/^\/usuarios\/(\d+)\/aprobacion$/)
+  if (aprobacion && metodo === 'PUT') {
+    if (!usuario.firma_reportes) return respuesta(403, { detail: 'Solo una Responsable de RRHH aprueba los accesos' })
+    const cuenta = estado.cuentas.find((c) => c.id === Number(aprobacion[1]))
+    Object.assign(cuenta, { acceso_aprobado: cuerpo.aprobada, activo: cuerpo.aprobada })
+    anotar(cuenta.usuario, cuerpo.aprobada ? 'aprobar_acceso' : 'rechazar_acceso')
+    return respuesta(200, cuenta)
   }
   if (usuario.rol !== 'admin_ti') return soloTi()
   if (cuerpo && 'firma_reportes' in cuerpo && (metodo === 'PATCH' || cuerpo.firma_reportes))
@@ -265,7 +274,7 @@ function cargasFalsas(usuario, pathname, metodo, cuerpo, estado, datosReales) {
     errores: conErrores ? [{ fila: 3, columna: 'area', mensaje: "'Marte' el área 'Marte' no existe" }] : [],
     descartadas: conErrores ? [] : [{ columna: 'nombre_completo', motivo: 'dato personal: no se guarda' }],
     periodos: [], subida_por: usuario.usuario, subida_en: '2026-10-06T12:00:00Z', aplicada_por: null, aplicada_en: null,
-    resultado: { previo: { filas: 358, validas: conErrores ? 0 : 358, existentes: 355, nuevas: 3 }, errores_totales: conErrores ? 1 : 0,
+    resultado: { previo: { filas: 358, validas: conErrores ? 0 : 358, existentes: 355, nuevas: 3, areas_nuevas: estado.areasNuevas ?? [] }, errores_totales: conErrores ? 1 : 0,
       muestra: { columnas: ['codigo', 'area'], filas: conErrores ? [] : [['E0001', 'Ventas']] } },
   }
   estado.cargas.unshift(carga)
@@ -292,6 +301,7 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
     mesPendiente: '2026-09', // null: ya estan cargados todos los meses cerrados
     cuentas: cuentasIniciales(),
     bitacora: [],
+    accesos: [],
     avisos: avisosIniciales(),
     umbrales: UMBRALES.map((u) => ({ ...u })),
     cambios: [],

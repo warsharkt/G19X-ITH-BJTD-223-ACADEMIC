@@ -112,7 +112,7 @@ def estado(u: Usuario) -> dict:
                 for f in conn.execute(
                     text(
                         "SELECT usuario, nombre FROM usuarios WHERE activo AND rol = 'rrhh' AND NOT firma_reportes "
-                        "AND NOT debe_cambiar_contrasena AND mfa_activo ORDER BY nombre"
+                        "AND NOT debe_cambiar_contrasena AND mfa_activo AND acceso_aprobado ORDER BY nombre"
                     )
                 ).mappings()
             ]
@@ -142,12 +142,13 @@ def designar_suplente(titular: Usuario, suplente: str, hasta: date, motivo: str 
     seguridad.asegurar_tabla()
     with engine.begin() as conn:
         persona = conn.execute(
-            text("SELECT rol, firma_reportes, activo, debe_cambiar_contrasena, mfa_activo FROM usuarios WHERE usuario = :u"),
+            text("SELECT rol, firma_reportes, activo, debe_cambiar_contrasena, mfa_activo, acceso_aprobado "
+                 "FROM usuarios WHERE usuario = :u"),
             {"u": suplente},
         ).mappings().first()
         if persona is None or not persona["activo"] or persona["rol"] != "rrhh" or persona["firma_reportes"]:
             raise ErrorDeUsuario("La suplente debe ser una Analista de RRHH con cuenta activa")
-        if persona["debe_cambiar_contrasena"] or not persona["mfa_activo"]:
+        if persona["debe_cambiar_contrasena"] or not persona["mfa_activo"] or not persona["acceso_aprobado"]:
             raise ErrorDeUsuario(
                 "Esa persona debe entrar primero, cambiar su contraseña temporal y activar su verificación "
                 "en dos pasos: así nadie más conoce su acceso"
