@@ -70,6 +70,7 @@ services:
     environment:
       # Siempre la base de este compose, aunque el .env traiga otra DATABASE_URL
       DATABASE_URL: ""
+      CORS_ORIGENES: ""  # el tablero va detras de nginx, en la misma direccion
       DB_HOST: db
       DB_PORT: "5432"
       # Ollama corre en el equipo, fuera de Docker

@@ -46,6 +46,8 @@ from app.seguridad import Usuario
 log = logging.getLogger(__name__)
 
 DIAS_PARA_CORREO = 7  # un aviso mas viejo ya no se manda por correo
+# Desde muchas IP el bloqueo por origen no actua (5 fallos por IP): por eso se avisa
+FALLOS_PARA_AVISAR = 20  # en una hora, contra una misma cuenta
 SEGUNDOS_SMTP = 20
 _tabla_lista = False
 
@@ -265,6 +267,27 @@ def avisar_cuenta(titulo: str, afectada: dict | None = None) -> int:
             # su aviso va con su area: es la unica que puede ver
             area = afectada["area_id"] if afectada["rol"] == "gerente" else CORPORATIVO
             creados += _crear(conn, {afectada["id"]}, "cuenta", area, titulo, "/cuenta", clave)
+    if creados:
+        programar_envio()
+    return creados
+
+
+@_tolerante
+def avisar_intentos(usuario: str) -> int:
+    """Muchos intentos fallidos contra una cuenta en la ultima hora, aunque cada
+    IP haya hecho pocos. Un aviso por cuenta y por hora, a RRHH."""
+    asegurar_tabla()
+    with engine.begin() as conn:
+        fallos = conn.execute(
+            text("SELECT COUNT(*) FROM accesos WHERE usuario = :u AND evento = 'fallo' "
+                 "AND momento > now() - interval '1 hour'"),
+            {"u": usuario},
+        ).scalar_one()
+        if fallos < FALLOS_PARA_AVISAR:
+            return 0
+        hora = conn.execute(text("SELECT to_char(now(), 'YYYY-MM-DD-HH24')")).scalar_one()
+        titulo = f"Hubo {fallos} intentos fallidos de entrar a la cuenta {usuario} en la última hora: revisa Usuarios"
+        creados = _crear(conn, _rrhh(conn), "cuenta", CORPORATIVO, titulo, "/usuarios", f"intentos:{usuario}:{hora}")
     if creados:
         programar_envio()
     return creados

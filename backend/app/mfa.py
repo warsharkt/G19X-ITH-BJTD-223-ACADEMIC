@@ -96,6 +96,11 @@ def _llave() -> bytes:
     return llave
 
 
+def revisar_llave():
+    """Lanza LlaveMfaInvalida si no hay llave y no se puede crear."""
+    _llave()
+
+
 def _contexto(usuario_id: int) -> bytes:
     return f"{PRODUCTO}:usuarios:{usuario_id}:mfa_secreto".encode()
 

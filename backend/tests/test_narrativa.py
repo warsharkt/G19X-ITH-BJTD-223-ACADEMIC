@@ -584,17 +584,14 @@ def test_el_mes_estable_tambien_lo_redacta_el_modelo(df, caso_estable):
     assert n["conteo_estados"]["rojo"] == 0 and n["hallazgos"]
 
 
-def test_con_proveedor_en_la_nube_no_se_envia_el_nombre_del_area(df, caso):
+@pytest.mark.parametrize("local", [True, False])
+def test_el_nombre_del_area_nunca_se_envia_al_modelo(df, caso, local):
     periodo, area_id, hechos = caso
-    nube = ProveedorFalso(respuesta_buena(hechos), local=False)
-    n = generar_narrativa(periodo, area_id, proveedor=nube, df=df)
-    prompt = "\n".join(m["content"] for m in nube.llamadas[0])
+    proveedor = ProveedorFalso(respuesta_buena(hechos), local=local)
+    n = generar_narrativa(periodo, area_id, proveedor=proveedor, df=df)
+    prompt = "\n".join(m["content"] for m in proveedor.llamadas[0])
     assert "Operaciones" not in prompt and "un área de la empresa" in prompt
     assert n["area"] == "Operaciones"  # el reporte si dice el area; solo el modelo no la ve
-
-    local = ProveedorFalso(respuesta_buena(hechos))
-    generar_narrativa(periodo, area_id, proveedor=local, df=df)
-    assert "el área Operaciones" in "\n".join(m["content"] for m in local.llamadas[0])
 
 
 # ------------------------------------------------------------- orquestacion

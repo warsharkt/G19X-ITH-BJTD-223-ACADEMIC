@@ -7,6 +7,7 @@ ve solo lo que le corresponde (ver app/seguridad.py y la regla 10.3.2 del PRD).
 
 Aqui solo se arma la aplicacion: los endpoints estan en app/rutas/, uno por tema.
 """
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -65,14 +66,21 @@ app = FastAPI(
     version="0.10.0",
 )
 
-# El frontend de React (paso 7) se sirve en local desde estos origenes.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
-    allow_methods=["GET", "POST", "PUT", "PATCH"],
-    allow_headers=["*"],
-    expose_headers=["Content-Disposition"],  # nombre del archivo al exportar
-)
+def origenes_permitidos() -> list[str]:
+    """Solo hacen falta en desarrollo: en Docker el tablero y la API comparten
+    direccion detras de nginx, y docker-compose.yml los deja vacios."""
+    valor = os.getenv("CORS_ORIGENES", "http://localhost:5173,http://localhost:3000")
+    return [o.strip() for o in valor.split(",") if o.strip()]
+
+
+if origenes := origenes_permitidos():
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origenes,
+        allow_methods=["GET", "POST", "PUT", "PATCH"],
+        allow_headers=["*"],
+        expose_headers=["Content-Disposition"],  # nombre del archivo al exportar
+    )
 
 
 @app.middleware("http")

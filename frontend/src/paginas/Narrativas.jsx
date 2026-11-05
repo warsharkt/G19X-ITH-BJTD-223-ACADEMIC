@@ -48,7 +48,7 @@ function NuevoReporte({ areas, periodos, areaPedida, periodoPedido }) {
   const [error, setError] = useState(null)
   const firmas = useConsulta(() => api.firmas(), [])
   const firmante = firmanteDeHoy(firmas.datos)
-  const faltantes = useConsulta(() => api.fuentesFaltantes(periodo), [periodo])
+  const faltantes = useConsulta(periodo ? () => api.fuentesFaltantes(periodo) : null, [periodo])
   const sinDatos = faltantes.datos?.fuentes ?? []
   const sinActualizar = faltantes.datos?.sin_actualizar ?? []
 

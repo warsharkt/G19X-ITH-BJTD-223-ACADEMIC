@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api'
 import GraficaSerie from '../componentes/GraficaSerie'
 import Mensaje from '../componentes/Mensaje'
 import TarjetaKpi from '../componentes/TarjetaKpi'
 import { nombreMes, ordenIndicador } from '../formato'
-import { puedeGenerar, puedePedir, useSesion } from '../sesion'
+import { puedeCargarDatos, puedeGenerar, puedePedir, useSesion } from '../sesion'
 import { useConsulta } from '../useConsulta'
 
 const PRIORIDAD = { rojo: 0, amarillo: 1 }
@@ -38,6 +38,27 @@ function Resumen({ kpis }) {
         </li>
       )}
     </ul>
+  )
+}
+
+// Primer dia: sin un mes completo no hay indicadores que mostrar
+function SinDatos({ usuario }) {
+  return (
+    <div>
+      <div className="titulo-pagina">
+        <h1>Tablero</h1>
+      </div>
+      <Mensaje tipo="info" titulo="Todavía no hay datos cargados">
+        {puedeCargarDatos(usuario) ? (
+          <p>
+            Empieza en <Link to="/carga">Carga de datos</Link>. Los indicadores aparecen en cuanto se aplica la productividad
+            del mes.
+          </p>
+        ) : (
+          <p>Los indicadores aparecerán aquí cuando Recursos Humanos cargue el primer mes.</p>
+        )}
+      </Mensaje>
+    </div>
   )
 }
 
@@ -99,6 +120,7 @@ export default function Tablero() {
 
   const errorCatalogo = areas.error || periodos.error
   if (errorCatalogo) return <Mensaje titulo="No se pudo cargar el tablero">{errorCatalogo.message}</Mensaje>
+  if (periodos.datos?.length === 0) return <SinDatos usuario={usuario} />
   if (!listo) return <p className="cargando">Cargando…</p>
 
   const nombreArea = areas.datos.find((a) => a.id === areaId)?.nombre ?? `Área ${areaId}`

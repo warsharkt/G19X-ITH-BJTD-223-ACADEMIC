@@ -924,6 +924,25 @@ describe('auditoría de seguridad', () => {
   })
 })
 
+describe('primer día, sin datos', () => {
+  it('la Analista ve por dónde empezar, no un Cargando eterno', async () => {
+    const { contrasena, estado } = instalarApiFalsa()
+    estado.sinDatos = true
+    await entrar('ana', contrasena)
+    const aviso = await screen.findByRole('status')
+    expect(aviso).toHaveTextContent('Todavía no hay datos cargados')
+    expect(within(aviso).getByRole('link', { name: 'Carga de datos' })).toHaveAttribute('href', '/carga')
+    expect(screen.queryByText('Cargando…')).not.toBeInTheDocument()
+  })
+
+  it('quien no carga datos sabe que los carga RRHH', async () => {
+    const { contrasena, estado } = instalarApiFalsa()
+    estado.sinDatos = true
+    await entrar('dir', contrasena)
+    expect(await screen.findByText(/cuando Recursos Humanos cargue el primer mes/)).toBeInTheDocument()
+  })
+})
+
 describe('pantalla que no se puede abrir', () => {
   it('muestra un aviso con Recargar en lugar de dejar la página en blanco', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {}) // React registra el error capturado

@@ -44,7 +44,12 @@ def login(request: Request, formulario: OAuth2PasswordRequestForm = Depends()):
     queda bloqueado unos minutos para esa cuenta.
     """
     try:
-        u = seguridad.autenticar(formulario.username, formulario.password, _origen(request))
+        try:
+            u = seguridad.autenticar(formulario.username, formulario.password, _origen(request))
+        except HTTPException as exc:
+            if exc.status_code == 401:
+                avisos.avisar_intentos(formulario.username.strip().lower())
+            raise
         if u.mfa_activo:
             return {
                 "mfa_requerido": True,

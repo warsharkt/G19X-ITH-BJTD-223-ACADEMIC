@@ -377,7 +377,7 @@ export function instalarApiFalsa({ consultasHastaLista = 1, fallaNarrativa = fal
     if (pathname.startsWith('/usuarios')) return cuentas(usuario, pathname, metodo, opciones.body && JSON.parse(opciones.body), estado)
     if (pathname.startsWith('/cargas')) return cargasFalsas(usuario, pathname, metodo, opciones.body, estado, datosReales)
     if (pathname === '/areas') return respuesta(200, AREAS.filter((a) => usuario.areas_permitidas.includes(a.id)))
-    if (pathname === '/periodos') return respuesta(200, PERIODOS)
+    if (pathname === '/periodos') return respuesta(200, estado.sinDatos ? [] : PERIODOS)
     const enFaltantes = pathname.match(/^\/periodos\/([\d-]+)\/faltantes$/)
     if (enFaltantes) return respuesta(200, { fuentes: [], sin_actualizar: [], ...faltantes[enFaltantes[1]] })
     if (pathname === '/umbrales') return respuesta(200, estado.umbrales)

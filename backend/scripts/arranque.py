@@ -26,7 +26,7 @@ import sys
 from psycopg import sql
 from sqlalchemy import text
 
-from app import avisos, cargas, demo, programacion, seguridad, trabajos
+from app import avisos, cargas, demo, mfa, programacion, seguridad, trabajos
 from app.database import ejecutar_sql, engine
 from app.kpis import inicializar_umbrales
 from app.llm import ConfiguracionIA, modo_datos
@@ -165,8 +165,22 @@ def revisar_contrasena_de_la_base():
     print(f"AVISO: {mensaje}")
 
 
+def revisar_llave_del_mfa():
+    """Sin llave nadie con verificacion en dos pasos puede entrar, y el error
+    apareceria hasta que alguien lo intentara: mejor no arrancar y decir por que.
+    Pasa en Linux si Docker creo la carpeta llaves/: queda de root y la API no es root."""
+    try:
+        mfa.revisar_llave()
+    except mfa.LlaveMfaInvalida as exc:
+        sys.exit(
+            f"La verificacion en dos pasos no tiene llave: {exc}\n"
+            "En Linux, dale la carpeta a la API: sudo chown 10001:10001 llaves. O pon MFA_LLAVE en el .env."
+        )
+
+
 def main():
     revisar_contrasena_de_la_base()
+    revisar_llave_del_mfa()
     sembrar_si_hace_falta()
     preparar_demo()
     preparar_esquema()

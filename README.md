@@ -133,6 +133,17 @@ Todo se configura en el `.env`. [`.env.example`](.env.example) explica cada vari
 | `WEB_ESCUCHA`, `WEB_NOMBRE`, `APP_URL` | Abrir el tablero a la red de la empresa con HTTPS |
 | `SMTP_*` | Correo opcional de avisos (sin datos) |
 
+## En un servidor Linux
+
+Windows y Docker Desktop son más permisivos con las carpetas. En Linux, antes de `docker compose up`:
+
+```bash
+mkdir -p llaves certs
+sudo chown 10001:10001 llaves   # la API corre con ese usuario y guarda ahí la llave del MFA
+```
+
+Si no, la API no arranca y `docker compose logs api` dice por qué. También sirve poner `MFA_LLAVE` en el `.env`. Ollama escucha solo en `127.0.0.1`: para que el contenedor lo alcance, enciéndelo con `OLLAMA_HOST=0.0.0.0` y permite solo la red de Docker en el firewall.
+
 ## Usarlo con los datos de otra empresa
 
 Nada de Nordika está fijo en el código: el nombre sale de `EMPRESA_NOMBRE`, y las áreas, las personas y los indicadores salen de la base.
@@ -153,8 +164,9 @@ Nada de Nordika está fijo en el código: el nombre sale de `EMPRESA_NOMBRE`, y 
 | Contraseñas | Mínimo 10 caracteres, sin las más comunes ni secuencias obvias, guardadas con scrypt (parámetros de OWASP; las cuentas anteriores se actualizan solas al entrar). TI genera temporales que la persona cambia al entrar y que vencen a las 72 horas. Tras 5 intentos fallidos (al entrar o al escribir la contraseña actual en Mi cuenta) se bloquea ese equipo para ese usuario (no la cuenta entera, para que nadie pueda dejar fuera a otra persona). Un usuario inventado se bloquea igual que uno real, así que el bloqueo no revela qué cuentas existen; nginx además limita los intentos por IP |
 | Verificación en dos pasos | Código de 6 dígitos (TOTP) obligatorio para Dirección, TI y RRHH, con 10 códigos de respaldo. El secreto se guarda cifrado (AES-256) con una llave que no está en la base |
 | Datos personales | La carga descarta nombres, CURP, RFC, correos y demás; el sistema solo conoce códigos de empleado. Una carga validada que nadie aplica vence a los 7 días y sus filas se borran; de lo descartado o con errores tampoco queda la muestra |
-| IA | Con `MODO_DATOS=reales` solo se permite un modelo en este equipo o en una IP privada de la empresa, y ninguno `-cloud`: si no, la IA no arranca |
+| IA | El modelo solo recibe cifras e indicadores: ni nombres de personas ni de áreas. Con `MODO_DATOS=reales` solo se permite un modelo en este equipo o en una IP privada de la empresa, y ninguno `-cloud`: si no, la IA no arranca |
 | Red | Por defecto solo acepta conexiones del mismo equipo; abierto a la red, HTTPS se activa solo |
+| Intentos de entrar | Más de 20 fallos en una hora contra una cuenta, aunque vengan de muchas IP, llegan como aviso a RRHH |
 | Bitácoras | Inicios de sesión (entradas y fallos, un año), cuentas, umbrales, cargas, reportes, firmas y descargas: quién, qué, cuándo y desde qué IP. Nunca guardan contraseñas |
 | Navegador | Las respuestas de la API llevan `Cache-Control: no-store`: los datos de RRHH no quedan guardados en un equipo compartido. El tablero no carga nada de otros sitios, ni la fuente |
 | Dependencias | La imagen de la API solo instala lo que usa (`requirements.txt`); las de las pruebas van aparte (`requirements-dev.txt`). Los Excel se leen con `defusedxml` |

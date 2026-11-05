@@ -718,29 +718,38 @@ def autenticar(usuario: str, contrasena: str, origen: str = "local") -> Usuario:
     nombre = usuario.strip().lower()
     if "\x00" in nombre or "\x00" in contrasena:  # PostgreSQL no los acepta: nunca seria una cuenta
         raise invalido
+    with engine.connect() as conn:
+        fila = conn.execute(
+            text(f"SELECT {_COLUMNAS_SESION}, contrasena_hash, activo FROM usuarios WHERE usuario = :u"), {"u": nombre}
+        ).mappings().first()
+        bloqueo = error_si_bloqueada(conn, nombre, origen)
+    if bloqueo is not None:
+        raise bloqueo
+    existe = fila is not None and fila["activo"]
+    # El hash tarda a proposito: se calcula sin retener conexion ni candado. Con
+    # el candado puesto, unos cuantos intentos contra una cuenta hacian que su
+    # duena tardara 10 s en entrar, y agotaban las conexiones de todos.
+    correcta = verificar_contrasena(contrasena, fila["contrasena_hash"] if existe else _HASH_SENUELO) and existe
+    hash_nuevo = hash_contrasena(contrasena) if correcta and hash_viejo(fila["contrasena_hash"]) else None
     # Los errores se lanzan FUERA de la transaccion: lanzarlos dentro la
     # desharia, y el conteo de intentos fallidos nunca se guardaria.
     error = None
     with engine.begin() as conn:
-        fila = conn.execute(
-            text(f"SELECT {_COLUMNAS_SESION}, contrasena_hash, activo FROM usuarios WHERE usuario = :u FOR UPDATE"),
-            {"u": nombre},
-        ).mappings().first()
-        existe = fila is not None and fila["activo"]
+        if existe:  # de uno en uno por cuenta: el conteo de fallos no se salta
+            conn.execute(text("SELECT 1 FROM usuarios WHERE id = :i FOR UPDATE"), {"i": fila["id"]})
+        # Otra vez: varios intentos a la vez pasaron la primera revision antes
+        # de que se contaran. Aunque este acertara, ya no se le dice.
         if (bloqueo := error_si_bloqueada(conn, nombre, origen)) is not None:
             error = bloqueo
-        elif not verificar_contrasena(contrasena, fila["contrasena_hash"] if existe else _HASH_SENUELO) or not existe:
+        elif not correcta:
             registrar_fallo(conn, nombre, origen)
             error = invalido
         elif fila["temporal_vence"] and fila["temporal_vence"] < datetime.now(timezone.utc):
             error = HTTPException(status.HTTP_401_UNAUTHORIZED, "Tu contraseña temporal venció: pide a TI una nueva")
         elif not fila["mfa_activo"]:
             registrar_entrada(conn, fila["id"], nombre, origen)
-        if error is None and hash_viejo(fila["contrasena_hash"]):
-            conn.execute(
-                text("UPDATE usuarios SET contrasena_hash = :h WHERE id = :i"),
-                {"h": hash_contrasena(contrasena), "i": fila["id"]},
-            )
+        if error is None and hash_nuevo:
+            conn.execute(text("UPDATE usuarios SET contrasena_hash = :h WHERE id = :i"), {"h": hash_nuevo, "i": fila["id"]})
     if error is not None:
         raise error
     return _a_usuario(fila)
