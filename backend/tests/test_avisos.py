@@ -5,6 +5,7 @@ persona y van a la tabla `avisos` con llave foranea a `usuarios`. Las
 narrativas se insertan directo en la tabla; aqui no importa el modelo.
 """
 import smtplib
+import ssl
 
 import pandas as pd
 import pytest
@@ -232,6 +233,8 @@ class SmtpFalso:
     enviados: list = []
     falla = False
 
+    contextos: list = []
+
     def __init__(self, host, puerto, timeout=None):
         self.host, self.puerto = host, puerto
         self.tls = False
@@ -248,7 +251,8 @@ class SmtpFalso:
     def has_extn(self, nombre):
         return nombre == "starttls"
 
-    def starttls(self):
+    def starttls(self, context=None):
+        SmtpFalso.contextos.append(context)
         self.tls = True
 
     def login(self, usuario, contrasena):
@@ -348,3 +352,15 @@ def test_correo_del_usuario_se_valida(gente):
     seguridad.cambiar_correo(gente["rrhh2"].usuario, "")  # vacio lo quita
     with engine.connect() as conn:
         assert conn.execute(text("SELECT correo FROM usuarios WHERE id = :i"), {"i": gente["rrhh2"].id}).scalar() is None
+
+
+def test_el_correo_verifica_el_certificado_del_servidor(monkeypatch):
+    """Sin contexto, smtplib cifra pero acepta cualquier certificado: un
+    intermediario podria quedarse con la contrasena del correo."""
+    monkeypatch.setattr(avisos.smtplib, "SMTP", SmtpFalso)
+    SmtpFalso.contextos.clear()
+    conf = {"host": "smtp.prueba", "puerto": 587, "usuario": "motor@empresa.com", "contrasena": "secreta",
+            "remitente": "motor@empresa.com"}
+    avisos._enviar(conf, "ana@empresa.com", "Asunto", "Cuerpo")
+    contexto = SmtpFalso.contextos[-1]
+    assert contexto is not None and contexto.verify_mode == ssl.CERT_REQUIRED and contexto.check_hostname

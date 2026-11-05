@@ -28,6 +28,7 @@ import functools
 import logging
 import os
 import smtplib
+import ssl
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from email.message import EmailMessage
@@ -388,15 +389,19 @@ def _enviar(conf: dict, destinatario: str, asunto: str, cuerpo: str):
     mensaje["To"] = destinatario
     mensaje["Subject"] = asunto
     mensaje.set_content(cuerpo)
+    # Verifica el certificado y el nombre del servidor: sin contexto, smtplib
+    # cifra pero acepta cualquier certificado, y un intermediario podria
+    # quedarse con la contrasena del correo.
+    contexto = ssl.create_default_context()
     if conf["puerto"] == 465:
-        servidor = smtplib.SMTP_SSL(conf["host"], 465, timeout=SEGUNDOS_SMTP)
+        servidor = smtplib.SMTP_SSL(conf["host"], 465, timeout=SEGUNDOS_SMTP, context=contexto)
     else:
         servidor = smtplib.SMTP(conf["host"], conf["puerto"], timeout=SEGUNDOS_SMTP)
     with servidor:
         if conf["puerto"] != 465:
             servidor.ehlo()
             if servidor.has_extn("starttls"):
-                servidor.starttls()
+                servidor.starttls(context=contexto)
                 servidor.ehlo()
             elif conf["usuario"] and conf["host"] not in ("localhost", "127.0.0.1"):
                 # nunca mandar la contrasena sin cifrar fuera de este equipo

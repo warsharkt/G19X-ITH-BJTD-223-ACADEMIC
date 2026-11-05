@@ -8,6 +8,10 @@
 -- Es seguro ejecutarlo varias veces: la API lo ejecuta al arrancar.
 -- ============================================================
 
+-- De uno en uno: dos a la vez se interbloquean (toman los candados de cargas y
+-- vacantes en orden distinto). Se suelta solo al terminar la transaccion.
+SELECT pg_advisory_xact_lock(hashtext('cargas.sql'));
+
 CREATE TABLE IF NOT EXISTS cargas (
     id            SERIAL PRIMARY KEY,
     fuente        TEXT NOT NULL,

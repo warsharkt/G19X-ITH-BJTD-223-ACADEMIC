@@ -133,11 +133,35 @@ def verificar_contrasena(contrasena: str, guardado: str) -> bool:
 _HASH_SENUELO = hash_contrasena(secrets.token_hex(16))
 
 
+# Lo que la gente mas usa, sin los numeros y simbolos que le agrega al final para
+# llegar al minimo ("Password123!" -> "password"). Solo atrapa lo mas obvio.
+_PALABRAS_COMUNES = frozenset({
+    "abc", "abcd", "abcde", "abcdef", "admin", "administrador", "administrator", "amor", "bienvenido", "bienvenida",
+    "changeme", "clave", "contrasena", "contraseña", "demo", "empresa", "hola", "iloveyou", "letmein", "login",
+    "master", "mexico", "monkey", "nordika", "pass", "passw0rd", "password", "qwerty", "qwertyuiop", "recursos",
+    "rrhh", "secret", "secreto", "seguridad", "sistema", "talentia", "teamo", "test", "usuario", "welcome",
+})
+_SECUENCIAS = ("01234567890123456789", "abcdefghijklmnopqrstuvwxyz", "qwertyuiop", "asdfghjkl", "zxcvbnm")
+_RELLENO = "0123456789!@#$%&*.-_ "
+
+
+def _es_trivial(contrasena: str) -> bool:
+    c = contrasena.lower()
+    return (
+        len(set(c)) < 4  # aaaaaaaaaa, 1212121212
+        or c in (c + c)[1:-1]  # un patron que se repite: abcabcabca
+        or any(c in s or c in s[::-1] for s in _SECUENCIAS)  # 1234567890, abcdefghij
+        or c.strip(_RELLENO) in _PALABRAS_COMUNES
+    )
+
+
 def validar_contrasena_nueva(contrasena: str, usuario: str):
     if len(contrasena) < LONGITUD_MINIMA:
         raise ErrorDeUsuario(f"La contraseña debe tener al menos {LONGITUD_MINIMA} caracteres")
     if usuario.lower() in contrasena.lower():
         raise ErrorDeUsuario("La contraseña no puede contener el nombre de usuario")
+    if _es_trivial(contrasena):
+        raise ErrorDeUsuario("Esa contraseña es demasiado común o fácil de adivinar: elige otra")
 
 
 def generar_contrasena_temporal() -> str:

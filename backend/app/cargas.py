@@ -233,9 +233,23 @@ def _fuente(clave: str) -> Fuente:
     return FUENTES[clave]
 
 
+def _esquema_al_dia() -> bool:
+    """Solo lee el catalogo: no toma candados sobre cargas ni vacantes."""
+    with engine.connect() as conn:
+        return conn.execute(text(
+            "SELECT COUNT(*) = 2 FROM pg_attribute WHERE NOT attisdropped AND ("
+            "  (attrelid = to_regclass('public.cargas') AND attname = 'subida_desde') OR "
+            "  (attrelid = to_regclass('public.vacantes') AND attname = 'folio'))"
+        )).scalar()
+
+
 def asegurar_tabla():
-    # Sin cache: el seed recrea `vacantes` y se llevaria la columna folio.
-    ejecutar_sql("cargas.sql")
+    # Sin bandera por proceso: el seed recrea `vacantes` (a veces desde otro
+    # proceso, con la API encendida) y se lleva la columna folio. Pero el DDL
+    # solo corre si de verdad falta algo: sus ALTER TABLE toman candados
+    # exclusivos, y corriendolo en cada peticion dos pestanas se interbloqueaban.
+    if not _esquema_al_dia():
+        ejecutar_sql("cargas.sql")
 
 
 # ---------------------------------------------------------------- lectura

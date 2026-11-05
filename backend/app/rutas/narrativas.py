@@ -67,6 +67,8 @@ def crear_narrativa(
     try:
         id_ = trabajos.encolar(periodo, area_id, proveedor, df, solicitante=u.usuario)
         return trabajos.obtener(id_)
+    except trabajos.SolicitudRechazada as exc:
+        raise HTTPException(status_code=exc.estado, detail=str(exc))
     except SQLAlchemyError:
         raise HTTPException(status_code=503, detail="Base de datos no disponible")
 

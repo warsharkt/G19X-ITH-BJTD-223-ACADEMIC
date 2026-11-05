@@ -4,7 +4,7 @@ Deja todo listo para entrar sin correr scripts a mano:
   1. Si la base esta vacia y MODO_DATOS=sinteticos, carga los datos ficticios
      de Nordika (scripts/seed.py). Con datos reales nunca siembra nada.
   2. Si el modo demostracion esta activo, crea o restablece las cuentas
-     del personal de Nordika (app/demo.py).
+     del personal de Nordika (app/demo.py). Si esta apagado, las desactiva.
   3. Prepara la cuenta de PostgreSQL con la que se conecta la API
      (talentia_api): sin privilegios de superusuario, duena solo de las tablas
      del sistema y con una contrasena nueva al azar en cada arranque. Asi una
@@ -45,7 +45,10 @@ def sembrar_si_hace_falta():
         print("Base de datos con datos: no se siembra nada.")
         return
     if not sinteticos:
-        print("Base vacia y MODO_DATOS=reales: carga los datos reales desde Carga de datos.")
+        # Solo las tablas, sin datos: sin ellas la API no arranca. schema.sql
+        # borra las tablas de las fuentes, por eso solo corre con la base vacia.
+        ejecutar_sql("schema.sql")
+        print("Base vacia y MODO_DATOS=reales: tablas creadas; carga los datos reales desde Carga de datos.")
         return
     from scripts import seed
 
@@ -55,7 +58,11 @@ def sembrar_si_hace_falta():
 
 
 def preparar_demo():
-    if os.getenv("MODO_DEMO", "no").strip().lower() != "si":
+    if (motivo := demo.motivo_inactivo()) is not None:
+        for linea in demo.apagar_cuentas(por="arranque:docker"):
+            print(f"  {linea}")
+        if os.getenv("MODO_DEMO", "no").strip().lower() == "si":
+            print(f"Modo demostracion sin cuentas: {motivo}")
         return
     try:
         for linea in demo.preparar_cuentas(por="arranque:docker"):

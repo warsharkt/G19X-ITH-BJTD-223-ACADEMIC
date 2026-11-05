@@ -423,6 +423,7 @@ Cuando el reporte sale tras corregir, la Responsable lo ve antes de firmar: bajo
 
 Ningún reporte llega a la dirección sin que la Responsable de RRHH lo haya leído y firmado.
 
+- **Sin duplicados:** mientras un reporte se genera no se puede pedir otra vez el mismo, y con 20 en espera ya no se aceptan más hasta que avance la cola. Los reportes programados siempre entran.
 - **Quién prepara:** solo la Analista de RRHH, por iniciativa propia o porque Dirección o un gerente se lo pidió con **Pedir este reporte a RRHH** (el pedido le llega como aviso con el área y el mes ya elegidos). Dirección y los gerentes no generan reportes.
 - **Quién firma:** la Responsable de RRHH, o su suplente mientras no está. Nunca firma quien preparó el reporte. Cada reporte dice desde el principio quién lo firmará.
 - **Suplencia:** desde Configuración, la Responsable designa a una Analista que firma en su lugar hasta una fecha (máximo 90 días, una a la vez). Solo se puede elegir a quien ya entró con su propia contraseña y su verificación en dos pasos. Si la suplente preparó un reporte, lo firma la Responsable.
@@ -478,6 +479,7 @@ Todas las medidas funcionan igual con los datos de Nordika que con los de cualqu
 | Contraseñas | Mínimo 10 caracteres. Se guardan solo cifradas de forma irreversible (scrypt con sal): nadie, ni TI, puede leerlas. |
 | Bloqueo por intentos | Tras 5 intentos fallidos seguidos (de contraseña o de código) desde un mismo equipo, ese equipo queda bloqueado 15 minutos para ese usuario; la persona puede seguir entrando desde el suyo, así que nadie puede dejar fuera a otra persona equivocándose a propósito. Si se bloquean 3 equipos a la vez, se bloquea la cuenta completa. Un usuario que no existe se bloquea igual, para que nadie pueda averiguar qué cuentas existen. Además, el tablero acepta como máximo unos 10 intentos de inicio de sesión por minuto desde una misma dirección. |
 | Contraseña temporal | Cuando TI crea una cuenta o restablece una contraseña, el sistema genera una temporal. Al entrar, la persona elige la suya antes de hacer cualquier otra cosa: TI nunca conoce la definitiva. |
+| Contraseñas comunes | El sistema rechaza las más fáciles de adivinar (`1234567890`, `Password123`, secuencias y repeticiones). |
 | Sesiones | Caducan solas (60 minutos por defecto) y se guardan solo en la pestaña del navegador. **Cerrar sesión** las invalida en el servidor: aunque alguien haya copiado la sesión, deja de servirle. Desactivar una cuenta o cambiarle el rol surte efecto de inmediato. |
 | Cuentas personales | Nunca compartidas. No se borran, se desactivan, para que las bitácoras siempre digan de quién se trata. |
 | Bitácoras | De cuentas, umbrales, cargas, reportes, firmas y descargas: quién, qué, cuándo y desde qué equipo (IP), con valores de antes y después. Nunca guardan contraseñas. |

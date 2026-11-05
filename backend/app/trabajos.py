@@ -30,6 +30,10 @@ from app.database import engine, ejecutar_sql
 from app.narrativa import INTENTOS, NarrativaNoGenerada, generar_narrativa
 
 RONDAS = int(os.getenv("NARRATIVA_RONDAS", "2"))
+# Reportes en espera a partir de los cuales ya no se aceptan pedidos a mano. En
+# CPU cada uno tarda minutos y van de uno en uno: sin tope, los programados del
+# mes esperarian detras. Los programados siempre entran.
+COLA_MAXIMA = 20
 
 # Reemplazable en pruebas por un ejecutor que corre la tarea en el momento.
 ejecutor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="narrativa")
@@ -44,6 +48,14 @@ _COLUMNAS = (
     "CASE WHEN estado = 'en_proceso' THEN (SELECT COUNT(*) FROM narrativas n2 "
     "  WHERE n2.estado = 'en_proceso' AND n2.id < narrativas.id) END AS antes_en_cola"
 )
+
+
+class SolicitudRechazada(Exception):
+    """No se acepta la solicitud; `estado` es el codigo HTTP."""
+
+    def __init__(self, mensaje: str, estado: int):
+        super().__init__(mensaje)
+        self.estado = estado
 
 
 def asegurar_tabla():
@@ -77,9 +89,14 @@ def encolar(
     programada: bool = False,
 ) -> int:
     """Registra la solicitud (con quien la pidio, o programada = la pidio la
-    programacion mensual) y la manda al hilo de trabajo. Devuelve su id."""
+    programacion mensual) y la manda al hilo de trabajo. Devuelve su id.
+
+    Una solicitud a mano se rechaza (SolicitudRechazada) si ese mismo reporte
+    ya esta en camino o si la cola esta llena."""
     asegurar_tabla()
     with engine.begin() as conn:
+        if not programada:
+            _revisar_cola(conn, periodo, area_id)
         id_ = conn.execute(
             text(
                 "INSERT INTO narrativas (area_id, periodo, proveedor, modelo, solicitada_por, programada) "
@@ -90,6 +107,22 @@ def encolar(
         ).scalar_one()
     ejecutor.submit(_ejecutar, id_, periodo, area_id, proveedor, df)
     return id_
+
+
+def _revisar_cola(conn, periodo: pd.Timestamp, area_id: int):
+    # de uno en uno: dos clics seguidos no pasan los dos por esta revision
+    conn.execute(text("SELECT pg_advisory_xact_lock(hashtext('narrativas:cola'))"))
+    igual, en_cola = conn.execute(
+        text(
+            "SELECT MIN(id) FILTER (WHERE area_id = :a AND periodo = :p), COUNT(*) "
+            "FROM narrativas WHERE estado = 'en_proceso'"
+        ),
+        {"a": area_id, "p": periodo.date()},
+    ).one()
+    if igual is not None:
+        raise SolicitudRechazada(f"Este reporte ya se está generando (número {igual}): espera a que termine", 409)
+    if en_cola >= COLA_MAXIMA:
+        raise SolicitudRechazada(f"Hay {en_cola} reportes en espera: inténtalo cuando avance la cola", 429)
 
 
 def _ejecutar(id_: int, periodo, area_id, proveedor, df):

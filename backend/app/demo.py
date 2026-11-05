@@ -168,6 +168,29 @@ def preparar_cuentas(por: str) -> list[str]:
     return hecho
 
 
+def apagar_cuentas(por: str) -> list[str]:
+    """Con el modo demostracion apagado, las cuentas de prueba no pueden seguir
+    entrando con una contrasena que conoce todo el que probo la demo. Devuelve
+    que hizo; si el modo se vuelve a activar, preparar_cuentas las reactiva.
+
+    Solo las que preparo el arranque (lo dice la bitacora), no por el nombre:
+    una persona real de la empresa puede llamarse igual."""
+    with engine.connect() as conn:
+        if conn.execute(text("SELECT to_regclass('public.usuarios_cambios') IS NULL")).scalar():
+            return []  # base nueva: aun no hay cuentas
+        filas = conn.execute(
+            text(
+                "SELECT u.id, u.usuario FROM usuarios u WHERE u.activo AND u.usuario = ANY(:u) AND EXISTS ("
+                "  SELECT 1 FROM usuarios_cambios c WHERE c.usuario = u.usuario AND c.hecho_por LIKE 'arranque:%') "
+                "ORDER BY u.usuario"
+            ),
+            {"u": list(USUARIOS)},
+        ).all()
+    for id_, _usuario in filas:
+        seguridad.modificar_usuario(id_, {"activo": False, "firma_reportes": False}, por)
+    return [f"{usuario}: desactivada (el modo demostración está apagado)" for _id, usuario in filas]
+
+
 def codigo_vigente(usuario_id: int) -> dict:
     """El codigo que en este momento mostraria la app del telefono.
 

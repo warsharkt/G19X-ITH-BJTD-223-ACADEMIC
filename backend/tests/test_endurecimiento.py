@@ -29,6 +29,7 @@ import inspect
 import io
 import json
 import os
+import threading
 import time
 from datetime import date, timedelta
 
@@ -37,7 +38,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
-from app import cargas, seguridad
+from app import cargas, seguridad, trabajos
 from app.database import DB_URL, engine
 from app.main import app
 from app.rutas import cargas as rutas_cargas
@@ -673,3 +674,148 @@ def test_vencer_cargas_no_truena_si_la_api_nunca_ha_arrancado():
             conn.execute(text("DROP TABLE IF EXISTS cargas"))
             conn.execute(text("ALTER TABLE cargas_guardada RENAME TO cargas"))
 
+
+# ============================================================================
+# Tercera auditoria (noviembre de 2026)
+# ============================================================================
+
+# ============ 2. el DDL de cargas solo corre si falta algo: dos pestanas se interbloqueaban
+def test_dos_personas_viendo_las_cargas_no_se_interbloquean():
+    errores = []
+
+    def leer():
+        try:
+            for _ in range(25):
+                cargas.listar()
+        except Exception as exc:  # antes: DeadlockDetected en 12 de cada 100
+            errores.append(exc)
+
+    hilos = [threading.Thread(target=leer) for _ in range(4)]
+    for h in hilos:
+        h.start()
+    for h in hilos:
+        h.join()
+    assert errores == []
+
+
+def test_el_ddl_de_cargas_no_corre_si_el_esquema_esta_al_dia(monkeypatch):
+    llamadas = []
+    monkeypatch.setattr(cargas, "ejecutar_sql", llamadas.append)
+    cargas.asegurar_tabla()
+    assert llamadas == []
+
+
+def test_si_el_seed_se_lleva_la_columna_folio_se_repone():
+    """El seed recrea vacantes, a veces con la API encendida: por eso no basta
+    una bandera por proceso."""
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE vacantes RENAME COLUMN folio TO folio_guardado"))
+    try:
+        cargas.asegurar_tabla()
+        with engine.connect() as conn:
+            assert conn.execute(text("SELECT COUNT(folio) FROM vacantes")).scalar() == 0
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE vacantes DROP COLUMN IF EXISTS folio"))
+            conn.execute(text("ALTER TABLE vacantes RENAME COLUMN folio_guardado TO folio"))
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS vacantes_folio ON vacantes (folio)"))
+
+
+# ==================================== 4. las contrasenas mas obvias se rechazan
+@pytest.mark.parametrize("clave", [
+    "1234567890", "0987654321", "aaaaaaaaaa", "1212121212", "abcabcabca", "abcdefghij", "qwertyuiop",
+    "Password123", "Password123!", "qwerty12345", "Admin12345", "Talentia2026", "Bienvenido1",
+])
+def test_una_contrasena_obvia_se_rechaza(clave):
+    with pytest.raises(seguridad.ErrorDeUsuario, match="común"):
+        seguridad.validar_contrasena_nueva(clave, "persona")
+
+
+@pytest.mark.parametrize("clave", [CLAVE, "k7Mq-3xPa-9tRe", "mi perro se llama Toby", "Otra-clave-nueva-1"])
+def test_una_contrasena_razonable_se_acepta(clave):
+    seguridad.validar_contrasena_nueva(clave, "persona")
+
+
+def test_las_temporales_que_genera_ti_siempre_pasan_la_regla():
+    for _ in range(200):
+        seguridad.validar_contrasena_nueva(seguridad.generar_contrasena_temporal(), "persona")
+
+
+# ============= 9. la cola de reportes no acepta duplicados ni crece sin limite
+class _Proveedor:
+    nombre, modelo = "falso", "modelo-falso"
+
+
+class _SinEjecutar:
+    def submit(self, *_):
+        pass  # se queda en_proceso, como si el modelo siguiera trabajando
+
+
+@pytest.fixture()
+def cola_vacia(monkeypatch):
+    monkeypatch.setattr(trabajos, "ejecutor", _SinEjecutar())
+    with engine.begin() as conn:
+        antes = conn.execute(text("SELECT COALESCE(MAX(id), 0) FROM narrativas")).scalar()
+        conn.execute(text("UPDATE narrativas SET estado = 'error' WHERE estado = 'en_proceso'"))
+    yield
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM narrativas WHERE id > :i"), {"i": antes})
+
+
+def _pedir(area_id=0, mes="2026-08-01", **extra):
+    return trabajos.encolar(pd.Timestamp(mes), area_id, _Proveedor(), None, **extra)
+
+
+def test_el_mismo_reporte_no_se_encola_dos_veces(cola_vacia):
+    primero = _pedir(solicitante=PREFIJO + "ana")
+    with pytest.raises(trabajos.SolicitudRechazada, match=str(primero)) as exc:
+        _pedir(solicitante=PREFIJO + "ana")
+    assert exc.value.estado == 409  # antes: 30 de 30 aceptados
+    _pedir(area_id=1, solicitante=PREFIJO + "ana")  # otra area si
+    _pedir(mes="2026-07-01", solicitante=PREFIJO + "ana")  # otro mes tambien
+
+
+def test_la_cola_llena_rechaza_los_pedidos_pero_no_los_programados(cola_vacia, monkeypatch):
+    monkeypatch.setattr(trabajos, "COLA_MAXIMA", 2)
+    _pedir(area_id=1, solicitante=PREFIJO + "ana")
+    _pedir(area_id=2, solicitante=PREFIJO + "ana")
+    with pytest.raises(trabajos.SolicitudRechazada) as exc:
+        _pedir(area_id=3, solicitante=PREFIJO + "ana")
+    assert exc.value.estado == 429
+    assert _pedir(area_id=3, programada=True)  # lo del mes no se queda fuera
+
+
+def test_la_api_responde_409_con_el_motivo(client, cola_vacia, monkeypatch):
+    from app.rutas import narrativas
+
+    app.dependency_overrides[narrativas.proveedor_configurado] = lambda: _Proveedor()
+    try:
+        analista = como(client, "ana")
+        mes = client.get("/periodos", headers=analista).json()[-1]
+        datos = {"area_id": 0, "periodo": mes}
+        assert client.post("/narrativas", headers=analista, json=datos).status_code == 202
+        r = client.post("/narrativas", headers=analista, json=datos)
+        assert r.status_code == 409 and "ya se está generando" in r.json()["detail"]
+    finally:
+        app.dependency_overrides.pop(narrativas.proveedor_configurado, None)
+
+
+# ========= base vacia con datos reales: la API no arrancaba (faltaban las tablas)
+def _arranque_con_datos_reales(monkeypatch, vacia):
+    from scripts import arranque
+
+    ejecutados = []
+    monkeypatch.setattr(arranque, "base_vacia", lambda: vacia)
+    monkeypatch.setattr(arranque, "modo_datos", lambda: "reales")
+    monkeypatch.setattr(arranque, "ejecutar_sql", ejecutados.append)
+    arranque.sembrar_si_hace_falta()
+    return ejecutados
+
+
+def test_con_datos_reales_y_base_vacia_se_crean_las_tablas(monkeypatch):
+    assert _arranque_con_datos_reales(monkeypatch, vacia=True) == ["schema.sql"]
+
+
+def test_con_datos_reales_y_base_con_datos_no_se_toca_nada(monkeypatch):
+    """schema.sql borra las tablas de las fuentes: nunca con datos."""
+    assert _arranque_con_datos_reales(monkeypatch, vacia=False) == []

@@ -11,7 +11,7 @@ COPY . .
 ENV VITE_API_URL=/api
 RUN npm run build
 
-FROM nginx:1.28-alpine@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236
+FROM nginx:1.30-alpine@sha256:0e52bd054126cdc040b1276c0af347aeb02a41b9cfe305d6094767ac30e97949
 # openssl: genera un certificado autofirmado si la empresa no pone el suyo
 RUN apk add --no-cache openssl && rm -f /etc/nginx/conf.d/default.conf
 COPY nginx/comun.conf nginx/http.conf nginx/https.conf nginx/limites.conf nginx/proxy-api.conf /etc/nginx/talentia/

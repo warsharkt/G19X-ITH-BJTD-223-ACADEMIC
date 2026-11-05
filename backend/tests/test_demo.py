@@ -175,3 +175,24 @@ def test_prepararlas_desactiva_las_cuentas_que_ya_no_se_usan(client):
     hecho = demo.preparar_cuentas("pruebas")
     assert "demo_rrhh2: desactivada (ya no se usa)" in hecho
     assert entrar(client, "demo_rrhh2").status_code == 401
+
+
+def test_apagar_el_modo_desactiva_las_cuentas_que_preparo_el_arranque(client, monkeypatch):
+    """Antes seguian activas con una contrasena que conoce quien probo la demo."""
+    demo.preparar_cuentas("arranque:docker")
+    assert entrar(client, "luis.ortega").status_code == 200
+    monkeypatch.setenv("MODO_DEMO", "no")
+    hecho = demo.apagar_cuentas("arranque:docker")
+    assert len(hecho) == len(demo.CUENTAS)
+    assert entrar(client, "luis.ortega").status_code == 401
+    assert demo.apagar_cuentas("arranque:docker") == []  # ya no hay nada que apagar
+    monkeypatch.setenv("MODO_DEMO", "si")  # si la demo vuelve, las cuentas tambien
+    demo.preparar_cuentas("arranque:docker")
+    assert entrar(client, "luis.ortega").status_code == 200
+
+
+def test_apagar_el_modo_no_toca_a_una_persona_real_que_se_llame_igual(monkeypatch):
+    id_ = crear_usuario("luis.ortega", "Luis Ortega Real", "rrhh", CONTRASENA, por="consola:ti")
+    monkeypatch.setenv("MODO_DEMO", "no")
+    assert demo.apagar_cuentas("arranque:docker") == []
+    assert seguridad.obtener_cuenta(id_)["activo"] is True
