@@ -39,7 +39,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
-from app import areas, cargas, fechas, llm, seguridad, trabajos
+from app import areas, cargas, fechas, llm, mfa, seguridad, trabajos
 from app.database import DB_URL, engine
 from app.main import app
 from app.rutas import cargas as rutas_cargas
@@ -1596,3 +1596,49 @@ def test_los_origenes_de_desarrollo_se_pueden_apagar(monkeypatch):
     assert origenes_permitidos() == []
     monkeypatch.delenv("CORS_ORIGENES")
     assert "http://localhost:5173" in origenes_permitidos()
+
+
+# ============================================================================
+# Septima auditoria (noviembre de 2026)
+# ============================================================================
+
+# ===================== 3. un mes que Python no puede representar es un 422
+@pytest.mark.parametrize("ruta", ["/kpis?periodo=0000-01", "/kpis/serie/enps?hasta=0000-10", "/narrativas?periodo=0000-01",
+                                  "/periodos/0000-01/faltantes", "/kpis?periodo=1899-12", "/kpis?periodo=2100-01"])
+def test_un_mes_imposible_en_la_peticion_es_un_422(client, ruta):
+    assert client.get(ruta, headers=como(client, "resp")).status_code == 422  # antes: 500
+
+
+def test_un_mes_imposible_en_un_pedido_es_un_422(client):
+    r = client.post("/pedidos", headers=como(client, "dir"), json={"periodo": "0000-01"})
+    assert r.status_code == 422
+
+
+# ===================== 6. el aviso tambien cubre el segundo paso
+def test_muchos_codigos_equivocados_tambien_se_avisan(cuentas, monkeypatch):
+    from app import avisos
+
+    monkeypatch.setattr(avisos, "FALLOS_PARA_AVISAR", 3)
+    id_ = cuentas["ids"]["ger"]
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM accesos WHERE usuario = :u"), {"u": PREFIJO + "ger"})
+        conn.execute(text("UPDATE usuarios SET mfa_activo = true, mfa_secreto = :s WHERE id = :i"),
+                     {"s": mfa.cifrar_secreto(id_, "JBSWY3DPEHPK3PXP"), "i": id_})
+    for i in range(4):
+        equipo = TestClient(app, client=(f"10.0.10.{i}", 5000))
+        token = entrar(equipo, "ger").json()["mfa_token"]
+        assert equipo.post("/auth/mfa", json={"mfa_token": token, "codigo": "abcdef"}).status_code == 401
+    assert [t for t in avisos_de_cuenta("resp") if "intentos fallidos" in t]
+
+
+def test_el_nombre_del_marcador_no_genera_avisos(monkeypatch):
+    from app import avisos
+
+    monkeypatch.setattr(avisos, "FALLOS_PARA_AVISAR", 0)
+    assert avisos.avisar_intentos(seguridad.USUARIO_INEXISTENTE) == 0
+
+
+# ===================== 7. la especificacion dice lo que la API responde
+def test_la_especificacion_admite_los_errores_de_negocio(client):
+    detalle = client.app.openapi()["components"]["schemas"]["HTTPValidationError"]["properties"]["detail"]
+    assert {"type": "string"} in detalle["anyOf"]

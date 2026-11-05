@@ -325,3 +325,11 @@ def test_comentario_largo_se_recorta_con_aviso_en_la_presentacion_y_completo_en_
     assert "… (completo en el PDF)" in portada and "FIN" not in portada
     pdf = texto_pdf(exportar.generar(r, "pdf"))
     assert pdf.count("Revisado.") == 60 and "FIN" in pdf
+
+
+def test_la_presentacion_no_deja_ciclos_sin_recoger(monkeypatch):
+    """Sin esto, 300 exportes subian la API de 130 a 220 MB."""
+    llamadas = []
+    monkeypatch.setattr(exportar.gc, "collect", lambda: llamadas.append(1))
+    exportar.generar(reporte(), "pptx")
+    assert llamadas == [1]

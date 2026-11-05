@@ -138,11 +138,29 @@ Todo se configura en el `.env`. [`.env.example`](.env.example) explica cada vari
 Windows y Docker Desktop son más permisivos con las carpetas. En Linux, antes de `docker compose up`:
 
 ```bash
+chmod 600 .env                  # lleva contraseñas: solo para tu usuario
 mkdir -p llaves certs
 sudo chown 10001:10001 llaves   # la API corre con ese usuario y guarda ahí la llave del MFA
 ```
 
 Si no, la API no arranca y `docker compose logs api` dice por qué. También sirve poner `MFA_LLAVE` en el `.env`. Ollama escucha solo en `127.0.0.1`: para que el contenedor lo alcance, enciéndelo con `OLLAMA_HOST=0.0.0.0` y permite solo la red de Docker en el firewall.
+
+**Respaldos en Linux.** El script corre fuera de Docker, así que necesita Python (probado con 3.14):
+
+```bash
+cd backend
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+sudo .venv/bin/python -m scripts.respaldo        # sudo: para leer la llave si usas --llave
+```
+
+Y para que corra solo cada noche, con `sudo crontab -e`:
+
+```
+0 2 * * * cd /ruta/del/proyecto/backend && .venv/bin/python -m scripts.respaldo >> ../respaldos/respaldo.log 2>&1
+```
+
+Los respaldos quedan solo para quien los crea (permisos 600, carpeta 700). Revisa de vez en cuando que el log diga `Prueba de restauración: correcta`.
 
 ## Usarlo con los datos de otra empresa
 

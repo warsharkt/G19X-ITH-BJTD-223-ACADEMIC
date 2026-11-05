@@ -276,6 +276,8 @@ def avisar_cuenta(titulo: str, afectada: dict | None = None) -> int:
 def avisar_intentos(usuario: str) -> int:
     """Muchos intentos fallidos contra una cuenta en la ultima hora, aunque cada
     IP haya hecho pocos. Un aviso por cuenta y por hora, a RRHH."""
+    if usuario == seguridad.USUARIO_INEXISTENTE or "\x00" in usuario:  # no son cuentas, aunque alguien lo escriba
+        return 0
     asegurar_tabla()
     with engine.begin() as conn:
         fallos = conn.execute(

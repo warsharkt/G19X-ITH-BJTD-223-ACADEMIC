@@ -174,7 +174,8 @@ def revisar_llave_del_mfa():
     except mfa.LlaveMfaInvalida as exc:
         sys.exit(
             f"La verificacion en dos pasos no tiene llave: {exc}\n"
-            "En Linux, dale la carpeta a la API: sudo chown 10001:10001 llaves. O pon MFA_LLAVE en el .env."
+            "En Linux, dale la carpeta a la API y vuelve a empezar: sudo chown 10001:10001 llaves, luego "
+            "docker compose down y docker compose up -d. O pon MFA_LLAVE en el .env."
         )
 
 

@@ -181,12 +181,26 @@ def _dentro_de(ruta: Path, carpeta_: Path) -> bool:
 
 
 # ----------------------------------------------------------------- acciones
+def _solo_para_el_dueno(dentro: Path):
+    """En Linux un respaldo nace legible para cualquier usuario del servidor, y
+    lleva datos de colaboradores y los hashes de las contrasenas. Tambien pone
+    al dia los respaldos anteriores. En Windows no tiene efecto."""
+    try:
+        dentro.chmod(0o700)
+        for archivo in dentro.glob("*.dump"):
+            archivo.chmod(0o600)
+    except OSError as exc:  # una unidad externa puede no aceptar permisos
+        print(f"Aviso: no se pudieron restringir los permisos de {dentro}: {exc}")
+
+
 def respaldar(dentro: Path, prefijo: str = PREFIJO) -> Path:
     dentro.mkdir(parents=True, exist_ok=True)
+    _solo_para_el_dueno(dentro)
     archivo = dentro / f"{prefijo}{datetime.now():%Y%m%d-%H%M%S}.dump"
     parcial = archivo.with_suffix(".parcial")
     try:
-        with open(parcial, "wb") as f:
+        # con el permiso desde que se crea: un chmod despues deja un momento abierto
+        with os.fdopen(os.open(parcial, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600), "wb") as f:
             _docker("pg_dump", "-U", usuario_db(), "-d", base_db(), "-Fc", salida=f)
         parcial.replace(archivo)  # solo se llama .dump si termino completo
     finally:
@@ -224,7 +238,8 @@ def copiar_llave(destino: Path, dentro: Path) -> Path:
         texto = mfa.archivo_de_llave().read_text(encoding="ascii").strip()
     destino.mkdir(parents=True, exist_ok=True)
     copia = destino / f"mfa-{datetime.now():%Y%m%d}.key"
-    copia.write_text(texto + "\n", encoding="ascii")
+    with os.fdopen(os.open(copia, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600), "w", encoding="ascii") as f:
+        f.write(texto + "\n")
     return copia
 
 

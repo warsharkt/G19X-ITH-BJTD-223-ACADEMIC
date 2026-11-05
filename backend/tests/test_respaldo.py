@@ -5,6 +5,7 @@ la llave, huella) se prueban sin Docker. La prueba de punta a punta respalda
 la base local y la restaura en una base temporal: solo corre si existe el
 contenedor rrhh_db (en GitHub Actions la base no es de este compose).
 """
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -113,3 +114,18 @@ def test_un_respaldo_se_restaura_en_un_servidor_sin_la_cuenta_de_la_api(tmp_path
         assert respaldo._psql(destino, "SELECT count(*) FROM datos").strip() == "1"
     finally:
         limpiar()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="los permisos de Unix no aplican en Windows")
+def test_los_respaldos_y_la_llave_quedan_solo_para_su_dueno(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(respaldo, "_docker", lambda *a, **k: "")
+    monkeypatch.setattr(respaldo, "huella", lambda a: "x")
+    viejo = tmp_path / "talentia-20260101-000000.dump"
+    viejo.write_bytes(b"x")
+    viejo.chmod(0o644)
+    archivo = respaldo.respaldar(tmp_path)
+    assert oct(archivo.stat().st_mode)[-3:] == "600" and oct(viejo.stat().st_mode)[-3:] == "600"
+    assert oct(tmp_path.stat().st_mode)[-3:] == "700"
+    monkeypatch.setenv("MFA_LLAVE", "llave-de-prueba")
+    destino = tmp_path.parent / (tmp_path.name + "-llave")
+    assert oct(respaldo.copiar_llave(destino, tmp_path).stat().st_mode)[-3:] == "600"

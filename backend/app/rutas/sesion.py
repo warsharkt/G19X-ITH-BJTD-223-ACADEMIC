@@ -70,7 +70,12 @@ def segundo_paso(request: Request, paso: schemas.MfaPaso):
             raise HTTPException(
                 status_code=401, detail="La verificación venció; vuelve a escribir tu usuario y contraseña"
             )
-        mfa.verificar_entrada(u, paso.codigo, _origen(request))
+        try:
+            mfa.verificar_entrada(u, paso.codigo, _origen(request))
+        except HTTPException as exc:
+            if exc.status_code == 401:
+                avisos.avisar_intentos(u.usuario)
+            raise
         return _token_de_sesion(u)
     except SQLAlchemyError:
         raise HTTPException(status_code=503, detail="Base de datos no disponible")
@@ -107,6 +112,7 @@ def cambiar_mi_contrasena(request: Request, cambio: schemas.CambioContrasena, u:
     try:
         nuevo = seguridad.cambiar_mi_contrasena(u, cambio.actual, cambio.nueva, _origen(request))
     except ErrorDeUsuario as exc:
+        avisos.avisar_intentos(u.usuario)
         raise HTTPException(status_code=422, detail=str(exc))
     except SQLAlchemyError:
         raise HTTPException(status_code=503, detail="Base de datos no disponible")

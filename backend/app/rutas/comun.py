@@ -10,8 +10,8 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.database import engine
 from app.kpis import CORPORATIVO, calcular_kpis
+from app.schemas import PATRON_MES  # noqa: F401 (los routers lo importan de aqui)
 
-PATRON_MES = r"^\d{4}-(0[1-9]|1[0-2])$"
 SEGUNDOS_CACHE = 60
 
 # Calcular los KPIs toma casi un segundo: se guardan en memoria unos segundos

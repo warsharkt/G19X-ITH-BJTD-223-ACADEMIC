@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -113,3 +114,19 @@ for modulo in (
     demostracion, rutas_cargas,
 ):
     app.include_router(modulo.router)
+
+
+def especificacion() -> dict:
+    """Un 422 lleva la lista de FastAPI (peticion mal formada) o un texto (regla
+    del negocio): la especificacion solo decia lo primero."""
+    if app.openapi_schema is None:
+        esquema = get_openapi(title=app.title, version=app.version, description=app.description, routes=app.routes)
+        esquema["components"]["schemas"]["HTTPValidationError"]["properties"]["detail"] = {
+            "title": "Detail",
+            "anyOf": [{"type": "string"}, {"type": "array", "items": {"$ref": "#/components/schemas/ValidationError"}}],
+        }
+        app.openapi_schema = esquema
+    return app.openapi_schema
+
+
+app.openapi = especificacion

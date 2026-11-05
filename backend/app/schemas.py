@@ -5,6 +5,10 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 
+# 1900 a 2099: el año 0 pasaba el patron y Python no lo puede representar (error 500)
+PATRON_MES = r"^(19|20)\d{2}-(0[1-9]|1[0-2])$"
+
+
 class Token(BaseModel):
     """Respuesta del inicio de sesion. Con MFA activo, el primer paso NO trae
     access_token sino mfa_token: se manda con el codigo a POST /auth/mfa."""
@@ -207,7 +211,7 @@ class PuntoSerie(BaseModel):
 # ------------------------------------------------------------- narrativa
 class NarrativaSolicitud(BaseModel):
     periodo: str | None = Field(
-        None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$", description="AAAA-MM. Por defecto, el ultimo mes."
+        None, pattern=PATRON_MES, description="AAAA-MM. Por defecto, el ultimo mes."
     )
     area_id: int | None = Field(
         None, description="0 = consolidado corporativo. Por defecto: tu area si eres gerente, si no el 0."
@@ -422,7 +426,7 @@ class SuplenciaNueva(BaseModel):
 class PedidoReporte(BaseModel):
     """Direccion o un gerente pide un reporte a RRHH."""
     area_id: int | None = Field(None, description="Por defecto: el consolidado (Direccion) o su area (gerente)")
-    periodo: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$", description="AAAA-MM")
+    periodo: str = Field(pattern=PATRON_MES, description="AAAA-MM")
     comentario: str | None = Field(None, max_length=500)
 
 

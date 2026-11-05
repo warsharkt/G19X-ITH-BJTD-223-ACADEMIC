@@ -9,6 +9,7 @@ los hechos).
 La API decide quien puede exportar y exige que el reporte este aprobado;
 aqui solo se arma el archivo. Estructura del reporte: seccion 10.1 del PRD.
 """
+import gc
 import io
 import math
 import os
@@ -166,7 +167,11 @@ def generar(trabajo: dict, formato: str) -> bytes:
     if formato == "pdf":
         return pdf(trabajo)
     if formato == "pptx":
-        return presentacion(trabajo)
+        contenido = presentacion(trabajo)
+        # python-pptx deja ciclos que el recolector tarda en alcanzar: sin esto, 300
+        # exportes subian la API de 130 a 220 MB, y con esto se queda en 132
+        gc.collect()
+        return contenido
     raise ValueError(f"Formato desconocido: {formato}")
 
 
