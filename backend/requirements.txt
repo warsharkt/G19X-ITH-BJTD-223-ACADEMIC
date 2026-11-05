@@ -16,7 +16,7 @@ qrcode==8.2                # QR para configurar la app de MFA
 SQLAlchemy==2.0.54
 psycopg[binary]==3.3.6
 pandas==3.0.6
-numpy==2.5.3
+numpy==2.5.4
 python-dotenv==1.2.3
 
 # Exportacion de reportes (paso 9)
