@@ -11,7 +11,7 @@ COPY . .
 ENV VITE_API_URL=/api
 RUN npm run build
 
-FROM nginx:1.30-alpine@sha256:0e52bd054126cdc040b1276c0af347aeb02a41b9cfe305d6094767ac30e97949
+FROM nginx:1.31-alpine@sha256:785835ea65db4bba6f021acc0f3be91b0fef76a53fe41f8588c6698d2aed0606
 # openssl: genera un certificado autofirmado si la empresa no pone el suyo
 # apk upgrade: la imagen puede traer paquetes con arreglos ya publicados
 RUN apk upgrade --no-cache && apk add --no-cache openssl && rm -f /etc/nginx/conf.d/default.conf
