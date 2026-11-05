@@ -3,6 +3,6 @@
 #     pip install -r requirements-dev.txt
 -r requirements.txt
 
-pytest==9.1.1
+pytest==9.2.0
 httpx2==2.13.0             # lo usa el TestClient de FastAPI
 pypdf==6.21.4              # lee el texto de los PDF exportados (6.19 tenia 18 CVE)
