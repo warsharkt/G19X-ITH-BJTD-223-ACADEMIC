@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
+from app import fechas
 from app import seguridad, trabajos
 from app.database import engine
 from app.main import app
@@ -122,7 +123,7 @@ def test_la_nota_solo_va_al_aprobar(client, como, narrativa):
 
 def test_la_suplente_firma_mientras_la_responsable_no_esta(client, como, narrativa, usuarios):
     responsable, suplente = como("rrhh2"), como("rrhh3")
-    hasta = (date.today() + timedelta(days=3)).isoformat()
+    hasta = (fechas.hoy() + timedelta(days=3)).isoformat()
     datos = {"suplente": usuarios["rrhh3"], "hasta": hasta, "motivo": "Vacaciones"}
     assert client.post("/firmas/suplencia", json=datos, headers=suplente).status_code == 403  # solo la Responsable
     # sin su propia verificacion en dos pasos no se puede (TI podria conocer su acceso)

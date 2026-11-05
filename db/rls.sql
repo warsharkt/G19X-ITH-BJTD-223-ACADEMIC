@@ -6,9 +6,9 @@
 -- tabla sin RLS queda legible y modificable por cualquiera en internet.
 -- Con RLS activo y sin politicas, esa API no puede leer ni escribir nada.
 --
--- El backend NO se ve afectado: se conecta como dueno de las tablas, y
--- el dueno no esta sujeto a RLS (no se usa FORCE ROW LEVEL SECURITY).
--- En PostgreSQL local (Docker) no cambia nada.
+-- El backend NO se ve afectado: con Supabase se conecta como dueno de las
+-- tablas, que no esta sujeto a RLS (no se usa FORCE ROW LEVEL SECURITY), y en
+-- Docker con talentia_api, que no es duena pero tiene BYPASSRLS.
 --
 -- Recorre las tablas existentes, asi cubre tambien las que se agreguen
 -- despues. Es seguro ejecutarlo varias veces: la API lo ejecuta al

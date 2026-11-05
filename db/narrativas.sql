@@ -68,3 +68,33 @@ ALTER TABLE narrativas ADD COLUMN IF NOT EXISTS firmada_como TEXT;
 -- Desde donde (IP) se firmo cada reporte y se descargo cada archivo (bitacora).
 ALTER TABLE narrativas ADD COLUMN IF NOT EXISTS revisada_desde TEXT;
 ALTER TABLE exportaciones ADD COLUMN IF NOT EXISTS origen TEXT;
+
+-- Lo que ya se firmo no cambia, y nadie inserta un reporte ya firmado. El
+-- superusuario queda fuera (migraciones, renombrar cuentas de demostracion): la
+-- regla es para la cuenta de la API, que no es duena de la tabla y no puede
+-- quitar el trigger. Aunque alguien ejecutara codigo en la API, no podria
+-- cambiar el texto de un reporte firmado.
+CREATE OR REPLACE FUNCTION narrativa_firmada_no_cambia() RETURNS trigger AS $$
+BEGIN
+    IF current_setting('is_superuser') = 'on' THEN
+        RETURN NEW;
+    END IF;
+    IF TG_OP = 'INSERT' THEN
+        IF NEW.revision <> 'pendiente' OR NEW.revisada_por IS NOT NULL THEN
+            RAISE EXCEPTION 'Un reporte nace pendiente de firma';
+        END IF;
+    ELSIF OLD.revision <> 'pendiente' AND (
+        NEW.resultado, NEW.revision, NEW.revisada_por, NEW.revisada_en, NEW.nota_rrhh, NEW.firmada_como,
+        NEW.comentario_revision, NEW.solicitada_por, NEW.area_id, NEW.periodo
+    ) IS DISTINCT FROM (
+        OLD.resultado, OLD.revision, OLD.revisada_por, OLD.revisada_en, OLD.nota_rrhh, OLD.firmada_como,
+        OLD.comentario_revision, OLD.solicitada_por, OLD.area_id, OLD.periodo
+    ) THEN
+        RAISE EXCEPTION 'Un reporte firmado no se puede modificar';
+    END IF;
+    RETURN NEW;
+END $$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS narrativa_firmada ON narrativas;
+CREATE TRIGGER narrativa_firmada BEFORE INSERT OR UPDATE ON narrativas
+    FOR EACH ROW EXECUTE FUNCTION narrativa_firmada_no_cambia();

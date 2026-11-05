@@ -23,8 +23,13 @@ def _para(u: Usuario, trabajo: dict) -> dict:
     """Direccion y los gerentes reciben el reporte cuando RRHH ya lo firmo
     (regla 10.3.9). Antes pueden ver en que va y quien lo firmara, pero no el
     texto de la IA, el motivo de un rechazo ni los errores de la generacion."""
-    if u.rol == "rrhh" or (trabajo["estado"] == "lista" and trabajo["revision"] == "aprobada"):
+    if u.rol == "rrhh":
         return trabajo
+    if trabajo["estado"] == "lista" and trabajo["revision"] == "aprobada":
+        # lo que el modelo escribio y el sistema rechazo es para quien firma: son
+        # frases falsas que no deben llegar a la audiencia del reporte
+        n = trabajo["narrativa"]
+        return {**trabajo, "narrativa": {**n, "advertencias": []} if n else n}
     return {**trabajo, "narrativa": None, "error": None, "detalle_error": None, "comentario_revision": None}
 
 

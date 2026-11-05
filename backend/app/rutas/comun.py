@@ -17,9 +17,12 @@ SEGUNDOS_CACHE = 60
 # Calcular los KPIs toma casi un segundo: se guardan en memoria unos segundos
 # para no recalcular en cada peticion del dashboard.
 _cache = {"df": None, "momento": 0.0}
-# Al vencer la cache, uno calcula y los demas esperan: si cada peticion
-# calculara por su cuenta, 25 a la vez tardaban 3 s en lugar de 0.2.
+# Al vencer la cache calcula uno solo: si cada peticion calculara por su cuenta,
+# 25 a la vez tardaban 3 s en lugar de 0.2. Los demas siguen con los datos de
+# hace un minuto en vez de esperar: si la base se atora, no se ocupan todos los
+# hilos de la API. Solo esperan si no hay nada que mostrar (o cambiaron los datos).
 _calculando = threading.Lock()
+SEGUNDOS_ESPERA = 10
 
 
 def _vigente() -> pd.DataFrame | None:
@@ -31,15 +34,23 @@ def kpis_df() -> pd.DataFrame:
     df = _vigente()
     if df is not None:
         return df
-    with _calculando:
+    anterior = _cache["df"]
+    if anterior is not None and not _calculando.acquire(blocking=False):
+        return anterior
+    if anterior is None and not _calculando.acquire(timeout=SEGUNDOS_ESPERA):
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
+    try:
         df = _vigente()
         if df is None:
-            try:
-                df = calcular_kpis()
-            except SQLAlchemyError:
-                raise HTTPException(status_code=503, detail="Base de datos no disponible")
+            df = calcular_kpis()
             _cache["df"], _cache["momento"] = df, time.monotonic()
-    return df
+        return df
+    except (SQLAlchemyError, pd.errors.DatabaseError):  # pandas envuelve los errores de la base
+        if anterior is not None:
+            return anterior
+        raise HTTPException(status_code=503, detail="Base de datos no disponible")
+    finally:
+        _calculando.release()
 
 
 def olvidar_kpis():

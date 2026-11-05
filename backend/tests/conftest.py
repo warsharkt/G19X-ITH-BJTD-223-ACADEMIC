@@ -14,6 +14,11 @@ from app.database import DB_URL, ES_REMOTA, engine
 from app.main import app
 from app.seguridad import Usuario, usuario_actual
 
+# Las pruebas crean miles de cuentas: con el costo real del hash tardarian 10
+# minutos. Cada hash guarda sus parametros, asi que todo funciona igual.
+seguridad._SCRYPT.update(n=2**10, p=1)
+seguridad._HASH_SENUELO = seguridad.hash_contrasena("senuelo-de-las-pruebas")
+
 
 @pytest.fixture(scope="session", autouse=True)
 def _base_de_datos_lista():

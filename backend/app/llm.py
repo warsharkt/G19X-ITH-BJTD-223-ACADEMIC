@@ -16,11 +16,13 @@ Politica de datos (PRD, seccion "Politica de uso de IA"):
 Se usan las APIs REST directamente (libreria estandar, sin dependencias extra).
 """
 import copy
+import ipaddress
 import json
 import os
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
@@ -58,13 +60,32 @@ def _post_json(url: str, cuerpo: dict, timeout: float, encabezados: dict | None 
         return json.loads(respuesta.read().decode("utf-8"))
 
 
+def _servidor_propio(url: str) -> bool:
+    """Este equipo o una IP privada de la red de la empresa. Un nombre cualquiera
+    no: no se sabe a donde apunta."""
+    servidor = urlsplit(url).hostname or ""
+    if servidor in ("localhost", "host.docker.internal"):
+        return True
+    try:
+        return ipaddress.ip_address(servidor).is_private
+    except ValueError:
+        return False
+
+
 class OllamaProveedor:
     nombre = "ollama"
-    local = True
 
     def __init__(self, modelo=None, url=None, timeout=None, pensar=None, num_ctx=None):
         self.modelo = modelo or os.getenv("OLLAMA_MODEL", "qwen3:8b")
         self.url = (url or os.getenv("OLLAMA_URL", "http://localhost:11434")).rstrip("/")
+        # Ollama tambien sirve modelos en la nube (gpt-oss:120b-cloud): el
+        # servidor seria local, pero los datos saldrian de la empresa.
+        self.local = _servidor_propio(self.url) and "cloud" not in self.modelo.lower()
+        if not self.local and modo_datos() != "sinteticos":
+            raise ConfiguracionIA(
+                f"Con datos reales el modelo debe correr en la empresa: {self.url} con {self.modelo} no lo garantiza. "
+                "Usa este equipo o una IP privada en OLLAMA_URL, y un modelo que no termine en -cloud."
+            )
         # En CPU un reporte tarda minutos y se genera en segundo plano: un
         # timeout corto solo convertia respuestas lentas en fallos.
         self.timeout = timeout or float(os.getenv("OLLAMA_TIMEOUT", "900"))

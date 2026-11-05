@@ -36,6 +36,7 @@ from datetime import date, datetime, timedelta
 import pandas as pd
 from sqlalchemy import text
 
+from app import fechas
 from app.database import ejecutar_sql, engine
 from app.llm import modo_datos
 from app.origen import actual as origen_de_la_peticion
@@ -50,6 +51,12 @@ FILAS_MAXIMAS = 50_000
 # Leer un Excel tarda por celda, no por peso: 1.6 millones de celdas repetidas
 # caben en 4 MB y tardaban un minuto. Un mes real no llega a 20,000.
 CELDAS_MAXIMAS = 1_000_000
+# Pandas tarda cada vez mas al leer un encabezado con muchas columnas repetidas:
+# 156 KB eran 25 s y 5 MB dejaban la API al 100 % mas de 25 minutos. Se rechaza
+# antes de leer. Una exportacion real no llega a 100 columnas.
+COLUMNAS_MAXIMAS = 200
+ENCABEZADO_MAXIMO = 20_000  # caracteres
+_SEPARADORES = ",;\t|"
 # Una carga validada guarda sus filas hasta que se aplica o se descarta. Si
 # nadie la aplica en este plazo, vence: se descarta sola y sus filas se borran
 # (no se quedan datos de colaboradores olvidados en la base).
@@ -263,6 +270,21 @@ def _clave(texto: str) -> str:
     return "_".join(sin_acentos.strip().lower().replace("-", " ").split())
 
 
+def _demasiadas_columnas() -> ErrorDeCarga:
+    return ErrorDeCarga(f"El archivo tiene más de {COLUMNAS_MAXIMAS} columnas: exporta solo las que pide la plantilla")
+
+
+def _revisar_columnas_csv(texto: str):
+    """Sin leerlo: cuenta separadores por linea (cualquiera de los que se aceptan)."""
+    lineas = texto.strip().splitlines()
+    if not lineas:
+        return
+    if len(lineas[0]) > ENCABEZADO_MAXIMO:
+        raise _demasiadas_columnas()
+    if max(max(l.count(s) for s in _SEPARADORES) for l in lineas) >= COLUMNAS_MAXIMAS:
+        raise _demasiadas_columnas()
+
+
 def _revisar_zip(contenido: bytes):
     """Rechaza el .xlsx que descomprimido pesaria demasiado (bomba de zip)."""
     try:
@@ -279,6 +301,9 @@ def _revisar_zip(contenido: bytes):
     # Se cuentan en el XML, sin abrir el libro, y no se usa su <dimension>: la declara el archivo
     if sum(h.count(b"<c ") + h.count(b"<c>") for h in hojas) > CELDAS_MAXIMAS:
         raise ErrorDeCarga(f"El Excel tiene más de {CELDAS_MAXIMAS:,} celdas: divídelo en varios archivos o súbelo como .csv")
+    for hoja in hojas:
+        if max(f.count(b"<c ") + f.count(b"<c>") for f in hoja.split(b"</row>")) > COLUMNAS_MAXIMAS:
+            raise _demasiadas_columnas()
 
 
 def leer_archivo(nombre: str, contenido: bytes) -> pd.DataFrame:
@@ -298,6 +323,7 @@ def leer_archivo(nombre: str, contenido: bytes) -> pd.DataFrame:
                 texto = contenido.decode("utf-8-sig")
             except UnicodeDecodeError:
                 texto = contenido.decode("latin-1")
+            _revisar_columnas_csv(texto)
             df = pd.read_csv(io.StringIO(texto), dtype=str, sep=None, engine="python", keep_default_na=False,
                              nrows=FILAS_MAXIMAS + 1)
     except ErrorDeCarga:
@@ -306,6 +332,8 @@ def leer_archivo(nombre: str, contenido: bytes) -> pd.DataFrame:
         raise ErrorDeCarga(f"No se pudo leer el archivo: {exc}")
     if len(df) > FILAS_MAXIMAS:
         raise ErrorDeCarga(f"El archivo tiene más de {FILAS_MAXIMAS:,} filas: divídelo en varios archivos")
+    if df.shape[1] > COLUMNAS_MAXIMAS:
+        raise _demasiadas_columnas()
     columnas = [_clave(c) for c in df.columns]
     # vacio, NaN o NaT (fecha vacia en Excel) -> None. dtype=object: si no,
     # pandas vuelve a inferir fechas y convierte los None otra vez en NaT.
@@ -319,7 +347,7 @@ def leer_archivo(nombre: str, contenido: bytes) -> pd.DataFrame:
 
 # ------------------------------------------------------------- validacion
 def _hoy() -> date:
-    return date.today()
+    return fechas.hoy()
 
 
 def _texto(v) -> str:
@@ -406,7 +434,9 @@ def _convertir(c: Columna, v, contexto: dict):
             return _area_nueva(v, contexto)
         if not contexto["nombres_area"]:
             raise ValueError("no existe: carga primero la plantilla de personal (HRIS), de ahí salen las áreas")
-        raise ValueError(f"el área '{_texto(v)}' no existe. Áreas: {', '.join(contexto['nombres_area'])}")
+        raise ValueError(
+            f"el área '{_texto(v)}' no existe. Áreas: {', '.join(contexto['nombres_area'])}. Si es nueva, pide a TI que la agregue"
+        )
     if c.tipo == "empleado":
         id_ = contexto["empleados"].get(_texto(v).upper())
         if id_ is None:
@@ -466,7 +496,7 @@ def _validar_filas(fuente: Fuente, df: pd.DataFrame, ctx: dict) -> tuple[list[di
             try:
                 fila[c.nombre] = _convertir(c, v, ctx)
             except ValueError as exc:
-                errores.append({"fila": numero, "columna": c.nombre, "mensaje": f"'{_texto(v)}' {exc}"})
+                errores.append({"fila": numero, "columna": c.nombre, "mensaje": f"'{_texto(v)}' {exc}"[:300]})
                 ok = False
         if not ok:
             continue
@@ -562,7 +592,7 @@ def validar(clave_fuente: str, archivo: str, contenido: bytes, usuario: str) -> 
     faltan = [c.nombre for c in fuente.columnas if c.requerida and c.nombre not in columnas]
     esperadas = {c.nombre for c in fuente.columnas}
     descartadas = [
-        {"columna": c, "motivo": "dato personal: no se guarda" if c in PERSONALES else "no la usa ningún indicador"}
+        {"columna": c[:100], "motivo": "dato personal: no se guarda" if c in PERSONALES else "no la usa ningún indicador"}
         for c in df.columns if c not in esperadas
     ]
     areas_nuevas = []

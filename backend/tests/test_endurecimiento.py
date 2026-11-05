@@ -25,6 +25,7 @@ el tablero en Docker. El 15 es de las dependencias del frontend (npm audit).
 Usuarios reales con su contrasena (prefijo zz_end_), como test_cuentas.py.
 """
 import asyncio
+import hashlib
 import inspect
 import io
 import json
@@ -38,7 +39,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
-from app import cargas, seguridad, trabajos
+from app import areas, cargas, fechas, llm, seguridad, trabajos
 from app.database import DB_URL, engine
 from app.main import app
 from app.rutas import cargas as rutas_cargas
@@ -149,7 +150,7 @@ def test_si_ti_restablece_el_acceso_de_quien_firma_pierde_la_firma(client, cuent
         conn.execute(text("UPDATE usuarios SET mfa_activo = true WHERE id = :i"), {"i": resp})
         conn.execute(
             text("INSERT INTO suplencias (suplente, titular, desde, hasta) VALUES (:s, :t, :d, :h)"),
-            {"s": PREFIJO + "ana", "t": PREFIJO + "resp", "d": date.today(), "h": date.today() + timedelta(days=5)},
+            {"s": PREFIJO + "ana", "t": PREFIJO + "resp", "d": fechas.hoy(), "h": fechas.hoy() + timedelta(days=5)},
         )
     ti = como(client, "ti")
     # la suplente tambien: TI restablece a la Analista que firma en su lugar
@@ -216,7 +217,7 @@ def test_sin_firma_direccion_y_gerentes_no_leen_el_texto(cuentas, persona, area,
         client.get(f"/narrativas/{id_}", headers=encabezado)
     assert vistos[pendiente]["narrativa"] is None and vistos[pendiente]["revision"] == "pendiente"
     assert vistos[rechazada]["narrativa"] is None and vistos[rechazada]["comentario_revision"] is None
-    assert vistos[aprobada]["narrativa"] == {"resumen": "TEXTO DE LA IA"}
+    assert vistos[aprobada]["narrativa"]["resumen"] == "TEXTO DE LA IA"
     # RRHH si lo lee para firmarlo
     vistos.clear()
     client.get(f"/narrativas/{pendiente}", headers=como(client, "resp"))
@@ -371,17 +372,36 @@ def test_la_api_usa_una_cuenta_sin_privilegios(rol_de_prueba):
     try:
         with api.connect() as conn:
             assert conn.execute(text("SELECT rolsuper FROM pg_roles WHERE rolname = current_user")).scalar() is False
-            assert conn.execute(text("SELECT COUNT(*) FROM usuarios")).scalar() > 0  # trabaja normal
-            assert conn.execute(  # es duena de las tablas: las crea y modifica al arrancar
-                text("SELECT COUNT(*) FROM pg_tables WHERE schemaname = 'public' AND tableowner <> current_user")
+            assert conn.execute(text("SELECT COUNT(*) FROM usuarios")).scalar() > 0  # trabaja normal, a pesar de RLS
+            assert conn.execute(  # no es duena de nada: las tablas las crea el arranque
+                text("SELECT COUNT(*) FROM pg_tables WHERE schemaname = 'public' AND tableowner = current_user")
             ).scalar() == 0
             with pytest.raises(Exception, match="permission denied|must be superuser|privilege"):
                 conn.exec_driver_sql("COPY (SELECT 1) TO PROGRAM 'id'")  # con superusuario: comandos en el servidor
+        for prohibida in (
+            "DELETE FROM usuarios_cambios", "UPDATE usuarios_cambios SET accion = 'x'", "TRUNCATE usuarios_cambios",
+            "DELETE FROM accesos", "UPDATE accesos SET usuario = 'x'", "DELETE FROM exportaciones",
+            "DELETE FROM umbrales_cambios", "DELETE FROM usuarios", "DELETE FROM narrativas", "DELETE FROM cargas",
+            "DROP TRIGGER narrativa_firmada ON narrativas", "ALTER TABLE narrativas DISABLE TRIGGER narrativa_firmada",
+            "DROP TABLE accesos", "CREATE TABLE zz_nueva (id int)",
+        ):
+            with api.connect() as conn, pytest.raises(Exception, match="permission denied|must be owner"):
+                conn.exec_driver_sql(prohibida)
+        with api.begin() as conn:  # agregar a la bitacora si puede: es lo que hace al entrar
+            conn.execute(text("INSERT INTO accesos (usuario, evento) VALUES ('zz_prueba_rol', 'fallo')"))
         with api.connect() as conn:
             with pytest.raises(Exception, match="permission denied|privilege"):
                 conn.exec_driver_sql("CREATE ROLE zz_otro_rol SUPERUSER")
     finally:
         api.dispose()
+
+
+def test_dentro_de_la_api_no_se_corre_ddl(monkeypatch):
+    """La cuenta de la API no es duena: el arranque ya creo todo."""
+    from app import database
+
+    monkeypatch.setenv("DB_ESQUEMA_PREPARADO", "si")
+    database.ejecutar_sql("no-existe-y-no-importa.sql")
 
 
 def test_las_variables_de_la_cuenta_de_la_api_cambian_la_conexion(monkeypatch):
@@ -551,7 +571,7 @@ def test_no_se_designa_suplente_a_quien_tiene_la_temporal_de_ti(client, cuentas)
     with engine.begin() as conn:  # TI la creo: tiene la contrasena temporal que TI conoce
         conn.execute(text("UPDATE usuarios SET debe_cambiar_contrasena = true WHERE usuario = :u"), {"u": PREFIJO + "ana"})
     responsable = como(client, "resp")
-    hasta = str(date.today() + timedelta(days=3))
+    hasta = str(fechas.hoy() + timedelta(days=3))
     assert PREFIJO + "ana" not in [c["usuario"] for c in client.get("/firmas", headers=responsable).json()["candidatas"]]
     r = client.post("/firmas/suplencia", headers=responsable, json={"suplente": PREFIJO + "ana", "hasta": hasta})
     assert r.status_code == 422 and "contraseña temporal" in r.json()["detail"]  # antes: 200
@@ -570,6 +590,7 @@ def test_el_arranque_quita_la_contrasena_del_superusuario_antes_de_la_api(monkey
     monkeypatch.setenv("POSTGRES_PASSWORD", "secreto-del-superusuario")
     monkeypatch.setattr(arranque, "sembrar_si_hace_falta", lambda: None)
     monkeypatch.setattr(arranque, "preparar_demo", lambda: None)
+    monkeypatch.setattr(arranque, "preparar_esquema", lambda: None)
     monkeypatch.setattr(arranque, "preparar_cuenta_de_la_api",
                         lambda: {"DB_API_USUARIO": "talentia_api", "DB_API_CONTRASENA": "x" * 40})
     entorno = {}
@@ -934,7 +955,7 @@ def test_quien_espera_aprobacion_no_recibe_firma_ni_suplencia(client, cuentas):
     resp = como(client, "resp")
     assert PREFIJO + "ana" not in [c["usuario"] for c in client.get("/firmas", headers=resp).json()["candidatas"]]
     r = client.post("/firmas/suplencia", headers=resp,
-                    json={"suplente": PREFIJO + "ana", "hasta": str(date.today() + timedelta(days=3))})
+                    json={"suplente": PREFIJO + "ana", "hasta": str(fechas.hoy() + timedelta(days=3))})
     assert r.status_code == 422
     r = client.put(f"/firmas/responsables/{cuentas['ids']['ana']}", headers=resp, json={"firma": True})
     assert r.status_code == 422 and "aprueba" in r.json()["detail"]
@@ -962,7 +983,7 @@ def test_las_entradas_y_los_fallos_quedan_en_la_bitacora(client, sin_accesos):
 def test_un_nombre_que_no_existe_no_se_guarda(client, sin_accesos):
     """A veces la gente escribe la contrasena en el campo de usuario."""
     equipo = TestClient(app, client=("10.0.7.2", 5000))
-    equipo.post("/auth/login", data={"username": "Mi-Clave-Secreta-1", "password": "x"})
+    equipo.post("/auth/login", data={"username": "zz_Mi-Clave-Secreta-1", "password": "x"})
     with engine.connect() as conn:
         assert list(conn.execute(text("SELECT usuario FROM accesos")).scalars()) == [seguridad.USUARIO_INEXISTENTE]
 
@@ -1112,3 +1133,264 @@ def test_al_vencer_la_cache_los_kpis_se_calculan_una_vez(monkeypatch):
     finally:
         comun.olvidar_kpis()
     assert len(calculos) == 1  # antes: uno por peticion
+
+
+# ============================================================================
+# Cuarta auditoria (noviembre de 2026)
+# ============================================================================
+
+# ========== 1. un archivo con muchas columnas se rechaza antes de leerlo
+@pytest.mark.parametrize("contenido", [
+    b'"a",' * 50_000,                        # columnas repetidas: 156 KB tardaban 25 s
+    b"a;b|c:d\t" * 100_000,                  # separadores mezclados en una sola linea
+    b"\x00" * 1_000_000,                     # una linea sin separadores
+    b"codigo\n" + b"1," * 5000 + b"1\n",     # encabezado corto, una fila enorme
+], ids=["repetidas", "mezcladas", "nulos", "fila-larga"])
+def test_un_csv_con_demasiadas_columnas_se_rechaza_de_inmediato(contenido):
+    inicio = time.perf_counter()
+    with pytest.raises(cargas.ErrorDeCarga, match="columnas"):
+        cargas.leer_archivo("x.csv", contenido)
+    assert time.perf_counter() - inicio < 2
+
+
+def test_un_excel_con_demasiadas_columnas_se_rechaza():
+    salida = io.BytesIO()
+    pd.DataFrame([[1] * 300]).to_excel(salida, index=False)
+    with pytest.raises(cargas.ErrorDeCarga, match="columnas"):
+        cargas.leer_archivo("x.xlsx", salida.getvalue())
+
+
+def test_un_archivo_normal_con_columnas_de_mas_se_sigue_leyendo():
+    encabezado = ",".join(f"c{i}" for i in range(60))
+    df = cargas.leer_archivo("x.csv", f"{encabezado}\n{','.join('1' * 60)}\n".encode())
+    assert df.shape == (1, 60)
+
+
+# ======== 2. no se aprueba hasta que la persona cambio la temporal de TI
+def test_no_se_aprueba_mientras_ti_conoce_la_temporal(client, cuentas):
+    id_ = cuentas["ids"]["ger"]
+    temporal = client.post(f"/usuarios/{id_}/contrasena", headers=como(client, "ti")).json()["contrasena_temporal"]
+    resp = como(client, "resp")
+    r = client.put(f"/usuarios/{id_}/aprobacion", headers=resp, json={"aprobada": True})
+    assert r.status_code == 422 and "contraseña temporal" in r.json()["detail"]  # antes: 200, y TI entraba con ella
+    _entrar_con_temporal(client, PREFIJO + "ger", temporal)
+    assert client.put(f"/usuarios/{id_}/aprobacion", headers=resp, json={"aprobada": True}).status_code == 200
+
+
+def test_si_su_rol_exige_mfa_tampoco_se_aprueba_sin_el(client, cuentas, monkeypatch):
+    monkeypatch.setenv("MFA_OBLIGATORIO", "rrhh")
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE usuarios SET acceso_aprobado = false WHERE usuario = :u"), {"u": PREFIJO + "ana"})
+    with pytest.raises(seguridad.ErrorDeUsuario, match="verificación"):
+        seguridad.resolver_aprobacion(cuentas["ids"]["ana"], True, PREFIJO + "resp")
+
+
+def test_rechazar_no_espera_a_nada(client, cuentas):
+    id_ = cuentas["ids"]["ger"]
+    client.post(f"/usuarios/{id_}/contrasena", headers=como(client, "ti"))
+    assert client.put(f"/usuarios/{id_}/aprobacion", headers=como(client, "resp"), json={"aprobada": False}).status_code == 200
+
+
+def test_rrhh_se_entera_cuando_ya_puede_aprobar(client, cuentas):
+    id_ = cuentas["ids"]["ger"]
+    temporal = client.post(f"/usuarios/{id_}/contrasena", headers=como(client, "ti")).json()["contrasena_temporal"]
+    _entrar_con_temporal(client, PREFIJO + "ger", temporal)
+    assert any("ya configuró su acceso" in t for t in avisos_de_cuenta("resp"))
+
+
+# ============================ 3. con datos reales, el modelo corre en la empresa
+@pytest.mark.parametrize("url,modelo", [
+    ("https://ollama.empresa-externa.com", "qwen3:8b"),
+    ("http://8.8.8.8:11434", "qwen3:8b"),
+    ("http://localhost:11434", "gpt-oss:120b-cloud"),
+])
+def test_con_datos_reales_no_se_acepta_un_modelo_fuera_de_la_empresa(monkeypatch, url, modelo):
+    monkeypatch.setenv("MODO_DATOS", "reales")
+    with pytest.raises(llm.ConfiguracionIA, match="debe correr en la empresa"):
+        llm.OllamaProveedor(modelo=modelo, url=url)
+
+
+@pytest.mark.parametrize("url", ["http://localhost:11434", "http://127.0.0.1:11434", "http://host.docker.internal:11434",
+                                 "http://192.168.1.20:11434", "http://10.0.0.5:11434"])
+def test_con_datos_reales_se_acepta_un_modelo_propio(monkeypatch, url):
+    monkeypatch.setenv("MODO_DATOS", "reales")
+    assert llm.OllamaProveedor(modelo="qwen3:8b", url=url).local is True
+
+
+def test_con_datos_de_prueba_un_modelo_externo_no_cuenta_como_local(monkeypatch):
+    monkeypatch.setenv("MODO_DATOS", "sinteticos")
+    assert llm.OllamaProveedor(modelo="qwen3:8b", url="https://ollama.externo.com").local is False  # se le oculta el area
+
+
+# ============================ 5. nada espera a la base sin limite
+def test_las_consultas_y_los_candados_tienen_tiempo_limite():
+    with engine.connect() as conn:
+        assert conn.execute(text("SHOW statement_timeout")).scalar() == "30s"
+        assert conn.execute(text("SHOW lock_timeout")).scalar() == "5s"
+
+
+def test_mientras_uno_recalcula_los_demas_no_esperan(monkeypatch):
+    from app.rutas import comun
+
+    viejo, nuevo = pd.DataFrame({"x": [1]}), pd.DataFrame({"x": [2]})
+    entro, sigue = threading.Event(), threading.Event()
+
+    def lento():
+        entro.set()
+        sigue.wait(5)
+        return nuevo
+
+    monkeypatch.setattr(comun, "calcular_kpis", lento)
+    monkeypatch.setitem(comun._cache, "df", viejo)
+    monkeypatch.setitem(comun._cache, "momento", time.monotonic() - comun.SEGUNDOS_CACHE - 1)
+    hilo = threading.Thread(target=comun.kpis_df)
+    hilo.start()
+    try:
+        assert entro.wait(5)
+        inicio = time.perf_counter()
+        assert comun.kpis_df() is viejo  # antes: esperaba, y con 40 asi se acababan los hilos
+        assert time.perf_counter() - inicio < 0.5
+    finally:
+        sigue.set()
+        hilo.join()
+
+
+def test_si_no_se_puede_recalcular_siguen_los_datos_de_hace_un_minuto(monkeypatch):
+    from fastapi import HTTPException
+
+    from app.rutas import comun
+
+    def falla():
+        raise pd.errors.DatabaseError("canceling statement due to lock timeout")
+
+    viejo = pd.DataFrame({"x": [1]})
+    monkeypatch.setattr(comun, "calcular_kpis", falla)
+    monkeypatch.setitem(comun._cache, "df", viejo)
+    monkeypatch.setitem(comun._cache, "momento", time.monotonic() - comun.SEGUNDOS_CACHE - 1)
+    assert comun.kpis_df() is viejo  # antes: 500
+    monkeypatch.setitem(comun._cache, "df", None)
+    with pytest.raises(HTTPException) as exc:
+        comun.kpis_df()
+    assert exc.value.status_code == 503
+
+
+# ============================ 7. el hash sube de parametros al entrar
+def _hash_de_antes(clave):
+    sal = b"s" * 16
+    return f"scrypt${2**14}$8$1${sal.hex()}${hashlib.scrypt(clave.encode(), salt=sal, n=2**14, r=8, p=1).hex()}"
+
+
+def test_una_contrasena_con_el_hash_anterior_sigue_entrando_y_se_actualiza(client, cuentas):
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE usuarios SET contrasena_hash = :h WHERE id = :i"),
+                     {"h": _hash_de_antes(CLAVE), "i": cuentas["ids"]["ger"]})
+    assert entrar(client, "ger").status_code == 200
+    with engine.connect() as conn:
+        guardado = conn.execute(text("SELECT contrasena_hash FROM usuarios WHERE id = :i"), {"i": cuentas["ids"]["ger"]}).scalar()
+    assert not seguridad.hash_viejo(guardado) and seguridad.verificar_contrasena(CLAVE, guardado)
+
+
+def test_con_contrasena_equivocada_el_hash_anterior_no_se_toca(client, cuentas):
+    viejo = _hash_de_antes(CLAVE)
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE usuarios SET contrasena_hash = :h WHERE id = :i"), {"h": viejo, "i": cuentas["ids"]["ger"]})
+    assert entrar(client, "ger", "equivocada-1234").status_code == 401
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT contrasena_hash FROM usuarios WHERE id = :i"), {"i": cuentas["ids"]["ger"]}).scalar() == viejo
+
+
+# ============================ 6. areas despues de la primera plantilla
+@pytest.fixture()
+def area_de_prueba():
+    yield "Zz Compras"
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM areas WHERE nombre LIKE 'Zz %'"))
+        conn.execute(text("DELETE FROM usuarios_cambios WHERE usuario LIKE 'área: Zz %'"))
+
+
+def test_se_agrega_y_se_renombra_un_area(area_de_prueba):
+    assert areas.agregar(area_de_prueba, "consola:pruebas") in areas.listar()
+    assert areas.renombrar(area_de_prueba, "Zz Abasto", "consola:pruebas") == "Zz Abasto"
+    assert "Zz Abasto" in areas.listar() and area_de_prueba not in areas.listar()
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT accion FROM usuarios_cambios WHERE usuario = 'área: Zz Abasto'")).scalar() == "renombrar_area"
+
+
+@pytest.mark.parametrize("nombre", ["Ventas", "VENTAS", "ventás", "Corporativo", "   ", "x" * 61])
+def test_un_nombre_de_area_invalido_se_rechaza(nombre):
+    with pytest.raises(seguridad.ErrorDeUsuario):
+        areas.agregar(nombre, "consola:pruebas")
+
+
+def test_renombrar_un_area_que_no_existe_avisa():
+    with pytest.raises(seguridad.ErrorDeUsuario, match="no existe"):
+        areas.renombrar("Zz Nada", "Zz Otra", "consola:pruebas")
+
+
+# ============================ 4. la cuenta de la API no borra el rastro
+@pytest.fixture()
+def como_la_api():
+    """Una transaccion con un rol sin privilegios, como talentia_api, que se deshace."""
+    with engine.connect() as conn:
+        transaccion = conn.begin()
+        conn.execute(text("CREATE ROLE zz_api_prueba NOLOGIN NOSUPERUSER BYPASSRLS"))
+        conn.execute(text("GRANT SELECT, INSERT, UPDATE ON narrativas TO zz_api_prueba"))
+        conn.execute(text("GRANT USAGE, SELECT ON SEQUENCE narrativas_id_seq TO zz_api_prueba"))
+        id_ = conn.execute(text(
+            "INSERT INTO narrativas (area_id, periodo, estado, solicitada_por, resultado, revision, revisada_por) "
+            "VALUES (0, '2026-08-01', 'lista', 'zz', '{\"resumen\": \"firmado\"}', 'aprobada', 'zz_resp') RETURNING id"
+        )).scalar_one()
+        conn.execute(text("SET LOCAL ROLE zz_api_prueba"))
+        try:
+            yield conn, id_
+        finally:
+            transaccion.rollback()
+
+
+def test_un_reporte_firmado_no_se_puede_modificar(como_la_api):
+    conn, id_ = como_la_api
+    with pytest.raises(Exception, match="no se puede modificar"):
+        conn.execute(text("UPDATE narrativas SET resultado = '{\"resumen\": \"alterado\"}' WHERE id = :i"), {"i": id_})
+
+
+def test_un_reporte_firmado_no_vuelve_a_pendiente(como_la_api):
+    conn, id_ = como_la_api
+    with pytest.raises(Exception, match="no se puede modificar"):
+        conn.execute(text("UPDATE narrativas SET revision = 'pendiente' WHERE id = :i"), {"i": id_})
+
+
+def test_no_se_inserta_un_reporte_ya_firmado(como_la_api):
+    conn, _ = como_la_api
+    with pytest.raises(Exception, match="nace pendiente"):
+        conn.execute(text("INSERT INTO narrativas (area_id, periodo, revision, revisada_por) "
+                          "VALUES (0, '2026-08-01', 'aprobada', 'falsa')"))
+
+
+def test_lo_que_no_es_la_firma_se_puede_seguir_escribiendo(como_la_api):
+    conn, id_ = como_la_api
+    assert conn.execute(text("UPDATE narrativas SET rondas = 2 WHERE id = :i"), {"i": id_}).rowcount == 1
+
+
+# =================== 9. lo que el sistema rechazo no le llega a la audiencia
+@pytest.mark.parametrize("rol,ve", [("direccion", False), ("gerente", False), ("rrhh", True)])
+def test_las_frases_rechazadas_son_solo_para_rrhh(rol, ve):
+    from app.rutas import narrativas
+
+    trabajo = {"estado": "lista", "revision": "aprobada", "narrativa": {"resumen": "x", "advertencias": ["frase falsa"]}}
+    u = seguridad.Usuario(1, "x", "X", rol, None)
+    assert bool(narrativas._para(u, trabajo)["narrativa"]["advertencias"]) is ve
+    assert narrativas._para(u, trabajo)["narrativa"]["resumen"] == "x"
+
+
+# ================= 11 y 12. fechas de la empresa y mensajes
+def test_la_suplencia_usa_la_fecha_de_la_empresa(client, cuentas, monkeypatch):
+    con_mfa_activa("ana")
+    resp = como(client, "resp")
+    hasta = str(fechas.hoy() + timedelta(days=3))
+    assert client.post("/firmas/suplencia", headers=resp, json={"suplente": PREFIJO + "ana", "hasta": hasta}).status_code == 200
+    monkeypatch.setattr(fechas, "hoy", lambda: date.fromisoformat(hasta) + timedelta(days=1))
+    assert client.get("/firmas", headers=resp).json()["suplencia"] is None
+
+
+def test_un_usuario_con_caracter_nulo_es_un_intento_fallido_normal(client):
+    assert client.post("/auth/login", data={"username": "a\x00b", "password": "x"}).status_code == 401  # antes: 503

@@ -51,17 +51,31 @@ ES_REMOTA = bool(os.getenv("DATABASE_URL", "").strip()) and DB_URL.host not in (
 # connect_timeout: si PostgreSQL no responde, fallar en segundos (por defecto 5)
 # en lugar de quedarse esperando minutos.
 _args = {"connect_timeout": int(os.getenv("DB_CONNECT_TIMEOUT", "5"))}
+# Una consulta o un candado no esperan sin limite: si no, unas cuantas peticiones
+# atoradas ocupan todos los hilos de la API y nadie mas recibe respuesta. En
+# Supabase no: su pooler no acepta estas opciones al conectar.
+if not ES_REMOTA:
+    _args["options"] = (
+        f"-c statement_timeout={int(os.getenv('DB_SEGUNDOS_CONSULTA', '30')) * 1000} "
+        f"-c lock_timeout={int(os.getenv('DB_SEGUNDOS_CANDADO', '5')) * 1000}"
+    )
 if DB_URL.port == 6543:
     # "Transaction pooler" de Supabase: no admite sentencias preparadas
     # (se recomienda el "Session pooler", puerto 5432)
     _args["prepare_threshold"] = None
-# pool_pre_ping: en la nube las conexiones inactivas se cortan; se revisan antes de usarlas
-engine = create_engine(DB_URL, connect_args=_args, pool_pre_ping=ES_REMOTA)
+# pool_pre_ping: las conexiones que se cortaron (la nube, un reinicio de la base)
+# se revisan antes de usarlas. pool_timeout: sin conexion libre, 503 en segundos.
+engine = create_engine(DB_URL, connect_args=_args, pool_pre_ping=True, pool_timeout=10)
 
 
 def ejecutar_sql(archivo: str):
     """Ejecuta un archivo de db/ con varias sentencias (los idempotentes:
-    umbrales.sql, narrativas.sql, usuarios.sql, rls.sql)."""
+    umbrales.sql, narrativas.sql, usuarios.sql, rls.sql).
+
+    En Docker no hace nada dentro de la API: scripts/arranque.py ya los corrio
+    como superusuario, y la cuenta de la API no es duena de las tablas."""
+    if os.getenv("DB_ESQUEMA_PREPARADO") == "si":
+        return
     sql = (RAIZ / "db" / archivo).read_text(encoding="utf-8")
     with engine.begin() as conn:
         # conexion nativa de psycopg: permite varias sentencias en un execute

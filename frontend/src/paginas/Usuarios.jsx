@@ -22,6 +22,8 @@ const ACCIONES = {
   quitar_firma: 'Permiso de firma quitado',
   suspender_firma: 'Permiso de firma suspendido',
   aprobar_acceso: 'Acceso aprobado',
+  crear_area: 'Área agregada',
+  renombrar_area: 'Área renombrada',
   rechazar_acceso: 'Acceso rechazado',
 }
 
@@ -356,7 +358,7 @@ export default function Usuarios() {
                               onClick={() =>
                                 accion(
                                   () => api.aprobarAcceso(c.id, true),
-                                  `¿Aprobar el acceso de ${c.nombre}? Confirma con esa persona que ella lo pidió: TI lo dejó en espera.`,
+                                  `¿Aprobar el acceso de ${c.nombre}? Confirma antes con esa persona que ella lo pidió y que ya entró: TI lo dejó en espera.`,
                                 )
                               }
                             >

@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.exc import SQLAlchemyError
 
-from app import mfa, schemas, seguridad
+from app import avisos, mfa, schemas, seguridad
 from app.rutas.comun import ids_de_areas
 from app.seguridad import ErrorDeUsuario, Usuario, areas_visibles, sesion_actual
 
@@ -14,6 +14,15 @@ def _origen(request: Request) -> str:
     """IP de quien intenta entrar. Detras de nginx, uvicorn la toma de
     X-Forwarded-For (scripts/arranque.py usa --proxy-headers)."""
     return request.client.host if request.client else "desconocido"
+
+
+def _avisar_si_ya_se_puede_aprobar(u: Usuario):
+    """La Responsable no aprueba hasta que la persona termina de entrar: se le
+    avisa, para que no tenga que estar revisando."""
+    cuenta = seguridad.obtener_cuenta(u.id)
+    if seguridad.lista_para_aprobar(cuenta):
+        avisos.avisar_cuenta(f"{cuenta['nombre']} ({cuenta['usuario']}) ya configuró su acceso: confirma con esa persona "
+                             "y apruébalo en Usuarios", cuenta)
 
 
 def _token_de_sesion(u: Usuario) -> dict:
@@ -96,6 +105,7 @@ def cambiar_mi_contrasena(request: Request, cambio: schemas.CambioContrasena, u:
         raise HTTPException(status_code=422, detail=str(exc))
     except SQLAlchemyError:
         raise HTTPException(status_code=503, detail="Base de datos no disponible")
+    _avisar_si_ya_se_puede_aprobar(nuevo)
     return _token_de_sesion(nuevo)
 
 
@@ -114,8 +124,10 @@ def configurar_mfa(u: Usuario = Depends(sesion_actual)):
 def activar_mfa(solicitud: schemas.MfaActivar, u: Usuario = Depends(sesion_actual)):
     """Confirma con un codigo de la app. Devuelve los codigos de respaldo (una sola vez)."""
     try:
-        return {"codigos": mfa.activar(u, solicitud.codigo)}
+        codigos = mfa.activar(u, solicitud.codigo)
     except ErrorDeUsuario as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     except SQLAlchemyError:
         raise HTTPException(status_code=503, detail="Base de datos no disponible")
+    _avisar_si_ya_se_puede_aprobar(u)
+    return {"codigos": codigos}

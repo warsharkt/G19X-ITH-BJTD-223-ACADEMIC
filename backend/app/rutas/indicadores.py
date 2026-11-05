@@ -25,7 +25,9 @@ def kpis(
     indice = indice_kpis()
     del_mes = mes(periodo).date() if periodo else indice["ultimo_mes"]
     if del_mes not in indice["periodos"]:
-        raise HTTPException(status_code=404, detail=f"No hay datos para el periodo {periodo}")
+        raise HTTPException(
+            status_code=404, detail=f"No hay datos para el periodo {periodo}" if periodo else "Todavía no hay datos cargados"
+        )
     if area_id not in indice["areas"]:
         raise HTTPException(status_code=404, detail=f"El area {area_id} no existe")
     if indicador is not None and indicador not in indice["indicadores"]:

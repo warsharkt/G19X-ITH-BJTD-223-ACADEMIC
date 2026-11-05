@@ -16,7 +16,7 @@ from datetime import date, timedelta
 
 from sqlalchemy import text
 
-from app import seguridad
+from app import fechas, seguridad
 from app.database import engine
 from app.seguridad import ErrorDeUsuario, Usuario
 
@@ -53,7 +53,7 @@ def _suplencia_vigente(conn, hoy: date | None = None) -> dict | None:
             "WHERE s.cancelada_en IS NULL AND :hoy BETWEEN s.desde AND s.hasta "
             "ORDER BY s.id DESC LIMIT 1"
         ),
-        {"hoy": hoy or date.today()},
+        {"hoy": hoy or fechas.hoy()},
     ).mappings().first()
     return dict(fila) if fila else None
 
@@ -133,7 +133,7 @@ def designar_suplente(titular: Usuario, suplente: str, hasta: date, motivo: str 
     pasos: una cuenta con la temporal que entrego TI la podria usar TI."""
     if not titular.es_responsable:
         raise ErrorDeUsuario("Solo la Responsable de RRHH designa a su suplente")
-    hoy = date.today()
+    hoy = fechas.hoy()
     if hasta < hoy:
         raise ErrorDeUsuario("La fecha final no puede ser anterior a hoy")
     if hasta > hoy + timedelta(days=DIAS_MAXIMOS_SUPLENCIA):
@@ -181,7 +181,7 @@ def terminar_suplencia(titular: Usuario) -> dict:
                 "UPDATE suplencias SET cancelada_por = :p, cancelada_en = now() "
                 "WHERE cancelada_en IS NULL AND hasta >= :hoy RETURNING suplente"
             ),
-            {"p": titular.usuario, "hoy": date.today()},
+            {"p": titular.usuario, "hoy": fechas.hoy()},
         ).first()
         if fila is None:
             raise ErrorDeUsuario("No hay ninguna suplencia vigente")

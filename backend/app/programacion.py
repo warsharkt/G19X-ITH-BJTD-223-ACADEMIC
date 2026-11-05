@@ -23,14 +23,14 @@ este desactivada.
 import logging
 import os
 import threading
-from datetime import date, datetime
-from zoneinfo import ZoneInfo
+from datetime import date
 
 import pandas as pd
 from sqlalchemy import text
 
 from app import avisos, cargas, narrativa, trabajos
 from app.database import ejecutar_sql, engine
+from app.fechas import hoy
 from app.kpis import calcular_kpis
 from app.llm import ConfiguracionIA, obtener_proveedor
 from app.narrativa import MESES_ES
@@ -48,11 +48,6 @@ def asegurar_tabla():
         trabajos.asegurar_tabla()  # columna narrativas.programada
         ejecutar_sql("programacion.sql")
         _tabla_lista = True
-
-
-def hoy() -> date:
-    """Fecha de hoy en la zona horaria de la empresa (no la del servidor)."""
-    return datetime.now(ZoneInfo(os.getenv("ZONA_HORARIA", "America/Mexico_City"))).date()
 
 
 def _mes(periodo: pd.Timestamp) -> str:

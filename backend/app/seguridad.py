@@ -69,7 +69,10 @@ MINUTOS_PASO_MFA = 5  # para escribir el codigo tras la contrasena
 HORAS_CONTRASENA_TEMPORAL = 72  # despues, TI debe generar otra
 DIAS_BITACORA_ACCESOS = 365
 USUARIO_INEXISTENTE = "(usuario inexistente)"
-_SCRYPT = {"n": 2**14, "r": 8, "p": 1}
+# Parametros equivalentes de OWASP (N=2^15, r=8, p=3): 32 MB por calculo. Los de
+# 128 MB que tambien lista, con 40 hilos, pasarian del tope de memoria de la API.
+_SCRYPT = {"n": 2**15, "r": 8, "p": 3}
+_MEMORIA_SCRYPT = 64 * 1024 * 1024
 _ALGORITMO = "HS256"
 # Sin letras ni numeros que se confundan (0/O, 1/l/I) al dictar una temporal
 _ALFABETO_TEMPORAL = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789"
@@ -121,7 +124,7 @@ def roles_con_mfa() -> set[str]:
 # ------------------------------------------------------------ contrasenas
 def hash_contrasena(contrasena: str) -> str:
     sal = secrets.token_bytes(16)
-    clave = hashlib.scrypt(contrasena.encode("utf-8"), salt=sal, **_SCRYPT)
+    clave = hashlib.scrypt(contrasena.encode("utf-8"), salt=sal, maxmem=_MEMORIA_SCRYPT, **_SCRYPT)
     return f"scrypt${_SCRYPT['n']}${_SCRYPT['r']}${_SCRYPT['p']}${sal.hex()}${clave.hex()}"
 
 
@@ -129,11 +132,20 @@ def verificar_contrasena(contrasena: str, guardado: str) -> bool:
     try:
         _, n, r, p, sal, clave = guardado.split("$")
         calculada = hashlib.scrypt(
-            contrasena.encode("utf-8"), salt=bytes.fromhex(sal), n=int(n), r=int(r), p=int(p)
+            contrasena.encode("utf-8"), salt=bytes.fromhex(sal), n=int(n), r=int(r), p=int(p), maxmem=_MEMORIA_SCRYPT
         )
     except (ValueError, TypeError):
         return False
+    if hash_viejo(guardado):
+        # mismo tiempo que una cuenta al dia: si no, responder rapido revelaria
+        # que la cuenta existe y no ha entrado desde el cambio de parametros
+        hashlib.scrypt(contrasena.encode("utf-8"), salt=bytes.fromhex(sal), maxmem=_MEMORIA_SCRYPT, **_SCRYPT)
     return hmac.compare_digest(calculada.hex(), clave)
+
+
+def hash_viejo(guardado: str) -> bool:
+    """Se hizo con parametros anteriores: se rehace al entrar con la contrasena correcta."""
+    return not guardado.startswith(f"scrypt${_SCRYPT['n']}${_SCRYPT['r']}${_SCRYPT['p']}$")
 
 
 # Para usuarios que no existen tambien se calcula un scrypt: asi el tiempo de
@@ -207,6 +219,14 @@ def cambios(limite: int = 50, usuario: str | None = None) -> list[dict]:
             params,
         ).mappings().all()
     return [dict(f) for f in filas]
+
+
+def purgar_accesos() -> int:
+    """Lo corre el arranque: la cuenta de la API no borra bitacoras."""
+    with engine.begin() as conn:
+        return conn.execute(
+            text("DELETE FROM accesos WHERE momento < now() - make_interval(days => :d)"), {"d": DIAS_BITACORA_ACCESOS}
+        ).rowcount
 
 
 def accesos(limite: int = 100, usuario: str | None = None) -> list[dict]:
@@ -337,17 +357,36 @@ def pedir_aprobacion(conn, usuario_id: int):
     )
 
 
+def lista_para_aprobar(cuenta: dict) -> bool:
+    """Espera aprobacion y ya hizo lo suyo: la temporal que conoce TI dejo de servir."""
+    return (
+        not cuenta["acceso_aprobado"] and not cuenta["debe_cambiar_contrasena"]
+        and (cuenta["rol"] not in roles_con_mfa() or cuenta["mfa_activo"])
+    )
+
+
 def resolver_aprobacion(usuario_id: int, aprobada: bool, por: str) -> dict:
     """Una Responsable de RRHH aprueba el acceso que dejo en espera TI, o lo
-    rechaza: la cuenta se desactiva, y seguiria en espera aunque TI la reactive."""
+    rechaza: la cuenta se desactiva, y seguiria en espera aunque TI la reactive.
+
+    Solo se aprueba cuando la cuenta ya cambio la temporal y activo su MFA: si
+    no, TI seguiria conociendo el acceso y entraria con la aprobacion ya dada."""
     asegurar_tabla()
     with engine.begin() as conn:
         actual = _cuenta_para_cambiar(conn, usuario_id)
         if actual["usuario"] == por:
             raise ErrorDeUsuario("Tu propio acceso lo aprueba otra Responsable de RRHH")
-        espera = conn.execute(text("SELECT NOT acceso_aprobado FROM usuarios WHERE id = :i"), {"i": usuario_id}).scalar()
-        if not espera or not actual["activo"]:
+        estado = conn.execute(
+            text("SELECT acceso_aprobado, debe_cambiar_contrasena, mfa_activo FROM usuarios WHERE id = :i"),
+            {"i": usuario_id},
+        ).mappings().one()
+        if estado["acceso_aprobado"] or not actual["activo"]:
             raise ErrorDeUsuario("Esa cuenta no está esperando aprobación")
+        if aprobada and not lista_para_aprobar({**actual, **estado}):
+            raise ErrorDeUsuario(
+                "Esa persona debe entrar primero, cambiar su contraseña temporal y activar su verificación "
+                "en dos pasos: hasta entonces, TI conoce su acceso"
+            )
         conn.execute(
             text(
                 "UPDATE usuarios SET acceso_aprobado = :a, activo = :a, "
@@ -626,9 +665,6 @@ def registrar_fallo(conn, usuario: str, origen: str):
         ),
         {"u": usuario, "x": USUARIO_INEXISTENTE, "o": origen},
     )
-    conn.execute(
-        text("DELETE FROM accesos WHERE momento < now() - make_interval(days => :d)"), {"d": DIAS_BITACORA_ACCESOS}
-    )
 
 
 def registrar_entrada(conn, usuario_id: int, usuario: str, origen: str):
@@ -680,6 +716,8 @@ def autenticar(usuario: str, contrasena: str, origen: str = "local") -> Usuario:
     asegurar_tabla()
     invalido = HTTPException(status.HTTP_401_UNAUTHORIZED, "Usuario o contraseña incorrectos")
     nombre = usuario.strip().lower()
+    if "\x00" in nombre or "\x00" in contrasena:  # PostgreSQL no los acepta: nunca seria una cuenta
+        raise invalido
     # Los errores se lanzan FUERA de la transaccion: lanzarlos dentro la
     # desharia, y el conteo de intentos fallidos nunca se guardaria.
     error = None
@@ -698,6 +736,11 @@ def autenticar(usuario: str, contrasena: str, origen: str = "local") -> Usuario:
             error = HTTPException(status.HTTP_401_UNAUTHORIZED, "Tu contraseña temporal venció: pide a TI una nueva")
         elif not fila["mfa_activo"]:
             registrar_entrada(conn, fila["id"], nombre, origen)
+        if error is None and hash_viejo(fila["contrasena_hash"]):
+            conn.execute(
+                text("UPDATE usuarios SET contrasena_hash = :h WHERE id = :i"),
+                {"h": hash_contrasena(contrasena), "i": fila["id"]},
+            )
     if error is not None:
         raise error
     return _a_usuario(fila)

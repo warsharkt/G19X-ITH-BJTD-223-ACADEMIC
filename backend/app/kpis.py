@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 from sqlalchemy import text
 
-from app.database import RAIZ, engine
+from app.database import ejecutar_sql, engine
 
 CORPORATIVO = 0
 
@@ -173,10 +173,7 @@ CONSULTAS = {
 
 def inicializar_umbrales():
     """Crea la tabla `umbrales` con valores iniciales (idempotente)."""
-    sql = (RAIZ / "db" / "umbrales.sql").read_text(encoding="utf-8")
-    with engine.begin() as conn:
-        # conexion nativa de psycopg: permite varias sentencias en un execute
-        conn.connection.driver_connection.execute(sql)
+    ejecutar_sql("umbrales.sql")
 
 
 def semaforo(valor, sentido, umbral_atencion, umbral_critico):

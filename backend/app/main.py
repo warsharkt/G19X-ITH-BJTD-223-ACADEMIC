@@ -87,6 +87,12 @@ async def origen_y_sin_cache(request, siguiente):
     return respuesta
 
 
+@app.exception_handler(SQLAlchemyError)
+def base_no_disponible(_request, _exc: SQLAlchemyError):
+    """Las rutas ya lo traducen; esto cubre lo que corre antes de ellas (la sesion)."""
+    return JSONResponse(status_code=503, content={"detail": "Base de datos no disponible"})
+
+
 @app.exception_handler(mfa.LlaveMfaInvalida)
 def sin_llave_de_mfa(_request, exc: mfa.LlaveMfaInvalida):
     """MFA_LLAVE mal configurada: es un problema del servidor, no de la persona."""

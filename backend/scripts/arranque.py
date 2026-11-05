@@ -5,10 +5,11 @@ Deja todo listo para entrar sin correr scripts a mano:
      de Nordika (scripts/seed.py). Con datos reales nunca siembra nada.
   2. Si el modo demostracion esta activo, crea o restablece las cuentas
      del personal de Nordika (app/demo.py). Si esta apagado, las desactiva.
-  3. Prepara la cuenta de PostgreSQL con la que se conecta la API
-     (talentia_api): sin privilegios de superusuario, duena solo de las tablas
-     del sistema y con una contrasena nueva al azar en cada arranque. Asi una
-     falla en la API no da control de la base ni del contenedor. Los pasos 1 y
+  3. Crea o actualiza las tablas y prepara la cuenta de PostgreSQL con la que
+     se conecta la API (talentia_api): sin privilegios de superusuario, sin ser
+     duena de nada, con una contrasena nueva al azar en cada arranque y sin
+     poder cambiar ni borrar las bitacoras ni lo ya firmado. Asi una falla en
+     la API no da control de la base, ni deja borrar el rastro. Los pasos 1 y
      2, los scripts y las pruebas siguen usando POSTGRES_USER.
   4. Si no hay JWT_SECRETO, genera uno al azar para esta ejecucion (las
      sesiones se cierran al reiniciar el contenedor; nada se guarda en disco).
@@ -25,13 +26,18 @@ import sys
 from psycopg import sql
 from sqlalchemy import text
 
-from app import demo
+from app import avisos, cargas, demo, programacion, seguridad, trabajos
 from app.database import ejecutar_sql, engine
+from app.kpis import inicializar_umbrales
 from app.llm import ConfiguracionIA, modo_datos
 from app.seguridad import ErrorDeUsuario
 
 
 CONTRASENA_DE_EJEMPLO = "cambia_esto"
+# La API solo agrega a estas tablas: ni aun ejecutando codigo en ella se borra el rastro
+SOLO_AGREGAR = ("usuarios_cambios", "accesos", "exportaciones", "umbrales_cambios")
+# Las cuentas y los reportes se desactivan o se rechazan, no se borran
+SIN_BORRAR = ("usuarios", "narrativas", "suplencias", "cargas")
 
 
 def base_vacia() -> bool:
@@ -79,9 +85,22 @@ def preparar_demo():
         print(f"  {usuario:<16}{nombre}, {cargo}")
 
 
+def preparar_esquema():
+    """Crea o actualiza las tablas aqui, como superusuario: la API ya no puede."""
+    seguridad.asegurar_tabla()
+    trabajos.asegurar_tabla()
+    inicializar_umbrales()
+    avisos.asegurar_tabla()
+    programacion.asegurar_tabla()
+    cargas.asegurar_tabla()
+    ejecutar_sql("rls.sql")
+    if purgados := seguridad.purgar_accesos():
+        print(f"Se purgaron {purgados} registros de accesos de hace más de un año.")
+
+
 def preparar_cuenta_de_la_api() -> dict[str, str]:
-    """Crea o actualiza la cuenta de la API y le pasa las tablas. Devuelve las
-    variables de entorno que usa app/database.py (vacio si no aplica)."""
+    """Crea o actualiza la cuenta de la API y le da solo los permisos que usa.
+    Devuelve las variables de entorno que usa app/database.py (vacio si no aplica)."""
     if os.getenv("DATABASE_URL", "").strip():
         print("DATABASE_URL configurada: la API usa esa cuenta tal cual.")
         return {}
@@ -99,28 +118,41 @@ def preparar_cuenta_de_la_api() -> dict[str, str]:
         existe = conn.execute(text("SELECT 1 FROM pg_roles WHERE rolname = :u"), {"u": usuario}).first()
         ejecutar(
             ("ALTER ROLE {u} WITH" if existe else "CREATE ROLE {u}")
-            + " LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD {p}",
+            # BYPASSRLS: las tablas tienen RLS sin politicas, para cerrar la Data API
+            # de Supabase (db/rls.sql). Sin ser duena, la API no veria ninguna fila.
+            + " LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS PASSWORD {p}",
             u=ident, p=sql.Literal(contrasena),
         )
-        ejecutar("GRANT CONNECT, TEMPORARY ON DATABASE {d} TO {u}", d=sql.Identifier(engine.url.database), u=ident)
-        ejecutar("GRANT USAGE, CREATE ON SCHEMA public TO {u}", u=ident)
-        # Duena de las tablas: las crea y modifica al arrancar (asegurar_tabla, RLS).
-        # Las secuencias de columnas SERIAL cambian de dueno junto con su tabla.
+        ejecutar("GRANT CONNECT ON DATABASE {d} TO {u}", d=sql.Identifier(engine.url.database), u=ident)
+        ejecutar("GRANT USAGE ON SCHEMA public TO {u}", u=ident)
+        ejecutar("REVOKE CREATE ON SCHEMA public FROM {u}", u=ident)
+        # Las versiones anteriores le pasaban las tablas: se las devuelve. Las
+        # secuencias de columnas SERIAL cambian de dueno junto con su tabla.
         objetos = conn.execute(text(
             "SELECT c.relname, c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
             "WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'v', 'm', 'S') "
-            "AND pg_get_userbyid(c.relowner) <> :u "
+            "AND pg_get_userbyid(c.relowner) = :u "
             "AND NOT (c.relkind = 'S' AND EXISTS (SELECT 1 FROM pg_depend d WHERE d.objid = c.oid AND d.deptype IN ('a', 'i'))) "
             "ORDER BY c.relkind = 'S'"
         ), {"u": usuario}).all()
         tipos = {"r": "TABLE", "p": "TABLE", "v": "VIEW", "m": "MATERIALIZED VIEW", "S": "SEQUENCE"}
         for nombre, tipo in objetos:
-            ejecutar(f"ALTER {tipos[tipo]} {{t}} OWNER TO {{u}}", t=sql.Identifier("public", nombre), u=ident)
+            ejecutar(f"ALTER {tipos[tipo]} {{t}} OWNER TO CURRENT_USER", t=sql.Identifier("public", nombre))
+        ejecutar("REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {u}", u=ident)
+        ejecutar("REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM {u}", u=ident)
+        ejecutar("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {u}", u=ident)
+        ejecutar("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {u}", u=ident)
+        for tabla in SOLO_AGREGAR:
+            ejecutar("REVOKE UPDATE, DELETE ON {t} FROM {u}", t=sql.Identifier("public", tabla), u=ident)
+        for tabla in SIN_BORRAR:
+            ejecutar("REVOKE DELETE ON {t} FROM {u}", t=sql.Identifier("public", tabla), u=ident)
         # Lo que creen despues POSTGRES_USER (seed, respaldo) tambien lo puede usar
-        for clase in ("TABLES", "SEQUENCES"):
-            ejecutar(f"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON {clase} TO {{u}}", u=ident)
-    print(f"La API se conecta como '{usuario}' (sin privilegios de superusuario).")
-    return {"DB_API_USUARIO": usuario, "DB_API_CONTRASENA": contrasena}
+        ejecutar("ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM {u}", u=ident)
+        ejecutar("ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM {u}", u=ident)
+        ejecutar("ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO {u}", u=ident)
+        ejecutar("ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO {u}", u=ident)
+    print(f"La API se conecta como '{usuario}' (sin privilegios y sin ser duena de las tablas).")
+    return {"DB_API_USUARIO": usuario, "DB_API_CONTRASENA": contrasena, "DB_ESQUEMA_PREPARADO": "si"}
 
 
 def revisar_contrasena_de_la_base():
@@ -137,6 +169,7 @@ def main():
     revisar_contrasena_de_la_base()
     sembrar_si_hace_falta()
     preparar_demo()
+    preparar_esquema()
     cuenta_api = preparar_cuenta_de_la_api()
     os.environ.update(cuenta_api)
     if cuenta_api:
