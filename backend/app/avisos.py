@@ -181,14 +181,18 @@ def _narrativa(conn, id_: int):
 
 
 @_tolerante
-def avisar_narrativa_terminada(id_: int) -> int:
+def avisar_narrativa_terminada(id_: int, temporal: bool = False) -> int:
     """Reporte listo: se avisa a quien puede firmarlo (nunca a quien lo pidio).
-    Reporte programado con error: RRHH se entera (nadie lo estaba esperando)."""
+    Reporte programado con error: RRHH se entera (nadie lo estaba esperando).
+    Si el error es temporal se va a repetir solo: un aviso por mes, no uno
+    por reporte y por intento."""
     asegurar_tabla()
     with engine.begin() as conn:
         t = _narrativa(conn, id_)
         if t is None:
             return 0
+        if temporal and t["programada"] and t["estado"] == "error":
+            return avisar_reintento(t["periodo"], "el modelo de lenguaje no estuvo disponible")
         lugar = f"{_nombre_area(conn, t['area_id'])}, {_mes(t['periodo'])}"
         if t["estado"] == "lista":
             tipo, titulo = "revision", f"Reporte de {lugar} listo para tu firma"
@@ -296,15 +300,34 @@ def avisar_intentos(usuario: str) -> int:
 
 
 @_tolerante
-def avisar_programacion_fallida(periodo, motivo: str) -> int:
-    """La programacion no pudo arrancar (p. ej. la IA no esta configurada).
-    Un solo aviso por mes, aunque se vuelva a intentar cada hora."""
+def avisar_reintento(periodo, causa: str) -> int:
+    """Reportes programados que no terminaron y se van a repetir solos."""
+    asegurar_tabla()
+    titulo = (
+        f"Los reportes de {_mes(periodo)} no terminaron: {causa}. "
+        "Se reintentan solos mientras la programación mensual esté activa."
+    )
+    with engine.begin() as conn:
+        creados = _crear(
+            conn, _rrhh(conn), "error", CORPORATIVO, titulo, "/configuracion",
+            f"reintento:{pd.Timestamp(periodo):%Y-%m}",
+        )
+    if creados:
+        programar_envio()
+    return creados
+
+
+@_tolerante
+def avisar_programacion_fallida(periodo, motivo: str, clave: str = "programacion") -> int:
+    """La programacion no pudo arrancar (p. ej. la IA no esta configurada) o
+    agoto los reintentos. Un solo aviso por mes y por `clave`, aunque se vuelva
+    a intentar cada hora."""
     asegurar_tabla()
     titulo = f"La programación mensual no pudo generar los reportes de {_mes(periodo)}: {motivo}"
     with engine.begin() as conn:
         creados = _crear(
             conn, _rrhh(conn), "error", CORPORATIVO, titulo, "/configuracion",
-            f"programacion:{pd.Timestamp(periodo):%Y-%m}",
+            f"{clave}:{pd.Timestamp(periodo):%Y-%m}",
         )
     if creados:
         programar_envio()

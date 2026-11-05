@@ -1213,7 +1213,7 @@ def test_al_reiniciar_las_narrativas_en_proceso_quedan_en_error(client):
         id_ = conn.execute(
             text("INSERT INTO narrativas (area_id, periodo) VALUES (0, '2026-08-01') RETURNING id")
         ).scalar_one()
-    assert trabajos.marcar_interrumpidas() >= 1
+    trabajos.marcar_interrumpidas()
     trabajo = client.get(f"/narrativas/{id_}").json()
     assert trabajo["estado"] == "error" and "reinició" in trabajo["error"]
 

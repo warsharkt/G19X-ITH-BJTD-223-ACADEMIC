@@ -43,9 +43,11 @@ async def ciclo_de_vida(_app):
                 print(f"Se cifraron {cifrados} secretos de verificación en dos pasos que estaban en claro.")
         except mfa.LlaveMfaInvalida as exc:
             print(f"Verificación en dos pasos sin llave: {exc}")  # quien la use recibe un 503
-        trabajos.marcar_interrumpidas()
+        interrumpidos = trabajos.marcar_interrumpidas()
         inicializar_umbrales()
         avisos.asegurar_tabla()
+        for mes in interrumpidos:
+            avisos.avisar_reintento(mes, "el servidor se reinició mientras se generaban")
         programacion.asegurar_tabla()
         cargas.asegurar_tabla()
         ejecutar_sql("rls.sql")  # al final: cubre todas las tablas ya creadas

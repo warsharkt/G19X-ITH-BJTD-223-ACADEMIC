@@ -2,6 +2,8 @@
 # (no por etiqueta), y las dependencias por version exacta: Dependabot abre un
 # pull request cada semana con lo que haya que actualizar, y las pruebas de
 # .github/workflows/pruebas.yml lo revisan antes de aceptarlo.
+# Una version debe llevar 7 dias publicada: una maliciosa suele retirarse antes.
+# Las actualizaciones de seguridad no esperan.
 #
 # Lo menor va agrupado en un solo pull request por ecosistema. Quedan fuera los
 # saltos que no se deben aceptar solo porque las pruebas pasen:
@@ -14,12 +16,14 @@ updates:
   - package-ecosystem: docker
     directory: /backend
     schedule: {interval: weekly}
+    cooldown: {default-days: 7}
     ignore:
       - dependency-name: python
         update-types: [version-update:semver-major, version-update:semver-minor]
   - package-ecosystem: docker
     directory: /frontend
     schedule: {interval: weekly}
+    cooldown: {default-days: 7}
     ignore:
       - dependency-name: node
         update-types: [version-update:semver-major]
@@ -28,24 +32,28 @@ updates:
   - package-ecosystem: docker-compose
     directory: /
     schedule: {interval: weekly}
+    cooldown: {default-days: 7}
     ignore:
       - dependency-name: postgres
         update-types: [version-update:semver-major]
   - package-ecosystem: github-actions
     directory: /
     schedule: {interval: weekly}
+    cooldown: {default-days: 7}
     groups:
       acciones:
         update-types: [minor, patch]
   - package-ecosystem: pip
     directory: /backend
     schedule: {interval: weekly}
+    cooldown: {default-days: 7}
     groups:
       python:
         update-types: [minor, patch]
   - package-ecosystem: npm
     directory: /frontend
     schedule: {interval: weekly}
+    cooldown: {default-days: 7}
     groups:
       javascript:
         update-types: [minor, patch]

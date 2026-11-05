@@ -4,6 +4,8 @@ umbrales editables con bitacora y programacion (RF-12). Paso 10.
 La configuracion, las corridas y los umbrales se guardan antes de cada
 prueba y se restauran al final: la base local la usa tambien quien desarrolla.
 """
+import threading
+import time
 from datetime import date
 
 import pandas as pd
@@ -14,7 +16,7 @@ from sqlalchemy import text
 from app import avisos, programacion, trabajos
 from app.database import engine
 from app.kpis import calcular_kpis
-from app.llm import ConfiguracionIA
+from app.llm import ConfiguracionIA, ProveedorNoDisponible
 from app.main import app
 from app.seguridad import Usuario, crear_usuario, usuario_actual
 from conftest import USUARIO_RRHH
@@ -291,3 +293,186 @@ def test_api_solo_la_responsable_cambia_umbrales(rol):
     r = cliente.put("/umbrales/rotacion_total", json={"umbral_atencion": 2.5, "umbral_critico": 4.0})
     assert r.status_code == 403 and "Responsable" in r.json()["detail"]
     assert cliente.get("/umbrales/cambios").status_code == 200  # la bitacora si la ven
+
+
+# --------------------------------------- reportes que no terminaron (octava auditoria)
+AGOSTO = date(2026, 8, 1)
+
+
+class _ProveedorColgado(_ProveedorFalso):
+    """Un modelo que no responde: cada llamada le costaria OLLAMA_TIMEOUT a la cola."""
+
+    def __init__(self):
+        self.llamadas = 0
+
+    def generar(self, mensajes, esquema):
+        self.llamadas += 1
+        raise ProveedorNoDisponible("se agotó el tiempo de espera")
+
+
+class _ProveedorInvalido(_ProveedorFalso):
+    def generar(self, mensajes, esquema):
+        return "esto no es JSON"
+
+
+def generar_el_mes():
+    configurar()
+    programacion.revisar(dia=OCTUBRE)
+    tareas = list(trabajos.ejecutor.tareas)
+    trabajos.ejecutor.tareas.clear()
+    return tareas
+
+
+def correr(tareas, proveedor):
+    for id_, periodo, area_id, _, df in tareas:
+        trabajos._ejecutar(id_, periodo, area_id, proveedor, df)
+
+
+def errores_de(usuario):
+    return [a["titulo"] for a in avisos.listar(usuario)["avisos"] if a["tipo"] == "error"]
+
+
+@pytest.fixture
+def rrhh():
+    id_ = crear_usuario("zz_prog_rrhh", "Prueba", "rrhh", "Clave-de-prueba-123")
+    yield Usuario(id_, "zz_prog_rrhh", "Prueba", "rrhh", None)
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM usuarios WHERE id = :i"), {"i": id_})
+
+
+def test_lo_que_interrumpe_un_reinicio_se_vuelve_a_generar_solo():
+    tareas = generar_el_mes()
+    with engine.begin() as conn:  # el primero alcanzo a terminar: ese no se repite
+        conn.execute(text("UPDATE narrativas SET estado = 'lista' WHERE id = :i"), {"i": tareas[0][0]})
+    assert trabajos.marcar_interrumpidas() == [AGOSTO]
+
+    r = programacion.revisar(dia=OCTUBRE)
+    assert len(r["narrativas"]) == len(tareas) - 1
+    assert {t[2] for t in trabajos.ejecutor.tareas} == {t[2] for t in tareas[1:]}
+    assert "Se volvieron a solicitar" in r["mensaje"]
+    assert programacion.revisar(dia=OCTUBRE)["narrativas"] == []  # ya van en camino
+    assert programacion.corridas()[0]["narrativas"] == len(tareas)
+
+
+def test_si_se_reinicia_otra_vez_se_deja_de_intentar_y_se_avisa_una_vez(rrhh):
+    tareas = generar_el_mes()
+    for _ in range(programacion.FALLOS_MAXIMOS - 1):
+        trabajos.marcar_interrumpidas()
+        assert len(programacion.revisar(dia=OCTUBRE)["narrativas"]) == len(tareas)
+    trabajos.marcar_interrumpidas()
+    assert programacion.revisar(dia=OCTUBRE)["narrativas"] == []
+    programacion.revisar(dia=OCTUBRE)
+    agotados = [t for t in errores_de(rrhh) if "siguen sin generarse" in t]
+    assert len(agotados) == 1 and str(len(tareas)) in agotados[0]
+
+
+def test_un_reinicio_avisa_a_rrhh_al_arrancar(monkeypatch, rrhh):
+    monkeypatch.setenv("PROGRAMACION_EN_API", "no")
+    generar_el_mes()
+    with TestClient(app):
+        pass
+    titulos = errores_de(rrhh)
+    assert len(titulos) == 1 and "agosto 2026" in titulos[0] and "se reinició" in titulos[0]
+
+
+def test_lo_pedido_a_mano_no_se_repite_ni_avisa():
+    tareas = generar_el_mes()
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE narrativas SET estado = 'lista' WHERE programada"))
+        conn.execute(
+            text("INSERT INTO narrativas (area_id, periodo, solicitada_por) VALUES (:a, :p, 'pruebas')"),
+            {"a": tareas[0][2], "p": AGOSTO},
+        )
+    assert trabajos.marcar_interrumpidas() == []
+    assert programacion.revisar(dia=OCTUBRE)["narrativas"] == []
+
+
+def test_una_corrida_terminada_no_pide_areas_que_le_faltaron():
+    """Un area que aparece despues no se genera sola: la corrida ya termino."""
+    tareas = generar_el_mes()
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM narrativas WHERE id = :i"), {"i": tareas[0][0]})
+    assert programacion.revisar(dia=OCTUBRE)["narrativas"] == []
+
+
+def test_si_alguien_ya_lo_pidio_a_mano_no_se_repite():
+    tareas = generar_el_mes()
+    trabajos.marcar_interrumpidas()
+    with engine.begin() as conn:
+        conn.execute(
+            text("INSERT INTO narrativas (area_id, periodo, solicitada_por) VALUES (:a, :p, 'pruebas')"),
+            {"a": tareas[0][2], "p": AGOSTO},
+        )
+    assert len(programacion.revisar(dia=OCTUBRE)["narrativas"]) == len(tareas) - 1
+
+
+def test_con_la_programacion_apagada_no_se_repite_nada():
+    generar_el_mes()
+    trabajos.marcar_interrumpidas()
+    configurar(activa=False)
+    assert programacion.revisar(dia=OCTUBRE)["narrativas"] == []
+
+
+def test_un_reporte_que_no_paso_la_validacion_no_se_repite_solo(rrhh):
+    tareas = generar_el_mes()
+    correr(tareas[:1], _ProveedorInvalido())
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE narrativas SET estado = 'lista' WHERE programada AND estado = 'en_proceso'")
+        )
+    assert programacion.revisar(dia=OCTUBRE)["narrativas"] == []
+    assert any("No se pudo generar el reporte programado" in t for t in errores_de(rrhh))
+
+
+def test_un_modelo_colgado_solo_cuesta_una_espera_y_un_aviso(rrhh):
+    tareas = generar_el_mes()
+    colgado = _ProveedorColgado()
+    correr(tareas, colgado)
+    assert colgado.llamadas == 1  # antes: una por reporte, 15 minutos cada una
+    with engine.connect() as conn:
+        filas = conn.execute(text("SELECT estado, error FROM narrativas WHERE programada")).all()
+    assert len(filas) == len(tareas)
+    assert all(e == "error" and "no estuvo disponible" in m for e, m in filas)
+    titulos = errores_de(rrhh)
+    assert len(titulos) == 1 and "agosto 2026" in titulos[0]
+
+
+def test_mientras_el_modelo_sigue_caido_no_se_gastan_intentos():
+    tareas = generar_el_mes()
+    correr(tareas, _ProveedorColgado())
+    assert programacion.revisar(dia=OCTUBRE)["narrativas"] == []
+
+
+def test_cuando_el_modelo_vuelve_se_reintenta_lo_que_fallo():
+    tareas = generar_el_mes()
+    correr(tareas, _ProveedorColgado())
+    assert not trabajos.modelo_disponible()
+    trabajos._caida["hasta"] = time.monotonic() - 1  # ya paso la espera
+    assert trabajos.modelo_disponible()
+    assert len(programacion.revisar(dia=OCTUBRE)["narrativas"]) == len(tareas)
+
+
+def test_una_corrida_cortada_a_la_mitad_se_completa():
+    """La API murio despues de anotar el mes y antes de pedir los reportes."""
+    tareas = generar_el_mes()
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM narrativas WHERE programada AND id <> :i"), {"i": tareas[0][0]})
+        conn.execute(text("UPDATE corridas_programadas SET narrativas = 0"))
+    r = programacion.revisar(dia=OCTUBRE)
+    assert len(r["narrativas"]) == len(tareas) - 1
+    assert programacion.corridas()[0]["narrativas"] == len(tareas)
+
+
+def test_dos_revisiones_a_la_vez_no_duplican_los_reintentos():
+    tareas = generar_el_mes()
+    trabajos.marcar_interrumpidas()
+    resultados = []
+    hilos = [
+        threading.Thread(target=lambda: resultados.append(programacion.revisar(dia=OCTUBRE)["narrativas"]))
+        for _ in range(4)
+    ]
+    for h in hilos:
+        h.start()
+    for h in hilos:
+        h.join()
+    assert sorted(len(r) for r in resultados) == [0, 0, 0, len(tareas)]

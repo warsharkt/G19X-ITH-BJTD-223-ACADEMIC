@@ -9,7 +9,7 @@ import os
 import pytest
 from sqlalchemy import text
 
-from app import avisos, seguridad
+from app import avisos, seguridad, trabajos
 from app.database import DB_URL, ES_REMOTA, engine
 from app.main import app
 from app.seguridad import Usuario, usuario_actual
@@ -76,6 +76,12 @@ def _sin_bitacora_de_cuentas_de_prueba(_base_de_datos_lista):
 # Las pruebas de permisos (test_seguridad.py) quitan este atajo y usan
 # usuarios reales con su contrasena y su token.
 USUARIO_RRHH = Usuario(id=-1, usuario="pruebas_rrhh", nombre="Pruebas RRHH", rol="rrhh", area_id=None)
+
+
+@pytest.fixture(autouse=True)
+def _modelo_sin_caidas_previas():
+    """La espera tras una caida del modelo es del proceso: no pasa de una prueba a otra."""
+    trabajos._caida["hasta"] = 0.0
 
 
 @pytest.fixture(autouse=True)

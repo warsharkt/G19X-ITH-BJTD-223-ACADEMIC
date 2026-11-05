@@ -19,6 +19,7 @@ Al terminar, y al revisarla, se avisa a quien corresponde (app/avisos.py).
 """
 import json
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
@@ -27,9 +28,14 @@ from sqlalchemy import text
 from app import avisos, firmas, schemas
 from app.origen import actual as origen_de_la_peticion
 from app.database import engine, ejecutar_sql
-from app.narrativa import INTENTOS, NarrativaNoGenerada, generar_narrativa
+from app.narrativa import INTENTOS, INTERRUMPIDA, NarrativaNoGenerada, generar_narrativa
 
 RONDAS = int(os.getenv("NARRATIVA_RONDAS", "2"))
+# Tras una caida del modelo, lo que esta en cola falla de inmediato durante
+# este tiempo: uno por uno esperaria OLLAMA_TIMEOUT (15 minutos) a un modelo
+# que acaba de no responder. Lo programado se repite solo (programacion.py).
+ESPERA_TRAS_CAIDA = float(os.getenv("NARRATIVA_ESPERA_CAIDA", "300"))
+_caida = {"hasta": 0.0, "motivo": ""}
 # Reportes en espera a partir de los cuales ya no se aceptan pedidos a mano. En
 # CPU cada uno tarda minutos y van de uno en uno: sin tope, los programados del
 # mes esperarian detras. Los programados siempre entran.
@@ -67,17 +73,25 @@ def asegurar_tabla():
     _tabla_lista = True
 
 
-def marcar_interrumpidas() -> int:
-    """Al arrancar la API: lo que quedo "en_proceso" murio con el proceso anterior."""
+def marcar_interrumpidas() -> list:
+    """Al arrancar la API: lo que quedo "en_proceso" murio con el proceso anterior.
+    Devuelve los meses con reportes programados a medias: nadie los esta
+    esperando, asi que hay que avisar (lo pedido a mano se ve en pantalla)."""
     asegurar_tabla()
     with engine.begin() as conn:
-        return conn.execute(
+        filas = conn.execute(
             text(
-                "UPDATE narrativas SET estado = 'error', terminada_en = now(), "
-                "error = 'Interrumpida: el servidor se reinició mientras se generaba. Solicítala de nuevo.' "
-                "WHERE estado = 'en_proceso'"
-            )
-        ).rowcount
+                "UPDATE narrativas SET estado = 'error', terminada_en = now(), error = :e "
+                "WHERE estado = 'en_proceso' RETURNING periodo, programada"
+            ),
+            {"e": INTERRUMPIDA},
+        ).all()
+    return sorted({periodo for periodo, programada in filas if programada})
+
+
+def modelo_disponible() -> bool:
+    """False mientras dura la espera tras una caida del modelo."""
+    return time.monotonic() >= _caida["hasta"]
 
 
 def encolar(
@@ -126,7 +140,10 @@ def _revisar_cola(conn, periodo: pd.Timestamp, area_id: int):
 
 
 def _ejecutar(id_: int, periodo, area_id, proveedor, df):
-    detalle, motivo = [], "Error inesperado"
+    if not modelo_disponible():
+        _terminar_con_error(id_, _caida["motivo"], ["No se llamó al modelo: acababa de fallar."], temporal=True)
+        return
+    detalle, motivo, temporal = [], "Error inesperado", False
     for ronda in range(1, RONDAS + 1):
         _actualizar(id_, rondas=ronda)
         try:
@@ -135,6 +152,8 @@ def _ejecutar(id_: int, periodo, area_id, proveedor, df):
             motivo = exc.motivo
             detalle += [f"Ronda {ronda}: {d}" for d in exc.detalle] or [f"Ronda {ronda}: {exc.motivo}"]
             if not exc.reintentable:
+                temporal = True
+                _caida.update(hasta=time.monotonic() + ESPERA_TRAS_CAIDA, motivo=exc.motivo)
                 break
             continue
         except Exception as exc:  # que un fallo inesperado no deje la fila "en_proceso" para siempre
@@ -151,10 +170,14 @@ def _ejecutar(id_: int, periodo, area_id, proveedor, df):
         )
         avisos.avisar_narrativa_terminada(id_)
         return
+    _terminar_con_error(id_, motivo, detalle, temporal)
+
+
+def _terminar_con_error(id_: int, motivo: str, detalle: list[str], temporal: bool):
     _actualizar(
         id_, estado="error", error=motivo, detalle_error=json.dumps(detalle, ensure_ascii=False), terminada=True
     )
-    avisos.avisar_narrativa_terminada(id_)
+    avisos.avisar_narrativa_terminada(id_, temporal=temporal)
 
 
 def _actualizar(id_: int, terminada=False, **campos):

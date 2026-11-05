@@ -14,7 +14,10 @@ Quien la dispara (los dos usan revisar(), que es idempotente):
   - scripts/programar.py, para el Programador de tareas de Windows o cron,
     por si la API no esta encendida.
 Un mes se genera una sola vez: la tabla corridas_programadas lo garantiza
-aunque los dos revisen al mismo tiempo.
+aunque los dos revisen al mismo tiempo. Lo que no termino por una causa ajena
+al reporte (la API se reinicio, el modelo no estuvo disponible) se repite en las
+siguientes revisiones, hasta FALLOS_MAXIMOS veces por reporte. Lo que el modelo
+no logro validar no se repite: lo decide una persona.
 
 En cada revision tambien se avisan los indicadores en rojo de ese mismo mes
 cerrado (RF-09) y se mandan los correos pendientes, aunque la programacion
@@ -23,6 +26,7 @@ este desactivada.
 import logging
 import os
 import threading
+from contextlib import contextmanager
 from datetime import date
 
 import pandas as pd
@@ -33,9 +37,10 @@ from app.database import ejecutar_sql, engine
 from app.fechas import hoy
 from app.kpis import calcular_kpis
 from app.llm import ConfiguracionIA, obtener_proveedor
-from app.narrativa import MESES_ES
+from app.narrativa import INTERRUMPIDA, MESES_ES, NO_DISPONIBLE
 
 log = logging.getLogger(__name__)
+FALLOS_MAXIMOS = 3  # por reporte: una API que se cae al generar no debe repetirse sin fin
 
 _tabla_lista = False
 _parar = threading.Event()
@@ -109,6 +114,27 @@ def _ya_generado(periodo: pd.Timestamp) -> bool:
         ).first() is not None
 
 
+@contextmanager
+def _turno():
+    """De uno en uno entre la API y el script: dos revisiones a la vez pedirian
+    dos veces lo mismo. Los reportes se guardan en sus propias transacciones."""
+    with engine.begin() as conn:
+        conn.execute(text("SELECT pg_advisory_xact_lock(hashtext('programacion:corrida'))"))
+        yield
+
+
+def _areas(df: pd.DataFrame, periodo: pd.Timestamp) -> list[int]:
+    """Areas con algo que reportar ese mes (0 = consolidado, primero)."""
+    areas = []
+    for area_id in sorted(df.loc[df["periodo"] == periodo, "area_id"].unique()):
+        try:
+            narrativa.validar_solicitud(df, periodo, int(area_id))
+        except ValueError:
+            continue  # sin indicadores con datos: no hay nada que reportar
+        areas.append(int(area_id))
+    return areas
+
+
 def _generar(periodo: pd.Timestamp, df: pd.DataFrame, origen: str) -> dict:
     try:
         proveedor = obtener_proveedor()
@@ -116,34 +142,101 @@ def _generar(periodo: pd.Timestamp, df: pd.DataFrame, origen: str) -> dict:
         avisos.avisar_programacion_fallida(periodo, str(exc))
         return {"mensaje": f"No se generaron los reportes de {_mes(periodo)}: {exc}"}
 
-    with engine.begin() as conn:
-        gano = conn.execute(
-            text(
-                "INSERT INTO corridas_programadas (periodo, origen) VALUES (:p, :o) "
-                "ON CONFLICT (periodo) DO NOTHING RETURNING periodo"
-            ),
-            {"p": periodo.date(), "o": origen},
-        ).first()
-    if gano is None:  # otro proceso se adelanto
-        return {"mensaje": f"Los reportes de {_mes(periodo)} ya se generaron."}
+    with _turno():
+        with engine.begin() as conn:
+            gano = conn.execute(
+                text(
+                    "INSERT INTO corridas_programadas (periodo, origen) VALUES (:p, :o) "
+                    "ON CONFLICT (periodo) DO NOTHING RETURNING periodo"
+                ),
+                {"p": periodo.date(), "o": origen},
+            ).first()
+        if gano is None:  # otro proceso se adelanto
+            return {"mensaje": f"Los reportes de {_mes(periodo)} ya se generaron."}
 
-    ids = []
-    for area_id in sorted(df.loc[df["periodo"] == periodo, "area_id"].unique()):  # 0 = consolidado, primero
-        try:
-            narrativa.validar_solicitud(df, periodo, int(area_id))
-        except ValueError:
-            continue  # sin indicadores con datos: no hay nada que reportar
-        ids.append(trabajos.encolar(periodo, int(area_id), proveedor, df, programada=True))
-    with engine.begin() as conn:
-        conn.execute(
-            text("UPDATE corridas_programadas SET narrativas = :n WHERE periodo = :p"),
-            {"n": len(ids), "p": periodo.date()},
-        )
+        ids = [trabajos.encolar(periodo, a, proveedor, df, programada=True) for a in _areas(df, periodo)]
+        with engine.begin() as conn:
+            conn.execute(
+                text("UPDATE corridas_programadas SET narrativas = :n WHERE periodo = :p"),
+                {"n": len(ids), "p": periodo.date()},
+            )
     log.info("Programacion mensual: %s reportes de %s solicitados", len(ids), _mes(periodo))
     return {
         "periodo": f"{periodo:%Y-%m}",
         "narrativas": ids,
         "mensaje": f"Se solicitaron {len(ids)} reportes de {_mes(periodo)}; quedan pendientes de revisión.",
+    }
+
+
+def _por_repetir(periodo: pd.Timestamp, df: pd.DataFrame) -> tuple[list[int], int]:
+    """Areas a repetir y cuantas agotaron sus intentos. Manda el ultimo reporte
+    de cada area: si ya hay uno en camino o pedido a mano, no se repite nada."""
+    with engine.connect() as conn:
+        solicitados = conn.execute(
+            text("SELECT narrativas FROM corridas_programadas WHERE periodo = :p"), {"p": periodo.date()}
+        ).scalar_one()
+        ultimos = {
+            f.area_id: f
+            for f in conn.execute(
+                text(
+                    "SELECT DISTINCT ON (area_id) area_id, temporal, "
+                    "COUNT(*) FILTER (WHERE temporal) OVER (PARTITION BY area_id) AS fallos "
+                    "FROM (SELECT id, area_id, programada AND estado = 'error' "
+                    "      AND (error = :i OR error LIKE :n) AS temporal "
+                    "      FROM narrativas WHERE periodo = :p) AS reportes "
+                    "ORDER BY area_id, id DESC"
+                ),
+                {"p": periodo.date(), "i": INTERRUMPIDA, "n": f"{NO_DISPONIBLE}%"},
+            )
+        }
+    repetir, agotados = [], 0
+    for area_id in _areas(df, periodo):
+        ultimo = ultimos.get(area_id)
+        if ultimo is None:
+            if solicitados == 0:  # la corrida se corto antes de pedirlo
+                repetir.append(area_id)
+        elif ultimo.temporal:
+            if ultimo.fallos < FALLOS_MAXIMOS:
+                repetir.append(area_id)
+            else:
+                agotados += 1
+    return repetir, agotados
+
+
+def _completar(periodo: pd.Timestamp, df: pd.DataFrame) -> dict:
+    """El mes ya se genero: repite lo que no termino por una causa temporal."""
+    listo = {"mensaje": f"Los reportes de {_mes(periodo)} ya se generaron."}
+    if not trabajos.modelo_disponible():  # fallaria de inmediato y gastaria un intento
+        return listo
+    with _turno():
+        repetir, agotados = _por_repetir(periodo, df)
+        if agotados:
+            avisos.avisar_programacion_fallida(
+                periodo,
+                f"{agotados} reportes siguen sin generarse tras {FALLOS_MAXIMOS} intentos. Solicítalos a mano.",
+                clave="agotados",
+            )
+        if not repetir:
+            return listo
+        try:
+            proveedor = obtener_proveedor()
+        except ConfiguracionIA as exc:
+            avisos.avisar_programacion_fallida(periodo, str(exc))
+            return {"mensaje": f"No se generaron los reportes de {_mes(periodo)}: {exc}"}
+        ids = [trabajos.encolar(periodo, a, proveedor, df, programada=True) for a in repetir]
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE corridas_programadas SET narrativas = (SELECT COUNT(DISTINCT area_id) "
+                    "FROM narrativas WHERE periodo = :p AND programada) WHERE periodo = :p"
+                ),
+                {"p": periodo.date()},
+            )
+    log.info("Programacion mensual: %s reportes de %s repetidos", len(ids), _mes(periodo))
+    return {
+        "periodo": f"{periodo:%Y-%m}",
+        "narrativas": ids,
+        "mensaje": f"Se volvieron a solicitar {len(ids)} reportes de {_mes(periodo)} que no terminaron.",
     }
 
 
@@ -169,7 +262,7 @@ def revisar(origen: str = "api", dia: date | None = None) -> dict:
     elif objetivo is None:
         resultado["mensaje"] = "No hay meses cerrados con datos."
     elif _ya_generado(objetivo):
-        resultado["mensaje"] = f"Los reportes de {_mes(objetivo)} ya se generaron."
+        resultado.update(_completar(objetivo, df))
     elif faltan := cargas.fuentes_faltantes(objetivo.date()):
         # Se revisa al aplicar cada archivo: sin esto, la primera fuente del
         # mes generaria reportes incompletos, y un mes se genera una sola vez.

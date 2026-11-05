@@ -494,6 +494,11 @@ def _enriquecer(items: list[dict], por_id: dict, campos: tuple) -> list[dict]:
     return resultado
 
 
+# Fallos que no dependen del reporte: repetirlo mas tarde si puede servir
+NO_DISPONIBLE = "El modelo de lenguaje no estuvo disponible"
+INTERRUMPIDA = "Interrumpida: el servidor se reinició mientras se generaba. Solicítala de nuevo."
+
+
 class NarrativaNoGenerada(Exception):
     """El modelo no logro una narrativa valida. Nunca se sustituye por otro texto.
 
@@ -567,7 +572,7 @@ def generar_narrativa(periodo=None, area_id=CORPORATIVO, proveedor=None, df=None
             crudo = proveedor.generar(mensajes, esquema)
         except Exception as exc:  # frontera externa: cualquier fallo del proveedor
             raise NarrativaNoGenerada(
-                f"El modelo de lenguaje no estuvo disponible: {exc}", advertencias, reintentable=False
+                f"{NO_DISPONIBLE}: {exc}", advertencias, reintentable=False
             ) from exc
         try:
             salida = json.loads(crudo)

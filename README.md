@@ -240,7 +240,7 @@ En cuanto el tablero se abre a la red, **HTTPS se activa solo**: se entra por `h
 | Reporte aprobado | Su audiencia y quien lo pidió |
 | Reporte rechazado | Quien lo pidió |
 
-**Programación mensual.** En **Configuración**, RRHH la activa y elige el día. Desde ese día se generan los reportes del último mes cerrado (el consolidado y cada área), una sola vez por mes. Si al mes le falta alguna de las cuatro fuentes mensuales (metas, capacitación, ambiente laboral o productividad), espera a que se suban. Nace **desactivada**, porque con Ollama en CPU cada reporte tarda minutos.
+**Programación mensual.** En **Configuración**, RRHH la activa y elige el día. Desde ese día se generan los reportes del último mes cerrado (el consolidado y cada área), una sola vez por mes. Si al mes le falta alguna de las cuatro fuentes mensuales (metas, capacitación, ambiente laboral o productividad), espera a que se suban. Nace **desactivada**, porque con Ollama en CPU cada reporte tarda minutos. Si un reporte no termina porque el servidor se reinició o el modelo no estuvo disponible, se repite solo en las siguientes revisiones, hasta 3 veces por reporte: RRHH recibe un aviso al mes y otro si se agotan los intentos. Lo que el modelo no logró validar no se repite: lo decide una persona.
 
 La API revisa al arrancar y cada hora. Para que funcione aunque la API esté apagada, programa el script en el Programador de tareas de Windows (cambia la ruta):
 
