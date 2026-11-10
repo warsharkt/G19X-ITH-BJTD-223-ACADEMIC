@@ -102,11 +102,11 @@ En modo desarrollo, `python -m scripts.demo` las crea o las deja como nuevas y t
 
 - **La seguridad funciona igual que en producción.** La pantalla de inicio no muestra cuentas ni contraseñas, y se entra con usuario, contraseña y código de verificación en dos pasos. La primera vez, Dirección, RRHH y TI escanean el QR y guardan sus códigos de respaldo.
 - **Teléfono simulado:** para no necesitar un celular, junto al formulario aparece un teléfono que muestra el código. La pantalla aclara que es una simulación de la app que cada persona tendría en su celular. Solo funciona con las cuentas de prueba.
-- **Solo con datos de prueba:** el modo demostración se niega a funcionar con `MODO_DATOS=reales` o sin `DEMO_CONTRASENA`.
+- **Solo con datos de prueba:** el modo demostración se niega a funcionar con `MODO_DATOS=reales`, sin `DEMO_CONTRASENA` o con una contraseña que alguna vez estuvo publicada en este repositorio.
 
 **Recorrido sugerido** (para cambiar de persona, cierra sesión):
 
-> **Los pasos 2 a 4 necesitan la IA.** El reporte lo redacta siempre un modelo: antes de empezar, abre Ollama con `qwen3:8b` ([Inteligencia artificial](#inteligencia-artificial)) o configura Groq (solo con datos sintéticos). Sin ninguno de los dos, el reporte del paso 2 termina en **error** con el motivo, y en los pasos 3 y 4 no hay nada que firmar ni descargar. Con Ollama en CPU, cada reporte tarda de 2 a 5 minutos; Groq responde en segundos. Los pasos 1 y 5, y la carga de datos del paso 2, funcionan sin IA.
+> **Los pasos 2 a 4 necesitan la IA.** El reporte lo redacta siempre un modelo: antes de empezar, abre Ollama con `qwen3:8b` ([Inteligencia artificial](#inteligencia-artificial)) o configura Groq (solo con datos sintéticos). Sin ninguno de los dos, el reporte del paso 2 termina en **error** con el motivo, y en los pasos 3 y 4 no hay nada que firmar ni descargar. Con Ollama en CPU, cada reporte tarda unos 3 minutos en promedio, y más si la IA tiene que corregir su texto ([evidencias](docs/evidencias/LEEME.md)); Groq responde en segundos. Los pasos 1 y 5, y la carga de datos del paso 2, funcionan sin IA.
 
 1. Como **Dirección**, en **Reportes**, pide a RRHH el reporte del último mes.
 2. Como la **Analista**, sube en **Carga de datos** los seis archivos del mes pendiente (septiembre de 2026; también están en [`datos-de-prueba/`](datos-de-prueba/LEEME.md)). Después, el aviso del pedido abre el formulario con el área y el mes ya elegidos. Genera el reporte.
@@ -201,7 +201,7 @@ La narrativa siempre la redacta un modelo, y se elige en el `.env`:
 
 | Opción | Configuración | Cuándo usarla |
 |---|---|---|
-| **Ollama local** (por defecto) | Instala [Ollama](https://ollama.com), corre `ollama pull qwen3:8b` y deja `LLM_PROVEEDOR=ollama` | Datos reales: nada sale del equipo. En CPU tarda de 2 a 5 minutos por reporte |
+| **Ollama local** (por defecto) | Instala [Ollama](https://ollama.com), corre `ollama pull qwen3:8b` y deja `LLM_PROVEEDOR=ollama` | Datos reales: nada sale del equipo. En CPU tarda unos 3 minutos por reporte en promedio, y más si tiene que corregir |
 | **Groq** (nube) | Crea una llave en https://console.groq.com/keys y pon `LLM_PROVEEDOR=groq`, `MODO_DATOS=sinteticos` y `GROQ_API_KEY` | Revisar el proyecto rápido: responde en segundos. **Solo con datos sintéticos**: el sistema se niega a usarla con datos reales |
 
 Los reportes se generan en segundo plano: `POST /narrativas` devuelve un id y `GET /narrativas/{id}` muestra el resultado cuando está listo.

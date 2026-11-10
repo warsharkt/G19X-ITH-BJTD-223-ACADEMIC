@@ -5,7 +5,7 @@
 | | |
 |---|---|
 | Empresa | Nordika Logística (operador logístico en Guadalajara, ~350 personas, seis áreas) |
-| Versión de la guía | 2.0 · 27 de octubre de 2026 |
+| Versión de la guía | 2.1 · 10 de noviembre de 2026 |
 | Reemplaza a | *Guía de funcionamiento - Talentia Insights.pdf* (octubre de 2026), que todavía describía las cuentas `demo_*` |
 
 > Nordika y sus datos son ficticios: no corresponden a personas reales. El sistema se usa como si fuera la instalación de la empresa; para otra empresa se cambian el nombre y todos los datos sin tocar el código (README, sección *Usarlo con los datos de otra empresa*).
@@ -78,7 +78,7 @@ Cada mes la información recorre el mismo camino, desde el archivo que exporta u
 |---|---|---|
 | Al subir un archivo | Se valida completo y se muestra una vista previa: cuántas filas se agregan, cuántas se actualizan y qué columnas se descartan. Todavía no cambia nada. | Quién lo subió, cuándo, nombre y huella digital del archivo. |
 | Al aplicar la carga | Los datos entran a la base en una sola operación, se recalculan los indicadores y se revisa si algo quedó en rojo. | Quién lo aplicó y la conciliación (si lo del archivo cuadra con la base). |
-| Al preparar un reporte | Se genera en segundo plano (la pantalla no se bloquea) y desde el inicio dice quién lo firmará. Con la IA local tarda de 2 a 5 minutos; con la IA en la nube, segundos. | Quién lo preparó, los datos exactos que recibió la IA, el modelo y la versión de las instrucciones. |
+| Al preparar un reporte | Se genera en segundo plano (la pantalla no se bloquea) y desde el inicio dice quién lo firmará. Con la IA local, en CPU, tarda unos 3 minutos en promedio, y más si la IA tiene que corregir su texto; con la IA en la nube, segundos. | Quién lo preparó, los datos exactos que recibió la IA, el modelo y la versión de las instrucciones. |
 | Al firmar | Se aprueba tal como está, con una Nota de RRHH opcional, o se rechaza con un motivo. El texto de la IA no se edita. | Quién firmó, con qué cargo, cuándo y su comentario. |
 | Al descargar | Se arma el PDF o la presentación con lo aprobado, sin recalcular nada. | Quién descargó, en qué formato y cuándo. |
 
@@ -395,7 +395,7 @@ Antes de mostrarse, el código revisa la respuesta de la IA y la rechaza si:
 
 - Contiene una cifra que no está en los datos que cita (cifras inventadas).
 - Cita un dato que no se le entregó.
-- Atribuye causas ("causó", "debido a", "se debe a", "porque", "por eso", "a raíz de"). Puede decir que dos cosas coinciden, pero no que una provocó la otra, porque los datos no lo demuestran.
+- Atribuye causas ("causó", "debido a", "se debe a", "porque", "por eso", "a raíz de", "atribuible a"). Puede decir que dos cosas coinciden, pero no que una provocó la otra, porque los datos no lo demuestran.
 - Dice que un indicador "mejoró" cuando el sistema calculó que empeoró, o al revés. Si mejoró o empeoró lo decide el código según el indicador (en rotación, subir es peor; en eNPS, bajar es peor), no la IA.
 - Escribe un número con forma de año que no es el del reporte ni el anterior (por ejemplo "2031 MXN"): se revisa como cualquier otra cifra.
 - Omite algún indicador en alerta o por vigilar, o deja un indicador en rojo sin recomendación.
@@ -417,7 +417,7 @@ Cuando el reporte sale tras corregir, la Responsable lo ve antes de firmar: bajo
 
 | Opción | Dónde | Cuándo se usa |
 |---|---|---|
-| Ollama (Qwen3 8B) | En el propio servidor de la empresa. | Con datos reales es la única permitida: la información no sale de la empresa. Tarda de 2 a 5 minutos por reporte. |
+| Ollama (Qwen3 8B) | En el propio servidor de la empresa. | Con datos reales es la única permitida: la información no sale de la empresa. En CPU tarda unos 3 minutos por reporte en promedio, y más si tiene que corregir. |
 | Groq | En la nube. | Solo con los datos ficticios de Nordika: responde en segundos. El sistema se niega a usarla si los datos son reales. |
 
 ## 9. Preparación, firma y descarga
@@ -479,7 +479,7 @@ Todas las medidas funcionan igual con los datos de Nordika que con los de cualqu
 | Secreto del código cifrado | El secreto de la app de cada cuenta se guarda cifrado (AES-256) con una llave que no está en la base. Quien obtenga una copia de la base no puede generar códigos, y copiar el secreto de una cuenta a otra no sirve. |
 | Contraseñas | Mínimo 10 caracteres. Se guardan solo cifradas de forma irreversible (scrypt con sal): nadie, ni TI, puede leerlas. |
 | Bloqueo por intentos | Tras 5 intentos fallidos seguidos (de contraseña o de código) desde un mismo equipo, ese equipo queda bloqueado 15 minutos para ese usuario; la persona puede seguir entrando desde el suyo, así que nadie puede dejar fuera a otra persona equivocándose a propósito. Si se bloquean 3 equipos a la vez, se bloquea la cuenta completa. Un usuario que no existe se bloquea igual, para que nadie pueda averiguar qué cuentas existen. Además, el tablero acepta como máximo unos 10 intentos de inicio de sesión por minuto desde una misma dirección. |
-| Contraseña temporal | Cuando TI crea una cuenta o restablece una contraseña, el sistema genera una temporal. Al entrar, la persona elige la suya antes de hacer cualquier otra cosa: TI nunca conoce la definitiva. | Vence a las 72 horas: después, TI genera otra.
+| Contraseña temporal | Cuando TI crea una cuenta o restablece una contraseña, el sistema genera una temporal. Al entrar, la persona elige la suya antes de hacer cualquier otra cosa: TI nunca conoce la definitiva. Vence a las 72 horas: después, TI genera otra. |
 | Aprobación de accesos | Lo que TI hace y da acceso a información de colaboradores (crear una cuenta de RRHH, Dirección o gerencia, cambiarle rol o área, restablecer su contraseña o su verificación) deja la cuenta en espera. La Responsable de RRHH la aprueba o la rechaza en **Usuarios**, después de confirmar con la persona que ella lo pidió. Solo se puede aprobar cuando la persona ya cambió la contraseña temporal y activó su verificación; al terminar, le llega un aviso a la Responsable. Rechazarla la desactiva. |
 | Contraseñas comunes | El sistema rechaza las más fáciles de adivinar (`1234567890`, `Password123`, secuencias y repeticiones). |
 | Sesiones | Caducan solas (60 minutos por defecto) y se guardan solo en la pestaña del navegador. **Cerrar sesión** las invalida en el servidor: aunque alguien haya copiado la sesión, deja de servirle. Desactivar una cuenta o cambiarle el rol surte efecto de inmediato. |

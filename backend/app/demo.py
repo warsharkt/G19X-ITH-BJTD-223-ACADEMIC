@@ -69,7 +69,8 @@ _REFERENCIAS = [
 # es publico): siguen en su historial, asi que cualquiera las conoce. Solo se
 # guarda su SHA-256. Con una de ellas el modo demostracion no se activa.
 CONTRASENAS_PUBLICADAS = frozenset({
-    "25cbcfd130733a1abfdba9686ef72988cf0e5cde3b146021995d59a1cae42a7a",  # la de prueba hasta octubre de 2026
+    "25cbcfd130733a1abfdba9686ef72988cf0e5cde3b146021995d59a1cae42a7a",  # la de prueba del 6 al 27 de octubre de 2026
+    "55ddb8efd225b13b44397f1b4223c941830dba82f7ef84defc1fe2721381d1b8",  # la del 27 al 28 de octubre de 2026
 })
 
 

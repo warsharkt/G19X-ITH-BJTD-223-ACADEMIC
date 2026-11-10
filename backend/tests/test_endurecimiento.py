@@ -540,10 +540,11 @@ def test_el_modo_demo_rechaza_una_contrasena_publicada(monkeypatch):
     monkeypatch.setenv("MODO_DATOS", "sinteticos")
     monkeypatch.setenv("DEMO_CONTRASENA", "Publicada-en-github-1")
     assert demo.motivo_inactivo() is None
+    publicadas = demo.CONTRASENAS_PUBLICADAS
     monkeypatch.setattr(demo, "CONTRASENAS_PUBLICADAS",
-                        demo.CONTRASENAS_PUBLICADAS | {hashlib.sha256(b"Publicada-en-github-1").hexdigest()})
+                        publicadas | {hashlib.sha256(b"Publicada-en-github-1").hexdigest()})
     assert "estuvo publicada" in demo.motivo_inactivo()
-    assert len(demo.CONTRASENAS_PUBLICADAS) >= 1  # la que estuvo en el repositorio hasta octubre
+    assert len(publicadas) >= 2  # las dos de prueba que estuvieron en el repositorio en octubre de 2026
 
 
 # ============================ 17. un reporte en espera dice su lugar en la cola
