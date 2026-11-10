@@ -1,11 +1,17 @@
-# Evidencias: el modelo de IA real
+# Evidencias
 
-Corridas de `backend/scripts/evaluar_narrativa.py` con el modelo de verdad, no simulado. Las pruebas automáticas (`pytest`) usan un modelo falso, así que no miden cómo redacta el modelo ni cuánto tarda. Para eso sirve esta carpeta.
+Pruebas con el sistema y el modelo de verdad, no simulados. Las pruebas automáticas (`pytest`) usan un modelo falso, así que no miden cómo redacta el modelo ni cuánto tarda, y no instalan el sistema como lo haría alguien nuevo. Para eso sirve esta carpeta. Cada prueba dice con qué commit se hizo.
+
+| Fecha | Prueba | Commit |
+|---|---|---|
+| 10 de noviembre de 2026 | [Instalación desde cero y recorrido sugerido](instalacion-2026-11-10-8c59caf.md) | `8c59caf` |
+| 4 de noviembre de 2026 | [Qwen3 8B con los 12 casos de la evaluación](#4-de-noviembre-de-2026-qwen3-8b-en-ollama) | `29bcdd0` |
 
 ## 4 de noviembre de 2026: Qwen3 8B en Ollama
 
 | Dato | Valor |
 |---|---|
+| Commit | `29bcdd0` (4 de noviembre de 2026): el código con el que se corrió; esta evidencia se subió en ese mismo commit |
 | Modelo | `qwen3:8b` (Q4_K_M) en Ollama, en CPU, en el equipo de desarrollo (Windows 11) |
 | Prompt | v6, con los guardarrailes de la revisión de noviembre de 2026 (causas con "porque" o "por eso", "mejoró" contra lo que calculó el sistema, y años) |
 | Datos | Nordika recién sembrada (`scripts/seed.py`, semilla fija), en una base aparte (`rrhh_evaluacion`) |
@@ -49,6 +55,8 @@ python -m scripts.evaluar_narrativa --salida ..\docs\evidencias\qwen3-8b-2026-11
 **Lo que no mide.** Los guardarrailes comprueban cifras, citas, causas, direcciones y cobertura, pero no si un texto es útil. Por ejemplo, en Corporativo 2026-08 los hallazgos repiten la acción sugerida ("Se recomienda reforzar...") además de describir el dato. Es correcto, pero redundante con las recomendaciones. Por eso cada reporte lo firma una persona.
 
 **Comparación con la evaluación anterior** (2 de octubre de 2026, prompt v5, mismos 12 casos): 8 de 12 a la primera, 1 sin narrativa válida y 400 s de promedio. Las correcciones de octubre (rango de hallazgos según los hechos, valor exacto en el error y muestra mínima) se notan: ahora salen 11 de 12 a la primera, ninguno falla y el promedio baja a 198 s. Ojo: el tiempo depende de qué tan cargado esté el equipo. Durante los primeros casos de esta corrida también corrían las pruebas y una compilación de Docker.
+
+**Lo que cambió después.** Desde `157254d` (5 de noviembre) el prompt es v7: ya no le da al modelo el nombre del área, solo "un área de la empresa". Los guardarrailes no cambiaron hasta `8c59caf`; después se agregaron "atribuible a" y las contracciones "al" y "del" ("debido al", "a raíz del"; regla 16 de `guardrails.py`). Esta corrida no se repitió con v7, pero los 12 textos aceptados seguirían pasando con la regla nueva, porque ninguno usa esas formas. El reporte del [recorrido del 10 de noviembre](instalacion-2026-11-10-8c59caf.md) sí se generó con v7.
 
 ### Archivos
 

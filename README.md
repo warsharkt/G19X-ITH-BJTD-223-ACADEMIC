@@ -412,8 +412,10 @@ Para volver a la base local, comenta `DATABASE_URL`. El plan gratuito se pausa t
 backend/
   app/
     main.py          arma la API: arranque, CORS y los routers
-    rutas/           endpoints, un archivo por tema (sesion, kpis, narrativas, cargas,
-                     cuentas, firmas, avisos, configuracion, catalogos, demostracion)
+    rutas/           endpoints, un archivo por tema (sesion, indicadores, narrativas,
+                     cargas, cuentas, firmas, avisos, configuracion, catalogos,
+                     demostracion, sistema: /health y marca) y comun.py, lo que
+                     comparten (KPIs en memoria y formato de mes)
     schemas.py       modelos de entrada y salida de la API
     kpis.py          motor analítico: indicadores, tendencias, semáforo
     narrativa.py     motor de narrativa: hechos, prompt, reintentos
@@ -426,14 +428,17 @@ backend/
     umbrales.py      edición de umbrales con bitácora
     exportar.py      reporte aprobado en PDF y presentación
     cargas.py        carga de archivos: validación y conciliación
+    areas.py         áreas nuevas o renombradas después de la primera plantilla
     seguridad.py     sesión, cuentas, contraseñas, tokens y permisos por rol
                      (las dependencias solo_rrhh, solo_responsable, solo_ti, ti_o_rrhh...)
     mfa.py           verificación en dos pasos, secreto cifrado y códigos de respaldo
     demo.py          modo demostración: cuentas de prueba y teléfono simulado
     marca.py         nombre del producto y de la empresa
     database.py      conexión a PostgreSQL
+    fechas.py        la fecha de hoy en la zona horaria de la empresa
+    origen.py        IP de cada petición, para las bitácoras
   scripts/           seed, arranque (Docker), crear_usuario, demo, programar, respaldo,
-                     calcular_kpis, generar_narrativa, evaluar_narrativa
+                     areas, borrar_mes, calcular_kpis, generar_narrativa, evaluar_narrativa
   tests/             pruebas automáticas (pytest)
   reportes/          resultados de las evaluaciones del modelo de IA
   Dockerfile         imagen de la API
@@ -450,7 +455,7 @@ frontend/
 db/                  esquema y tablas (SQL)
 datos-de-prueba/     archivos para probar Carga de datos (ver su LEEME.md)
 docs/GUIA.md         guía de funcionamiento para quien usa el sistema
-docs/evidencias/     corridas de evaluación con el modelo real (Qwen3 8B)
+docs/evidencias/     evaluación con el modelo real (Qwen3 8B) e instalación desde cero
 docker-compose.yml   base de datos, API y tablero
 .env.example         configuración de ejemplo, sin secretos
 .github/workflows/   pruebas automáticas en GitHub
@@ -462,11 +467,11 @@ Se crean en cada instalación y no se suben a GitHub: `.env`, `llaves/`, `certs/
 
 Este proyecto se programó con un asistente de IA. Esta sección dice qué hizo la herramienta y qué hice yo, para que se pueda evaluar el trabajo propio. No hay que confundirla con la IA del producto (Ollama con Qwen3, o Groq), que redacta los reportes.
 
-**Herramienta:** [Claude Code](https://claude.com/claude-code), el asistente de programación de Anthropic (modelo Claude Opus), en la terminal y sobre este repositorio. Los commits en los que participó llevan la línea `Co-Authored-By: Claude` (27 de los primeros 33).
+**Herramienta:** [Claude Code](https://claude.com/claude-code), el asistente de programación de Anthropic (modelo Claude Opus), en la terminal y sobre este repositorio. Los commits en los que participó llevan la línea `Co-Authored-By: Claude`: 39 de los 45 que hay hasta `8c59caf` (5 de noviembre de 2026). Los lista `git log --grep="Co-Authored-By: Claude" --oneline`.
 
 | Parte | Lo que hizo Claude Code | Lo que hice yo |
 |---|---|---|
-| Requerimientos y alcance | Comentarios y preguntas sobre huecos | Definí el problema, los requerimientos (PRD) y el alcance del MVP, que son documentos internos y no están en el repositorio, y el orden de los pasos |
+| Requerimientos y alcance | Comentarios y preguntas sobre huecos | Definí el problema, los requerimientos (PRD) y el alcance del MVP, y el orden de los pasos. El PRD y el MVP no están en el repositorio: se entregan en Documentos del SGPA |
 | Decisiones de diseño | Propuso opciones cuando había más de un camino | Las elegí antes de que se programaran (ver abajo) |
 | Código del backend y del tablero | Escribió la mayor parte: API, indicadores, motor de narrativa y guardarrailes, seguridad y MFA, carga de datos, exportación, tablero en React, scripts, Docker y GitHub Actions | Revisé lo que hacía, pedí cambios y aprobé cada commit y cada push |
 | Pruebas | Escribió las pruebas (pytest y Vitest) y las corrió antes de cada commit | Pedí qué comprobar y revisé los resultados |
@@ -479,7 +484,7 @@ Este proyecto se programó con un asistente de IA. Esta sección dice qué hizo 
 - Quien prepara no firma: la Analista carga y genera, la Responsable firma, con suplente; solo la Responsable cambia los umbrales.
 - Verificación en dos pasos obligatoria para Dirección, TI y RRHH, con códigos de respaldo; solo TI administra cuentas, y estas se desactivan, no se borran.
 - IA local por defecto y Groq solo con datos sintéticos; el correo de avisos nunca lleva datos; la programación mensual nace apagada.
-- Que el PRD sea un documento interno y no se publique.
+- Que el PRD y el MVP sean documentos internos: no se publican en GitHub y se entregan en Documentos del SGPA.
 
 **Revisión del código (noviembre de 2026).** Otra persona revisó el proyecto y encontró, entre otras cosas, una prueba que dependía de la fecha, huecos en los guardarrailes (causas con "porque" o "por eso", un "mejoró" cuando el sistema calculó "empeoró", y cifras como "2031" tomadas por años), un desbordamiento del tablero en celular y un `main.py` demasiado grande. Claude Code hizo los arreglos y corrió la evaluación con Qwen3 real que está en [`docs/evidencias/`](docs/evidencias/LEEME.md); yo decidí qué arreglar y reviso los cambios antes de subirlos.
 
@@ -487,5 +492,6 @@ Este proyecto se programó con un asistente de IA. Esta sección dice qué hizo 
 
 - [Guía de funcionamiento](docs/GUIA.md): pantallas, roles, archivos que se suben, cómo se calcula cada indicador y por qué.
 - [Datos de prueba](datos-de-prueba/LEEME.md): archivos correctos y con errores para probar la carga, y qué debe pasar con cada uno.
-- [Evidencias](docs/evidencias/LEEME.md): evaluación del modelo de IA real, caso por caso.
+- [Evidencias](docs/evidencias/LEEME.md): evaluación del modelo de IA real, caso por caso, e instalación desde cero con el recorrido sugerido.
+- **PRD y MVP:** requerimientos, alcance del piloto, criterios de aceptación y pendientes. Son documentos internos: no están en el repositorio y se entregan en Documentos del SGPA.
 - Documentación de la API: http://localhost:8000/docs con el sistema encendido, desde el propio servidor.

@@ -39,6 +39,9 @@ Huecos cerrados tras una revision del codigo (noviembre de 2026):
      (ni al reves): la direccion la decide el sistema, no el modelo.
  15. Solo se ignoran los anios del reporte (el del periodo y el anterior, para
      la comparacion anual): "2031 MXN" ya no pasa como si fuera un anio.
+ 16. Causalidad tambien con "atribuible a" y con las contracciones "al" y
+     "del": "debido al aumento" o "a raiz del cambio" pasaban, porque la
+     regla pedia que despues de "a" o "de" no siguiera ninguna letra.
 
 Limite conocido: no puede comprobar que una frase sea semanticamente
 correcta. Por eso la revision humana (10.3.9) sigue siendo obligatoria.
@@ -57,13 +60,15 @@ _ORACION = re.compile(r"(?<=[.!?])\s+(?=[A-ZÁÉÍÓÚÑ¿¡\"“])")
 
 # Frases que afirman una causa. "causas" como sustantivo (p. ej. "investigar
 # las causas") NO se marca: solo las formas que atribuyen causalidad.
+# "al?" y "del?" cubren las contracciones: "debido al aumento" tambien es una
+# causa. "resultado de" se queda sin "del": "el resultado del eNPS" no lo es.
 _CAUSAL = re.compile(
     r"(?<!\w)("
     r"caus[óo]|causaron|causando|causad[oa]s?|"
     r"provoc\w+|ocasion\w+|"
-    r"debido a|a causa de|por culpa de|se debe(?:n)?\s+a|se debi[óo]\s+a|se debieron\s+a|"
-    r"gracias a|consecuencia de|producto de|resultado de|origin[óo]|originaron|"
-    r"por eso|por ello|porque|a ra[íi]z de|derivad[oa]s? de"
+    r"debido al?|a causa del?|por culpa del?|se debe(?:n)?\s+al?|se debi[óo]\s+al?|se debieron\s+al?|"
+    r"gracias al?|consecuencia del?|producto del?|resultado de|origin[óo]|originaron|"
+    r"por eso|por ello|porque|a ra[íi]z del?|derivad[oa]s? del?|atribuibles? al?"
     r")(?!\w)",
     re.IGNORECASE,
 )

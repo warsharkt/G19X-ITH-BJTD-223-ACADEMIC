@@ -226,12 +226,32 @@ def test_rechaza_cifra_de_otro_hecho_no_citado(caso, visibles):
         "La rotación subió porque hubo más carga de trabajo.",
         "A raíz de la reorganización, la rotación subió.",
         "El ausentismo derivado de la reorganización subió.",
+        "La caída del eNPS es atribuible a la reorganización.",
+        # contracciones "al" y "del": antes pasaban
+        "La rotación subió debido al aumento de la carga de trabajo.",
+        "Esto se debe al cambio de turno.",
+        "La productividad mejoró gracias al nuevo programa.",
+        "A raíz del cambio de turno, la rotación subió.",
+        "Las bajas son atribuibles al cierre del almacén.",
     ],
 )
 def test_rechaza_causalidad(caso, visibles, frase):
     _, _, hechos = caso
     r = json.loads(con_cambio(hechos, texto=frase))
     assert any("causalidad" in e for e in validar_narrativa(r, visibles, set()))
+
+
+@pytest.mark.parametrize(
+    "frase",
+    [
+        "Se debe alcanzar la meta del trimestre.",  # "al" seguido de letra: no es "al"
+        "Conviene revisar el resultado del eNPS.",  # "resultado del" no afirma una causa
+    ],
+)
+def test_no_marca_causalidad_donde_no_la_hay(caso, visibles, frase):
+    _, _, hechos = caso
+    r = json.loads(con_cambio(hechos, texto=f"{visibles[0]['valor_texto']}: {frase}"))
+    assert not any("causalidad" in e for e in validar_narrativa(r, visibles, set()))
 
 
 def test_permite_coincidencia_y_la_palabra_causas_como_sustantivo(caso, visibles):
